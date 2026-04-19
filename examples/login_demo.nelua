@@ -1,0 +1,743 @@
+-- =============================================================================
+-- login_demo.nelua
+-- Nebula GUI Compiler — Phase 0 Login Demo
+--
+-- 演示 Phase 0 的多组件渲染能力：
+--   · 卡片背景（静态，无交互）
+--   · Email 输入框（hover + focus 动画）
+--   · Password 输入框（hover + focus 动画）
+--   · 分割线（静态）
+--   · 登录按钮（hover + press 动画）
+--
+-- 渲染策略：每个组件对应一个 NebulaRectPipeline 实例，
+-- 在同一 RenderPass 中依次 draw，后绘制的组件覆盖先绘制的。
+-- Phase 0 约束：无文字渲染，输入框为纯视觉占位矩形。
+-- =============================================================================
+
+## cinclude "<stdio.h>"
+
+require "nebula_core"
+require "glfw_bindings"
+require "wgpu_bindings"
+require "primitives"
+require "renderer"
+
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+
+-- =============================================================================
+-- 窗口常量
+-- =============================================================================
+local WIN_W <comptime> = 800
+local WIN_H <comptime> = 600
+
+-- =============================================================================
+-- 视觉规格定义
+-- =============================================================================
+
+-- ---- 卡片背景（静态，无状态机）----
+global CardVisual = @record{
+  pos:    Vec2,
+  size:   Vec2,
+  radius: float32,
+  -- 单一状态：只有 default
+  default_bg_color:     Color,
+  default_border_color: Color,
+  default_border_width: float32,
+}
+
+##[[
+nebula_annotate("CardVisual", {
+  states     = {"default"},
+  primitives = {},
+  transitions = {},
+})
+]]
+
+-- ---- 输入框（hover + focused 状态）----
+global InputVisual = @record{
+  pos:    Vec2,
+  size:   Vec2,
+  radius: float32,
+
+  default_bg_color:     Color,
+  default_border_color: Color,
+  default_border_width: float32,
+
+  hovered_bg_color:     Color,
+  hovered_border_color: Color,
+  hovered_border_width: float32,
+
+  focused_bg_color:     Color,
+  focused_border_color: Color,
+  focused_border_width: float32,
+}
+
+##[[
+nebula_annotate("InputVisual", {
+  states     = {"default", "hovered", "focused"},
+  primitives = {"hoverable", "clickable"},
+  transitions = {
+    {from="default", to="hovered", tween="ease_out", duration=0.12},
+    {from="hovered", to="default", tween="ease_out", duration=0.12},
+    {from="hovered", to="focused", tween="ease_out", duration=0.1},
+    {from="focused", to="hovered", tween="ease_out", duration=0.1},
+    {from="focused", to="default", tween="ease_out", duration=0.15},
+  },
+})
+]]
+
+-- ---- 分割线（静态）----
+global DividerVisual = @record{
+  pos:    Vec2,
+  size:   Vec2,
+  radius: float32,
+  default_bg_color:     Color,
+  default_border_color: Color,
+  default_border_width: float32,
+}
+
+##[[
+nebula_annotate("DividerVisual", {
+  states     = {"default"},
+  primitives = {},
+  transitions = {},
+})
+]]
+
+-- ---- 按钮（default + hovered + pressed）----
+global ButtonVisual = @record{
+  pos:    Vec2,
+  size:   Vec2,
+  radius: float32,
+
+  default_bg_color:     Color,
+  default_border_color: Color,
+  default_border_width: float32,
+
+  hovered_bg_color:     Color,
+  hovered_border_color: Color,
+  hovered_border_width: float32,
+
+  pressed_bg_color:     Color,
+  pressed_border_color: Color,
+  pressed_border_width: float32,
+}
+
+##[[
+nebula_annotate("ButtonVisual", {
+  states     = {"default", "hovered", "pressed"},
+  primitives = {"hoverable", "clickable"},
+  transitions = {
+    {from="default", to="hovered", tween="ease_out", duration=0.15},
+    {from="hovered", to="default", tween="ease_out", duration=0.15},
+    {from="hovered", to="pressed", tween="none",     duration=0.0},
+    {from="pressed", to="hovered", tween="ease_out", duration=0.1},
+  },
+})
+
+-- 编译期验证：打印各组件的 Uniform 大小
+print("[编译期] CardVisual  Uniform 大小: " .. nebula_calc_uniform_size("CardVisual")  .. " bytes")
+print("[编译期] InputVisual Uniform 大小: " .. nebula_calc_uniform_size("InputVisual") .. " bytes")
+print("[编译期] ButtonVisual Uniform 大小: " .. nebula_calc_uniform_size("ButtonVisual") .. " bytes")
+]]
+
+-- =============================================================================
+-- 静态组件上下文（无状态机，直接映射到 Uniform）
+-- =============================================================================
+global StaticContext = @record{
+  visual: CardVisual,  -- 复用 CardVisual 结构（pos/size/radius + 单状态视觉属性）
+}
+
+function StaticContext:init(vis: CardVisual): void
+  self.visual = vis
+end
+
+function StaticContext:to_uniforms(vw: float32, vh: float32): NebulaRectUniforms
+  return NebulaRectUniforms{
+    pos          = self.visual.pos,
+    size         = self.visual.size,
+    radius       = self.visual.radius,
+    _pad0        = 0.0, _pad1 = 0.0, _pad2 = 0.0,
+    bg_color     = self.visual.default_bg_color,
+    border_color = self.visual.default_border_color,
+    border_width = self.visual.default_border_width,
+    _pad3        = 0.0, _pad4 = 0.0, _pad5 = 0.0,
+    viewport     = Vec2{ x = vw, y = vh },
+    _pad6        = 0.0, _pad7 = 0.0,
+  }
+end
+
+-- =============================================================================
+-- 输入框状态枚举与状态机
+-- =============================================================================
+global InputState = @enum{
+  Default = 0,
+  Hovered = 1,
+  Focused = 2,
+}
+
+global InputStateMachine = @record{
+  current:  InputState,
+  target:   InputState,
+  progress: float32,
+  duration: float32,
+  tween:    uint8,
+}
+
+function InputStateMachine:init(): void
+  self.current  = InputState.Default
+  self.target   = InputState.Default
+  self.progress = 1.0
+  self.duration = 0.0
+  self.tween    = 0
+end
+
+function InputStateMachine:transition_to(new_target: InputState): void
+  if new_target == self.target and self.progress >= 1.0 then return end
+  if new_target ~= self.target then
+    self.target   = new_target
+    self.progress = 0.0
+    -- 展开 transitions 注解中的规则
+    if self.current == InputState.Default and new_target == InputState.Hovered then
+      self.duration = 0.12; self.tween = 1
+    elseif self.current == InputState.Hovered and new_target == InputState.Default then
+      self.duration = 0.12; self.tween = 1
+    elseif self.current == InputState.Hovered and new_target == InputState.Focused then
+      self.duration = 0.10; self.tween = 1
+    elseif self.current == InputState.Focused and new_target == InputState.Hovered then
+      self.duration = 0.10; self.tween = 1
+    elseif self.current == InputState.Focused and new_target == InputState.Default then
+      self.duration = 0.15; self.tween = 1
+    else
+      self.duration = 0.0; self.tween = 0
+    end
+  end
+end
+
+function InputStateMachine:update(dt: float32): void
+  if self.progress >= 1.0 then
+    self.current = self.target; self.progress = 1.0; return
+  end
+  if self.duration <= 0.0 then
+    self.progress = 1.0; self.current = self.target; return
+  end
+  self.progress = self.progress + dt / self.duration
+  if self.progress >= 1.0 then
+    self.progress = 1.0; self.current = self.target
+  end
+end
+
+function InputStateMachine:get_t(): float32
+  local t = self.progress
+  if self.tween == 1 then return ease_out(t) end
+  if self.tween == 2 then return ease_in(t) end
+  return t
+end
+
+-- =============================================================================
+-- 输入框上下文
+-- =============================================================================
+global InputContext = @record{
+  visual:               InputVisual,
+  sm:                   InputStateMachine,
+  hover:                HoverableState,
+  click:                ClickableState,
+  is_focused:           boolean,
+  current_bg_color:     Color,
+  current_border_color: Color,
+  current_border_width: float32,
+}
+
+function InputContext:init(vis: InputVisual): void
+  self.visual     = vis
+  self.sm:init()
+  self.hover      = HoverableState{}
+  self.click      = ClickableState{}
+  self.is_focused = false
+  self.current_bg_color     = vis.default_bg_color
+  self.current_border_color = vis.default_border_color
+  self.current_border_width = vis.default_border_width
+end
+
+local function input_get_bg(vis: *InputVisual, s: InputState): Color
+  if s == InputState.Hovered then return vis.hovered_bg_color end
+  if s == InputState.Focused  then return vis.focused_bg_color  end
+  return vis.default_bg_color
+end
+
+local function input_get_border(vis: *InputVisual, s: InputState): Color
+  if s == InputState.Hovered then return vis.hovered_border_color end
+  if s == InputState.Focused  then return vis.focused_border_color  end
+  return vis.default_border_color
+end
+
+local function input_get_bw(vis: *InputVisual, s: InputState): float32
+  if s == InputState.Hovered then return vis.hovered_border_width end
+  if s == InputState.Focused  then return vis.focused_border_width  end
+  return vis.default_border_width
+end
+
+-- 全局聚焦管理：记录当前聚焦的输入框 ID（0 = 无聚焦）
+global focused_input_id: int32 = 0
+
+function InputContext:update(id: int32, mx: float32, my: float32,
+                              is_btn_down: boolean, dt: float32): void
+  self.hover:update(mx, my,
+    self.visual.pos.x, self.visual.pos.y,
+    self.visual.size.x, self.visual.size.y)
+  self.click:update(&self.hover, is_btn_down)
+
+  -- 点击时获取焦点，点击其他地方时失去焦点
+  if self.click.just_clicked then
+    focused_input_id = id
+    printf("[runtime] input %d: focused\n", id)
+  end
+  self.is_focused = (focused_input_id == id)
+
+  -- 状态机驱动
+  if self.is_focused then
+    self.sm:transition_to(InputState.Focused)
+  elseif self.hover.is_hovered then
+    self.sm:transition_to(InputState.Hovered)
+  else
+    self.sm:transition_to(InputState.Default)
+  end
+
+  self.sm:update(dt)
+
+  local t = self.sm:get_t()
+  self.current_bg_color     = lerp_color(input_get_bg(&self.visual, self.sm.current),
+                                          input_get_bg(&self.visual, self.sm.target), t)
+  self.current_border_color = lerp_color(input_get_border(&self.visual, self.sm.current),
+                                          input_get_border(&self.visual, self.sm.target), t)
+  self.current_border_width = lerp_f32(input_get_bw(&self.visual, self.sm.current),
+                                        input_get_bw(&self.visual, self.sm.target), t)
+end
+
+function InputContext:to_uniforms(vw: float32, vh: float32): NebulaRectUniforms
+  return NebulaRectUniforms{
+    pos          = self.visual.pos,
+    size         = self.visual.size,
+    radius       = self.visual.radius,
+    _pad0        = 0.0, _pad1 = 0.0, _pad2 = 0.0,
+    bg_color     = self.current_bg_color,
+    border_color = self.current_border_color,
+    border_width = self.current_border_width,
+    _pad3        = 0.0, _pad4 = 0.0, _pad5 = 0.0,
+    viewport     = Vec2{ x = vw, y = vh },
+    _pad6        = 0.0, _pad7 = 0.0,
+  }
+end
+
+-- =============================================================================
+-- 按钮状态枚举与状态机
+-- =============================================================================
+global ButtonState = @enum{
+  Default = 0,
+  Hovered = 1,
+  Pressed = 2,
+}
+
+global ButtonStateMachine = @record{
+  current:  ButtonState,
+  target:   ButtonState,
+  progress: float32,
+  duration: float32,
+  tween:    uint8,
+}
+
+function ButtonStateMachine:init(): void
+  self.current  = ButtonState.Default
+  self.target   = ButtonState.Default
+  self.progress = 1.0
+  self.duration = 0.0
+  self.tween    = 0
+end
+
+function ButtonStateMachine:transition_to(new_target: ButtonState): void
+  if new_target == self.target and self.progress >= 1.0 then return end
+  if new_target ~= self.target then
+    self.target   = new_target
+    self.progress = 0.0
+    if self.current == ButtonState.Default and new_target == ButtonState.Hovered then
+      self.duration = 0.15; self.tween = 1
+    elseif self.current == ButtonState.Hovered and new_target == ButtonState.Default then
+      self.duration = 0.15; self.tween = 1
+    elseif self.current == ButtonState.Hovered and new_target == ButtonState.Pressed then
+      self.duration = 0.0;  self.tween = 0
+    elseif self.current == ButtonState.Pressed and new_target == ButtonState.Hovered then
+      self.duration = 0.1;  self.tween = 1
+    else
+      self.duration = 0.0;  self.tween = 0
+    end
+  end
+end
+
+function ButtonStateMachine:update(dt: float32): void
+  if self.progress >= 1.0 then
+    self.current = self.target; self.progress = 1.0; return
+  end
+  if self.duration <= 0.0 then
+    self.progress = 1.0; self.current = self.target; return
+  end
+  self.progress = self.progress + dt / self.duration
+  if self.progress >= 1.0 then
+    self.progress = 1.0; self.current = self.target
+  end
+end
+
+function ButtonStateMachine:get_t(): float32
+  local t = self.progress
+  if self.tween == 1 then return ease_out(t) end
+  if self.tween == 2 then return ease_in(t) end
+  return t
+end
+
+-- =============================================================================
+-- 按钮上下文
+-- =============================================================================
+global ButtonContext = @record{
+  visual:               ButtonVisual,
+  sm:                   ButtonStateMachine,
+  hover:                HoverableState,
+  click:                ClickableState,
+  current_bg_color:     Color,
+  current_border_color: Color,
+  current_border_width: float32,
+}
+
+function ButtonContext:init(vis: ButtonVisual): void
+  self.visual = vis
+  self.sm:init()
+  self.hover  = HoverableState{}
+  self.click  = ClickableState{}
+  self.current_bg_color     = vis.default_bg_color
+  self.current_border_color = vis.default_border_color
+  self.current_border_width = vis.default_border_width
+end
+
+local function btn_get_bg(vis: *ButtonVisual, s: ButtonState): Color
+  if s == ButtonState.Hovered then return vis.hovered_bg_color end
+  if s == ButtonState.Pressed  then return vis.pressed_bg_color  end
+  return vis.default_bg_color
+end
+
+local function btn_get_border(vis: *ButtonVisual, s: ButtonState): Color
+  if s == ButtonState.Hovered then return vis.hovered_border_color end
+  if s == ButtonState.Pressed  then return vis.pressed_border_color  end
+  return vis.default_border_color
+end
+
+local function btn_get_bw(vis: *ButtonVisual, s: ButtonState): float32
+  if s == ButtonState.Hovered then return vis.hovered_border_width end
+  if s == ButtonState.Pressed  then return vis.pressed_border_width  end
+  return vis.default_border_width
+end
+
+function ButtonContext:update(mx: float32, my: float32,
+                               is_btn_down: boolean, dt: float32): void
+  self.hover:update(mx, my,
+    self.visual.pos.x, self.visual.pos.y,
+    self.visual.size.x, self.visual.size.y)
+  self.click:update(&self.hover, is_btn_down)
+
+  if self.click.is_pressed then
+    self.sm:transition_to(ButtonState.Pressed)
+  elseif self.hover.is_hovered then
+    self.sm:transition_to(ButtonState.Hovered)
+  else
+    self.sm:transition_to(ButtonState.Default)
+  end
+
+  self.sm:update(dt)
+
+  local t = self.sm:get_t()
+  self.current_bg_color     = lerp_color(btn_get_bg(&self.visual, self.sm.current),
+                                          btn_get_bg(&self.visual, self.sm.target), t)
+  self.current_border_color = lerp_color(btn_get_border(&self.visual, self.sm.current),
+                                          btn_get_border(&self.visual, self.sm.target), t)
+  self.current_border_width = lerp_f32(btn_get_bw(&self.visual, self.sm.current),
+                                        btn_get_bw(&self.visual, self.sm.target), t)
+
+  if self.click.just_clicked then
+    printf("[runtime] login button: CLICKED! (submit login)\n")
+  end
+end
+
+function ButtonContext:to_uniforms(vw: float32, vh: float32): NebulaRectUniforms
+  return NebulaRectUniforms{
+    pos          = self.visual.pos,
+    size         = self.visual.size,
+    radius       = self.visual.radius,
+    _pad0        = 0.0, _pad1 = 0.0, _pad2 = 0.0,
+    bg_color     = self.current_bg_color,
+    border_color = self.current_border_color,
+    border_width = self.current_border_width,
+    _pad3        = 0.0, _pad4 = 0.0, _pad5 = 0.0,
+    viewport     = Vec2{ x = vw, y = vh },
+    _pad6        = 0.0, _pad7 = 0.0,
+  }
+end
+
+-- =============================================================================
+-- 主程序
+-- =============================================================================
+local function main(): int32
+  -- 初始化 GLFW
+  if glfwInit() == 0 then
+    printf("glfw: init failed\n")
+    return 1
+  end
+  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
+
+  local window = glfwCreateWindow(WIN_W, WIN_H,
+    "Nebula Phase 0 — Login Demo", nilptr, nilptr)
+  if window == nilptr then
+    printf("glfw: window creation failed\n")
+    return 1
+  end
+
+  -- 初始化 WebGPU 渲染器
+  local renderer: NebulaRenderer
+  if not renderer:init(window, WIN_W, WIN_H) then return 1 end
+
+  -- ============================================================
+  -- 创建各组件的渲染管线（每个组件独立的 Uniform Buffer）
+  -- 绘制顺序：card → divider → email → password → button
+  -- ============================================================
+  local pipe_card:     NebulaRectPipeline
+  local pipe_divider:  NebulaRectPipeline
+  local pipe_email:    NebulaRectPipeline
+  local pipe_password: NebulaRectPipeline
+  local pipe_button:   NebulaRectPipeline
+
+  if not pipe_card:init(&renderer)     then return 1 end
+  if not pipe_divider:init(&renderer)  then return 1 end
+  if not pipe_email:init(&renderer)    then return 1 end
+  if not pipe_password:init(&renderer) then return 1 end
+  if not pipe_button:init(&renderer)   then return 1 end
+
+  -- ============================================================
+  -- 卡片（静态）
+  -- ============================================================
+  local card: StaticContext
+  card:init(CardVisual{
+    pos    = Vec2{ x = 220.0, y = 100.0 },
+    size   = Vec2{ x = 360.0, y = 400.0 },
+    radius = 16.0,
+    default_bg_color     = Color{ r=0.13, g=0.13, b=0.15, a=1.0 },
+    default_border_color = Color{ r=0.25, g=0.25, b=0.28, a=1.0 },
+    default_border_width = 1.0,
+  })
+
+  -- ============================================================
+  -- 分割线（静态，在按钮上方）
+  -- ============================================================
+  local divider: StaticContext
+  divider:init(CardVisual{
+    pos    = Vec2{ x = 252.0, y = 336.0 },
+    size   = Vec2{ x = 296.0, y = 1.0 },
+    radius = 0.0,
+    default_bg_color     = Color{ r=0.28, g=0.28, b=0.32, a=1.0 },
+    default_border_color = Color{ r=0.0,  g=0.0,  b=0.0,  a=0.0 },
+    default_border_width = 0.0,
+  })
+
+  -- ============================================================
+  -- Email 输入框（ID = 1）
+  -- ============================================================
+  local email_input: InputContext
+  email_input:init(InputVisual{
+    pos    = Vec2{ x = 252.0, y = 196.0 },
+    size   = Vec2{ x = 296.0, y = 44.0 },
+    radius = 8.0,
+
+    default_bg_color     = Color{ r=0.18, g=0.18, b=0.20, a=1.0 },
+    default_border_color = Color{ r=0.32, g=0.32, b=0.36, a=1.0 },
+    default_border_width = 1.0,
+
+    hovered_bg_color     = Color{ r=0.20, g=0.20, b=0.23, a=1.0 },
+    hovered_border_color = Color{ r=0.45, g=0.45, b=0.52, a=1.0 },
+    hovered_border_width = 1.5,
+
+    focused_bg_color     = Color{ r=0.16, g=0.18, b=0.24, a=1.0 },
+    focused_border_color = Color{ r=0.35, g=0.60, b=1.00, a=1.0 },
+    focused_border_width = 2.0,
+  })
+
+  -- ============================================================
+  -- Password 输入框（ID = 2）
+  -- ============================================================
+  local password_input: InputContext
+  password_input:init(InputVisual{
+    pos    = Vec2{ x = 252.0, y = 264.0 },
+    size   = Vec2{ x = 296.0, y = 44.0 },
+    radius = 8.0,
+
+    default_bg_color     = Color{ r=0.18, g=0.18, b=0.20, a=1.0 },
+    default_border_color = Color{ r=0.32, g=0.32, b=0.36, a=1.0 },
+    default_border_width = 1.0,
+
+    hovered_bg_color     = Color{ r=0.20, g=0.20, b=0.23, a=1.0 },
+    hovered_border_color = Color{ r=0.45, g=0.45, b=0.52, a=1.0 },
+    hovered_border_width = 1.5,
+
+    focused_bg_color     = Color{ r=0.16, g=0.18, b=0.24, a=1.0 },
+    focused_border_color = Color{ r=0.35, g=0.60, b=1.00, a=1.0 },
+    focused_border_width = 2.0,
+  })
+
+  -- ============================================================
+  -- 登录按钮
+  -- ============================================================
+  local login_btn: ButtonContext
+  login_btn:init(ButtonVisual{
+    pos    = Vec2{ x = 252.0, y = 356.0 },
+    size   = Vec2{ x = 296.0, y = 48.0 },
+    radius = 10.0,
+
+    default_bg_color     = Color{ r=0.22, g=0.44, b=0.90, a=1.0 },
+    default_border_color = Color{ r=0.30, g=0.52, b=1.00, a=0.6 },
+    default_border_width = 0.0,
+
+    hovered_bg_color     = Color{ r=0.30, g=0.52, b=1.00, a=1.0 },
+    hovered_border_color = Color{ r=0.50, g=0.70, b=1.00, a=0.8 },
+    hovered_border_width = 0.0,
+
+    pressed_bg_color     = Color{ r=0.15, g=0.32, b=0.75, a=1.0 },
+    pressed_border_color = Color{ r=0.60, g=0.80, b=1.00, a=1.0 },
+    pressed_border_width = 2.0,
+  })
+
+  -- 主循环
+  local prev_time = glfwGetTime()
+
+  while glfwWindowShouldClose(window) == 0 do
+    glfwPollEvents()
+
+    -- 帧时间
+    local now = glfwGetTime()
+    local dt  = (@float32)(now - prev_time)
+    prev_time = now
+
+    -- 输入采样
+    local mx_f64: float64 = 0.0
+    local my_f64: float64 = 0.0
+    glfwGetCursorPos(window, (@*float64)(&mx_f64), (@*float64)(&my_f64))
+    local mx = (@float32)(mx_f64)
+    local my = (@float32)(my_f64)
+    local is_btn_down = (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
+
+    -- 更新各组件状态
+    email_input:update(1, mx, my, is_btn_down, dt)
+    password_input:update(2, mx, my, is_btn_down, dt)
+    login_btn:update(mx, my, is_btn_down, dt)
+
+    -- 点击窗口空白区域时清除焦点
+    if is_btn_down then
+      if not email_input.hover.is_hovered and not password_input.hover.is_hovered then
+        -- 只有在两个输入框都未悬停时点击，才清除焦点
+        if focused_input_id ~= 0 and
+           not email_input.click.is_pressed and
+           not password_input.click.is_pressed then
+          focused_input_id = 0
+        end
+      end
+    end
+
+    -- 获取 Surface Texture
+    local surface_tex: WGPUSurfaceTexture
+    wgpuSurfaceGetCurrentTexture(renderer.surface, &surface_tex)
+
+    local status = surface_tex.status
+    if status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal and
+       status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal then
+      continue
+    end
+
+    -- 创建 TextureView
+    local view_desc = WGPUTextureViewDescriptor{
+      nextInChain     = nilptr,
+      label           = wgpu_str_null(),
+      format          = renderer.format,
+      dimension       = 2,
+      baseMipLevel    = 0,
+      mipLevelCount   = 1,
+      baseArrayLayer  = 0,
+      arrayLayerCount = 1,
+      aspect          = 1,
+      usage           = 0,
+    }
+    local view = wgpuTextureCreateView(surface_tex.texture, &view_desc)
+
+    -- 更新各组件的 Uniform Buffer
+    local u_card     = card:to_uniforms(WIN_W, WIN_H)
+    local u_divider  = divider:to_uniforms(WIN_W, WIN_H)
+    local u_email    = email_input:to_uniforms(WIN_W, WIN_H)
+    local u_password = password_input:to_uniforms(WIN_W, WIN_H)
+    local u_button   = login_btn:to_uniforms(WIN_W, WIN_H)
+
+    pipe_card:update_uniforms(&renderer, &u_card)
+    pipe_divider:update_uniforms(&renderer, &u_divider)
+    pipe_email:update_uniforms(&renderer, &u_email)
+    pipe_password:update_uniforms(&renderer, &u_password)
+    pipe_button:update_uniforms(&renderer, &u_button)
+
+    -- 录制渲染命令（单次 RenderPass，多次 draw）
+    local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, nilptr)
+
+    local clear_color = WGPURenderPassColorAttachment{
+      nextInChain   = nilptr,
+      view          = view,
+      depthSlice    = 0xFFFFFFFF,
+      resolveTarget = nilptr,
+      loadOp        = WGPULoadOp_Clear,
+      storeOp       = WGPUStoreOp_Store,
+      clearValue    = WGPUColor{ r=0.09, g=0.09, b=0.10, a=1.0 },
+    }
+    local pass_desc = WGPURenderPassDescriptor{
+      nextInChain             = nilptr,
+      label                   = wgpu_str_null(),
+      colorAttachmentCount    = 1,
+      colorAttachments        = &clear_color,
+      depthStencilAttachment  = nilptr,
+      occlusionQuerySet       = nilptr,
+      timestampWrites         = nilptr,
+    }
+
+    local pass = wgpuCommandEncoderBeginRenderPass(encoder, &pass_desc)
+
+    -- 绘制顺序：从下到上（卡片 → 分割线 → 输入框 → 按钮）
+    pipe_card:draw(pass)
+    pipe_divider:draw(pass)
+    pipe_email:draw(pass)
+    pipe_password:draw(pass)
+    pipe_button:draw(pass)
+
+    wgpuRenderPassEncoderEnd(pass)
+    wgpuRenderPassEncoderRelease(pass)
+
+    local cmd = wgpuCommandEncoderFinish(encoder, nilptr)
+    wgpuCommandEncoderRelease(encoder)
+    wgpuQueueSubmit(renderer.queue, 1, &cmd)
+    wgpuCommandBufferRelease(cmd)
+
+    wgpuSurfacePresent(renderer.surface)
+    wgpuTextureViewRelease(view)
+    wgpuTextureRelease(surface_tex.texture)
+  end
+
+  -- 清理资源
+  wgpuSurfaceRelease(renderer.surface)
+  wgpuDeviceRelease(renderer.device)
+  wgpuAdapterRelease(renderer.adapter)
+  wgpuInstanceRelease(renderer.instance)
+  glfwDestroyWindow(window)
+  glfwTerminate()
+
+  printf("nebula: clean exit\n")
+  return 0
+end
+
+main()

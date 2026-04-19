@@ -1,6 +1,11 @@
 #!/bin/bash
 # =============================================================================
 # Nebula GUI Compiler — Phase 0 Build Script
+#
+# Usage:
+#   ./build.sh               # 默认构建 button_demo
+#   ./build.sh button_demo   # 构建 button_demo
+#   ./build.sh login_demo    # 构建 login_demo
 # =============================================================================
 set -e
 
@@ -14,15 +19,28 @@ if [ ! -d "$VENDOR" ]; then
   exit 1
 fi
 
-echo "[nebula] Building Phase 0 Demo..."
+# 解析目标参数（默认 button_demo）
+TARGET="${1:-button_demo}"
+
+case "$TARGET" in
+  button_demo|login_demo)
+    ;;
+  *)
+    echo "[nebula] Error: unknown target '$TARGET'"
+    echo "         Available targets: button_demo, login_demo"
+    exit 1
+    ;;
+esac
+
+echo "[nebula] Building $TARGET..."
 
 nelua \
   -L "$SCRIPT_DIR/src" \
   --cflags="-I$VENDOR/include" \
   --ldflags="-L$VENDOR/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,$VENDOR/lib" \
-  "$SCRIPT_DIR/examples/button_demo.nelua"
+  "$SCRIPT_DIR/examples/$TARGET.nelua"
 
-echo "[nebula] Build complete: ~/.cache/nelua/button_demo"
+echo "[nebula] Build complete: ~/.cache/nelua/$TARGET"
 echo ""
 
 # 运行指引
@@ -30,14 +48,14 @@ if [ -n "$WSL_DISTRO_NAME" ] || [ -n "$WSL_INTEROP" ] || [ -n "$WSLENV" ]; then
   echo "[nebula] WSL2 detected (Vulkan via d3d12 layer)."
   echo ""
   echo "To run:"
-  echo "  LD_LIBRARY_PATH=$VENDOR/lib ~/.cache/nelua/button_demo"
+  echo "  LD_LIBRARY_PATH=$VENDOR/lib ~/.cache/nelua/$TARGET"
   echo ""
   echo "Note: WSLg must be enabled for window display."
 else
   echo "To run:"
-  echo "  LD_LIBRARY_PATH=$VENDOR/lib ~/.cache/nelua/button_demo"
+  echo "  LD_LIBRARY_PATH=$VENDOR/lib ~/.cache/nelua/$TARGET"
   echo ""
   echo "If no display available, use Xvfb:"
   echo "  Xvfb :99 -screen 0 1024x768x24 &"
-  echo "  DISPLAY=:99 LD_LIBRARY_PATH=$VENDOR/lib ~/.cache/nelua/button_demo"
+  echo "  DISPLAY=:99 LD_LIBRARY_PATH=$VENDOR/lib ~/.cache/nelua/$TARGET"
 fi
