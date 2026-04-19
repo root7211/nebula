@@ -1,0 +1,420 @@
+-- =============================================================================
+-- button_demo.nelua
+-- Nebula GUI Compiler — Phase 0 Demo
+--
+-- 演示"形即"范式的核心：
+-- 1. 开发者只需定义 ButtonVisual record + nebula_annotate 注解
+-- 2. 编译期推导引擎自动派生：WGSL Uniform 结构体、状态机、动画插值
+-- 3. 运行时只执行纯粹的数据更新和 GPU 提交
+-- =============================================================================
+
+## cinclude "<stdio.h>"
+
+require "nebula_core"
+require "glfw_bindings"
+require "wgpu_bindings"
+require "primitives"
+require "renderer"
+
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+
+-- =============================================================================
+-- 第一步：开发者定义 ButtonVisual（这是开发者需要写的全部规格代码）
+-- =============================================================================
+global ButtonVisual = @record{
+  pos:    Vec2,
+  size:   Vec2,
+  radius: float32,
+
+  -- 三种状态下的视觉属性（命名约定：{state}_{property}）
+  default_bg_color:  Color,
+  hovered_bg_color:  Color,
+  pressed_bg_color:  Color,
+
+  default_border_color: Color,
+  hovered_border_color: Color,
+  pressed_border_color: Color,
+
+  default_border_width: float32,
+  hovered_border_width: float32,
+  pressed_border_width: float32,
+}
+
+-- 注解：声明状态拓扑、交互原语、动画转换规则
+##[[
+nebula_annotate("ButtonVisual", {
+  states     = {"default", "hovered", "pressed"},
+  primitives = {"hoverable", "clickable"},
+  transitions = {
+    {from="default", to="hovered", tween="ease_out", duration=0.15},
+    {from="hovered", to="default", tween="ease_out", duration=0.15},
+    {from="hovered", to="pressed", tween="none",     duration=0.0},
+    {from="pressed", to="hovered", tween="ease_out", duration=0.1},
+  },
+})
+
+-- 在编译期打印推导出的 WGSL Uniform 结构体（验证派生正确性）
+local wgsl = nebula_gen_wgsl_uniform("ButtonVisual")
+local sm   = nebula_gen_state_machine("ButtonVisual")
+local usize = nebula_calc_uniform_size("ButtonVisual")
+
+print("=== [编译期] 推导引擎输出 ===")
+print("派生的 WGSL Uniform 结构体：")
+print(wgsl)
+print("")
+print("状态机节点：" .. table.concat(sm.states, ", "))
+print("视觉属性数量：" .. #sm.all_props)
+print("Uniform 字节大小：" .. usize)
+print("===========================")
+]]
+
+-- =============================================================================
+-- 第二步：编译期推导引擎自动生成的状态机
+-- （Phase 0 中手动展开以供验证；Phase 1 将由 ## 块完全自动生成）
+-- =============================================================================
+
+-- 状态枚举（由 states 注解派生）
+global ButtonState = @enum{
+  Default = 0,
+  Hovered = 1,
+  Pressed = 2,
+}
+
+-- 状态机（由 transitions 注解派生）
+global ButtonStateMachine = @record{
+  current:     ButtonState,
+  target:      ButtonState,
+  progress:    float32,  -- 0.0 ~ 1.0，当前转换进度
+  duration:    float32,  -- 当前转换的持续时间
+  tween:       uint8,    -- 0=none, 1=ease_out, 2=ease_in
+}
+
+function ButtonStateMachine:init(): void
+  self.current  = ButtonState.Default
+  self.target   = ButtonState.Default
+  self.progress = 1.0
+  self.duration = 0.0
+  self.tween    = 0
+end
+
+function ButtonStateMachine:transition_to(new_target: ButtonState, dt: float32): void
+  if new_target == self.target and self.progress >= 1.0 then return end
+  if new_target ~= self.target then
+    self.target   = new_target
+    self.progress = 0.0
+    -- 根据 transitions 注解查找对应的 duration 和 tween
+    if self.current == ButtonState.Default and new_target == ButtonState.Hovered then
+      self.duration = 0.15
+      self.tween    = 1  -- ease_out
+    elseif self.current == ButtonState.Hovered and new_target == ButtonState.Default then
+      self.duration = 0.15
+      self.tween    = 1
+    elseif self.current == ButtonState.Hovered and new_target == ButtonState.Pressed then
+      self.duration = 0.0
+      self.tween    = 0  -- none
+    elseif self.current == ButtonState.Pressed and new_target == ButtonState.Hovered then
+      self.duration = 0.1
+      self.tween    = 1
+    else
+      self.duration = 0.0
+      self.tween    = 0
+    end
+  end
+end
+
+function ButtonStateMachine:update(dt: float32): void
+  if self.progress >= 1.0 then
+    self.current  = self.target
+    self.progress = 1.0
+    return
+  end
+  if self.duration <= 0.0 then
+    self.progress = 1.0
+    self.current  = self.target
+    return
+  end
+  self.progress = self.progress + dt / self.duration
+  if self.progress >= 1.0 then
+    self.progress = 1.0
+    self.current  = self.target
+  end
+end
+
+-- 获取缓动后的插值系数
+function ButtonStateMachine:get_t(): float32
+  local t = self.progress
+  if self.tween == 1 then return ease_out(t) end
+  if self.tween == 2 then return ease_in(t) end
+  return t
+end
+
+-- =============================================================================
+-- 第三步：ButtonContext —— 组件的完整运行时上下文
+-- =============================================================================
+global ButtonContext = @record{
+  visual:  ButtonVisual,
+  sm:      ButtonStateMachine,
+  hover:   HoverableState,
+  click:   ClickableState,
+  -- 当前帧插值后的视觉值（发送到 GPU）
+  current_bg_color:     Color,
+  current_border_color: Color,
+  current_border_width: float32,
+}
+
+function ButtonContext:init(vis: ButtonVisual): void
+  self.visual = vis
+  self.sm:init()
+  self.hover  = HoverableState{}
+  self.click  = ClickableState{}
+  self.current_bg_color     = vis.default_bg_color
+  self.current_border_color = vis.default_border_color
+  self.current_border_width = vis.default_border_width
+end
+
+-- 辅助：根据状态枚举获取对应的视觉属性
+local function get_state_bg(vis: *ButtonVisual, state: ButtonState): Color
+  if state == ButtonState.Hovered then return vis.hovered_bg_color end
+  if state == ButtonState.Pressed then return vis.pressed_bg_color end
+  return vis.default_bg_color
+end
+
+local function get_state_border(vis: *ButtonVisual, state: ButtonState): Color
+  if state == ButtonState.Hovered then return vis.hovered_border_color end
+  if state == ButtonState.Pressed then return vis.pressed_border_color end
+  return vis.default_border_color
+end
+
+local function get_state_border_width(vis: *ButtonVisual, state: ButtonState): float32
+  if state == ButtonState.Hovered then return vis.hovered_border_width end
+  if state == ButtonState.Pressed then return vis.pressed_border_width end
+  return vis.default_border_width
+end
+
+function ButtonContext:update(mx: float32, my: float32, is_btn_down: boolean, dt: float32): void
+  -- 1. 更新交互原语（依赖拓扑顺序：hoverable -> clickable）
+  self.hover:update(mx, my,
+    self.visual.pos.x, self.visual.pos.y,
+    self.visual.size.x, self.visual.size.y)
+  self.click:update(&self.hover, is_btn_down)
+
+  -- 2. 根据原语状态驱动状态机转换
+  if self.click.is_pressed then
+    self.sm:transition_to(ButtonState.Pressed, dt)
+  elseif self.hover.is_hovered then
+    self.sm:transition_to(ButtonState.Hovered, dt)
+  else
+    self.sm:transition_to(ButtonState.Default, dt)
+  end
+
+  -- 3. 推进状态机动画
+  self.sm:update(dt)
+
+  -- 4. 插值计算当前帧的视觉值（使用 nebula_core 的 lerp 工具函数）
+  local t = self.sm:get_t()
+  local src_bg     = get_state_bg(&self.visual, self.sm.current)
+  local dst_bg     = get_state_bg(&self.visual, self.sm.target)
+  local src_border = get_state_border(&self.visual, self.sm.current)
+  local dst_border = get_state_border(&self.visual, self.sm.target)
+  local src_bw     = get_state_border_width(&self.visual, self.sm.current)
+  local dst_bw     = get_state_border_width(&self.visual, self.sm.target)
+
+  self.current_bg_color     = lerp_color(src_bg, dst_bg, t)
+  self.current_border_color = lerp_color(src_border, dst_border, t)
+  self.current_border_width = lerp_f32(src_bw, dst_bw, t)
+
+  -- 5. 调试日志
+  if self.hover.just_entered then
+    printf("[runtime] button: default -> hovered\n")
+  end
+  if self.hover.just_left then
+    printf("[runtime] button: hovered -> default\n")
+  end
+  if self.click.just_clicked then
+    printf("[runtime] button: CLICKED!\n")
+  end
+end
+
+-- 将当前视觉状态打包为 GPU Uniform
+function ButtonContext:to_uniforms(vw: float32, vh: float32): NebulaRectUniforms
+  return NebulaRectUniforms{
+    pos          = self.visual.pos,
+    size         = self.visual.size,
+    radius       = self.visual.radius,
+    _pad0        = 0.0,
+    _pad1        = 0.0,
+    _pad2        = 0.0,
+    bg_color     = self.current_bg_color,
+    border_color = self.current_border_color,
+    border_width = self.current_border_width,
+    _pad3        = 0.0,
+    _pad4        = 0.0,
+    _pad5        = 0.0,
+    viewport     = Vec2{ x = vw, y = vh },
+    _pad6        = 0.0,
+    _pad7        = 0.0,
+  }
+end
+
+-- =============================================================================
+-- 主程序入口
+-- =============================================================================
+local WIN_W <comptime> = 800
+local WIN_H <comptime> = 600
+
+local function main(): int32
+  -- 初始化 GLFW
+  if glfwInit() == 0 then
+    printf("glfw: init failed\n")
+    return 1
+  end
+  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
+
+  local window = glfwCreateWindow(WIN_W, WIN_H, "Nebula Phase 0 - Button Demo", nilptr, nilptr)
+  if window == nilptr then
+    printf("glfw: window creation failed\n")
+    return 1
+  end
+
+  -- 初始化 WebGPU 渲染器
+  local renderer: NebulaRenderer
+  if not renderer:init(window, WIN_W, WIN_H) then
+    return 1
+  end
+
+  -- 初始化圆角矩形渲染管线
+  local rect_pipeline: NebulaRectPipeline
+  if not rect_pipeline:init(&renderer) then
+    return 1
+  end
+
+  -- ==========================================================================
+  -- 创建按钮组件（开发者只需填写视觉规格，其余全部由框架处理）
+  -- ==========================================================================
+  local button_vis = ButtonVisual{
+    pos    = Vec2{ x = 300.0, y = 250.0 },
+    size   = Vec2{ x = 200.0, y = 60.0 },
+    radius = 12.0,
+
+    -- default 状态：深灰背景，细边框
+    default_bg_color     = Color{ r=0.22, g=0.22, b=0.24, a=1.0 },
+    default_border_color = Color{ r=0.4,  g=0.4,  b=0.45, a=1.0 },
+    default_border_width = 1.0,
+
+    -- hovered 状态：稍亮背景，蓝色边框
+    hovered_bg_color     = Color{ r=0.28, g=0.28, b=0.32, a=1.0 },
+    hovered_border_color = Color{ r=0.4,  g=0.6,  b=1.0,  a=1.0 },
+    hovered_border_width = 2.0,
+
+    -- pressed 状态：更暗背景，更亮蓝色边框
+    pressed_bg_color     = Color{ r=0.16, g=0.16, b=0.20, a=1.0 },
+    pressed_border_color = Color{ r=0.6,  g=0.8,  b=1.0,  a=1.0 },
+    pressed_border_width = 2.5,
+  }
+
+  local button: ButtonContext
+  button:init(button_vis)
+
+  -- 主循环
+  local prev_time = glfwGetTime()
+
+  while glfwWindowShouldClose(window) == 0 do
+    glfwPollEvents()
+
+    -- 计算帧时间
+    local now = glfwGetTime()
+    local dt  = (@float32)(now - prev_time)
+    prev_time = now
+
+    -- 读取输入
+    local mx_f64: float64 = 0.0
+    local my_f64: float64 = 0.0
+    glfwGetCursorPos(window, (@*float64)(&mx_f64), (@*float64)(&my_f64))
+    local mx = (@float32)(mx_f64)
+    local my = (@float32)(my_f64)
+    local is_btn_down = (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
+
+    -- 更新按钮状态（交互原语 + 状态机 + 动画插值）
+    button:update(mx, my, is_btn_down, dt)
+
+    -- 获取当前帧的 Surface Texture
+    local surface_tex: WGPUSurfaceTexture
+    wgpuSurfaceGetCurrentTexture(renderer.surface, &surface_tex)
+
+    local status = surface_tex.status
+    if status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal and
+       status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal then
+      continue
+    end
+
+    -- 创建 TextureView
+    local view_desc = WGPUTextureViewDescriptor{
+      nextInChain     = nilptr,
+      label           = wgpu_str_null(),
+      format          = renderer.format,
+      dimension       = 2,  -- WGPUTextureViewDimension_2D
+      baseMipLevel    = 0,
+      mipLevelCount   = 1,
+      baseArrayLayer  = 0,
+      arrayLayerCount = 1,
+      aspect          = 1,  -- WGPUTextureAspect_All
+      usage           = 0,
+    }
+    local view = wgpuTextureCreateView(surface_tex.texture, &view_desc)
+
+    -- 更新 Uniform Buffer
+    local uniforms = button:to_uniforms(WIN_W, WIN_H)
+    rect_pipeline:update_uniforms(&renderer, &uniforms)
+
+    -- 录制渲染命令
+    local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, nilptr)
+
+    local clear_color = WGPURenderPassColorAttachment{
+      nextInChain   = nilptr,
+      view          = view,
+      depthSlice    = 0xFFFFFFFF,
+      resolveTarget = nilptr,
+      loadOp        = WGPULoadOp_Clear,
+      storeOp       = WGPUStoreOp_Store,
+      clearValue    = WGPUColor{ r=0.12, g=0.12, b=0.13, a=1.0 },
+    }
+    local pass_desc = WGPURenderPassDescriptor{
+      nextInChain             = nilptr,
+      label                   = wgpu_str_null(),
+      colorAttachmentCount    = 1,
+      colorAttachments        = &clear_color,
+      depthStencilAttachment  = nilptr,
+      occlusionQuerySet       = nilptr,
+      timestampWrites         = nilptr,
+    }
+
+    local pass = wgpuCommandEncoderBeginRenderPass(encoder, &pass_desc)
+    rect_pipeline:draw(pass)
+    wgpuRenderPassEncoderEnd(pass)
+    wgpuRenderPassEncoderRelease(pass)
+
+    local cmd = wgpuCommandEncoderFinish(encoder, nilptr)
+    wgpuCommandEncoderRelease(encoder)
+    wgpuQueueSubmit(renderer.queue, 1, &cmd)
+    wgpuCommandBufferRelease(cmd)
+
+    -- Present 必须在释放 texture 之前调用
+    wgpuSurfacePresent(renderer.surface)
+    wgpuTextureViewRelease(view)
+    wgpuTextureRelease(surface_tex.texture)
+  end
+
+  -- 清理资源
+  wgpuSurfaceRelease(renderer.surface)
+  wgpuDeviceRelease(renderer.device)
+  wgpuAdapterRelease(renderer.adapter)
+  wgpuInstanceRelease(renderer.instance)
+  glfwDestroyWindow(window)
+  glfwTerminate()
+
+  printf("nebula: clean exit\n")
+  return 0
+end
+
+main()

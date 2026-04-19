@@ -1,0 +1,38 @@
+-- =============================================================================
+-- glfw_bindings.nelua
+-- Nebula GUI Compiler — GLFW 3 Nelua 绑定（Phase 0 最小子集）
+-- =============================================================================
+
+## linklib "glfw"
+## cinclude "<GLFW/glfw3.h>"
+## cdefine "GLFW_EXPOSE_NATIVE_X11"
+## cinclude "<GLFW/glfw3native.h>"
+
+global GLFWwindow <cimport, nodecl> = @pointer
+
+global GLFW_TRUE  <comptime> = 1
+global GLFW_FALSE <comptime> = 0
+
+global GLFW_RESIZABLE  <comptime> = 0x00020003
+global GLFW_CLIENT_API <comptime> = 0x00022001
+global GLFW_NO_API     <comptime> = 0
+
+global GLFW_MOUSE_BUTTON_LEFT  <comptime> = 0
+global GLFW_MOUSE_BUTTON_RIGHT <comptime> = 1
+global GLFW_PRESS   <comptime> = 1
+global GLFW_RELEASE <comptime> = 0
+
+global function glfwInit(): int32 <cimport, nodecl> end
+global function glfwTerminate(): void <cimport, nodecl> end
+global function glfwWindowHint(hint: int32, value: int32): void <cimport, nodecl> end
+global function glfwCreateWindow(width: int32, height: int32, title: cstring, monitor: pointer, share: pointer): GLFWwindow <cimport, nodecl> end
+global function glfwDestroyWindow(window: GLFWwindow): void <cimport, nodecl> end
+global function glfwWindowShouldClose(window: GLFWwindow): int32 <cimport, nodecl> end
+global function glfwPollEvents(): void <cimport, nodecl> end
+global function glfwGetCursorPos(window: GLFWwindow, xpos: *float64, ypos: *float64): void <cimport, nodecl> end
+global function glfwGetMouseButton(window: GLFWwindow, button: int32): int32 <cimport, nodecl> end
+global function glfwGetWindowSize(window: GLFWwindow, width: *int32, height: *int32): void <cimport, nodecl> end
+global function glfwSetWindowShouldClose(window: GLFWwindow, value: int32): void <cimport, nodecl> end
+global function glfwGetX11Display(): pointer <cimport, nodecl> end
+global function glfwGetX11Window(window: GLFWwindow): uint64 <cimport, nodecl> end
+global function glfwGetTime(): float64 <cimport, nodecl> end

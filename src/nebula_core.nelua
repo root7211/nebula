@@ -1,0 +1,230 @@
+-- =============================================================================
+-- nebula_core.nelua
+-- Nebula GUI Compiler — Phase 0
+-- 编译期推导引擎：类型系统 + 注解注册表 + WGSL 生成器 + 状态机生成器
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- 第一层：语义类型系统（Semantic Type System）
+-- 这些类型携带"去往 GPU"的语义，编译期通过名称识别并映射到 WGSL
+-- -----------------------------------------------------------------------------
+global Vec2  = @record{ x: float32, y: float32 }
+global Vec4  = @record{ x: float32, y: float32, z: float32, w: float32 }
+global Color = @record{ r: float32, g: float32, b: float32, a: float32 }
+
+-- -----------------------------------------------------------------------------
+-- 编译期推导引擎（Compile-Time Derivation Engine）
+-- 所有 ## 块中的代码在编译期由 Lua 执行，不产生任何运行时代码
+-- -----------------------------------------------------------------------------
+##[[
+
+-- ===== 全局注解注册表 =====
+nebula_registry = nebula_registry or {}
+
+-- ===== 类型名称到 WGSL 类型的映射表 =====
+local WGSL_TYPE_MAP = {
+  Vec2    = "vec2<f32>",
+  Vec4    = "vec4<f32>",
+  Color   = "vec4<f32>",
+  float32 = "f32",
+}
+
+-- ===== 类型名称到字节大小的映射表 =====
+local TYPE_SIZE_MAP = {
+  Vec2    = 8,
+  Vec4    = 16,
+  Color   = 16,
+  float32 = 4,
+}
+
+-- ===== 类型名称到 WGPUVertexFormat 的映射表 =====
+local VERTEX_FORMAT_MAP = {
+  Vec2    = "WGPUVertexFormat_Float32x2",
+  Vec4    = "WGPUVertexFormat_Float32x4",
+  Color   = "WGPUVertexFormat_Float32x4",
+  float32 = "WGPUVertexFormat_Float32",
+}
+
+-- ===== 注解注册函数 =====
+-- 用户调用此函数为一个 record 类型附加元数据
+function nebula_annotate(type_name, spec)
+  nebula_registry[type_name] = {
+    states      = spec.states     or {"default"},
+    primitives  = spec.primitives or {},
+    transitions = spec.transitions or {},
+  }
+end
+
+-- ===== Shape Parser：解析 record 字段，分组到各状态 =====
+-- 返回: { base_fields, state_fields }
+-- base_fields: 不属于任何状态的基础字段（如 pos, size）
+-- state_fields: { state_name -> { field_name -> type_name } }
+function nebula_parse_shape(type_name)
+  local reg = nebula_registry[type_name]
+  assert(reg, "nebula_parse_shape: type '" .. type_name .. "' not annotated")
+
+  local T = symbols[type_name]
+  assert(T, "nebula_parse_shape: type '" .. type_name .. "' not found in symbols")
+
+  local base_fields  = {}
+  local state_fields = {}
+
+  -- 初始化每个状态的字段表
+  for _, state in ipairs(reg.states) do
+    state_fields[state] = {}
+  end
+
+  -- 遍历 record 的所有字段（Nelua API: T.value.fields）
+  for _, field in ipairs(T.value.fields) do
+    local fname = field.name
+    -- 使用 nickname 获取用户定义类型名（如 Color、Vec2），否则回落到 name
+    local ftype = field.type and (field.type.nickname or field.type.name) or "unknown"
+
+    -- 尝试匹配状态前缀（如 "hovered_bg_color" -> state="hovered", prop="bg_color"）
+    local matched = false
+    for _, state in ipairs(reg.states) do
+      local prefix = state .. "_"
+      if fname:sub(1, #prefix) == prefix then
+        local prop = fname:sub(#prefix + 1)
+        state_fields[state][prop] = { name = fname, type = ftype }
+        matched = true
+        break
+      end
+    end
+
+    -- 未匹配到任何状态前缀，归入基础字段
+    if not matched then
+      table.insert(base_fields, { name = fname, type = ftype })
+    end
+  end
+
+  return base_fields, state_fields
+end
+
+-- ===== WGSL 生成器：从 record 字段生成 WGSL Uniform 结构体字符串 =====
+function nebula_gen_wgsl_uniform(type_name)
+  local base_fields, state_fields = nebula_parse_shape(type_name)
+  local reg = nebula_registry[type_name]
+
+  local lines = {}
+  table.insert(lines, "struct NebulaUniforms {")
+
+  -- 基础字段
+  for _, f in ipairs(base_fields) do
+    local wgsl_type = WGSL_TYPE_MAP[f.type]
+    if wgsl_type then
+      table.insert(lines, "  " .. f.name .. ": " .. wgsl_type .. ",")
+    end
+  end
+
+  -- 当前激活状态的视觉字段（运行时插值后的结果）
+  -- 每个视觉属性只需要一个"当前值"字段发送到 GPU
+  local seen_props = {}
+  for _, state in ipairs(reg.states) do
+    for prop, info in pairs(state_fields[state]) do
+      if not seen_props[prop] then
+        local wgsl_type = WGSL_TYPE_MAP[info.type]
+        if wgsl_type then
+          table.insert(lines, "  " .. prop .. ": " .. wgsl_type .. ",")
+          seen_props[prop] = true
+        end
+      end
+    end
+  end
+
+  -- 视口尺寸（渲染必需）
+  table.insert(lines, "  viewport: vec2<f32>,")
+  table.insert(lines, "}")
+
+  return table.concat(lines, "\n")
+end
+
+-- ===== 状态机生成器：生成状态枚举和转换函数 =====
+-- 返回一个包含所有生成代码片段的表
+function nebula_gen_state_machine(type_name)
+  local reg = nebula_registry[type_name]
+  local base_fields, state_fields = nebula_parse_shape(type_name)
+
+  -- 收集所有视觉属性名称
+  local all_props = {}
+  local seen = {}
+  for _, state in ipairs(reg.states) do
+    for prop, info in pairs(state_fields[state]) do
+      if not seen[prop] then
+        table.insert(all_props, { name = prop, type = info.type })
+        seen[prop] = true
+      end
+    end
+  end
+
+  return {
+    states      = reg.states,
+    transitions = reg.transitions,
+    all_props   = all_props,
+    state_fields = state_fields,
+  }
+end
+
+-- ===== 计算 Uniform 结构体的总字节大小 =====
+function nebula_calc_uniform_size(type_name)
+  local base_fields, state_fields = nebula_parse_shape(type_name)
+  local reg = nebula_registry[type_name]
+  local total = 0
+
+  for _, f in ipairs(base_fields) do
+    total = total + (TYPE_SIZE_MAP[f.type] or 0)
+  end
+
+  local seen_props = {}
+  for _, state in ipairs(reg.states) do
+    for prop, info in pairs(state_fields[state]) do
+      if not seen_props[prop] then
+        total = total + (TYPE_SIZE_MAP[info.type] or 0)
+        seen_props[prop] = true
+      end
+    end
+  end
+
+  total = total + 8 -- viewport: vec2<f32>
+  return total
+end
+
+]]
+
+-- =============================================================================
+-- 数学工具函数（运行时，完全内联）
+-- 使用 global 以便其他模块（如 button_demo）可以直接调用
+-- =============================================================================
+global function lerp_f32(a: float32, b: float32, t: float32): float32
+  return a + (b - a) * t
+end
+
+global function lerp_color(a: Color, b: Color, t: float32): Color
+  return Color{
+    r = lerp_f32(a.r, b.r, t),
+    g = lerp_f32(a.g, b.g, t),
+    b = lerp_f32(a.b, b.b, t),
+    a = lerp_f32(a.a, b.a, t),
+  }
+end
+
+global function lerp_vec2(a: Vec2, b: Vec2, t: float32): Vec2
+  return Vec2{
+    x = lerp_f32(a.x, b.x, t),
+    y = lerp_f32(a.y, b.y, t),
+  }
+end
+
+-- ease_out 缓动函数（二次方）
+global function ease_out(t: float32): float32
+  if t <= 0.0 then return 0.0 end
+  if t >= 1.0 then return 1.0 end
+  return 1.0 - (1.0 - t) * (1.0 - t)
+end
+
+-- ease_in 缓动函数（二次方）
+global function ease_in(t: float32): float32
+  if t <= 0.0 then return 0.0 end
+  if t >= 1.0 then return 1.0 end
+  return t * t
+end

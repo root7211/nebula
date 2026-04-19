@@ -1,0 +1,502 @@
+-- =============================================================================
+-- renderer.nelua
+-- Nebula GUI Compiler — WebGPU 渲染层（Phase 0）
+-- 负责：设备初始化、Surface 格式动态查询、圆角矩形 SDF 渲染管线
+-- =============================================================================
+
+require "nebula_core"
+require "wgpu_bindings"
+require "glfw_bindings"
+
+## cinclude "<stdio.h>"
+## cinclude "<string.h>"
+## cinclude "<stdlib.h>"
+
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+global function memcpy(dst: pointer, src: pointer, n: csize): pointer <cimport, nodecl> end
+
+-- =============================================================================
+-- NebulaRenderer：WebGPU 设备与 Surface 的生命周期管理
+-- =============================================================================
+global NebulaRenderer = @record{
+  instance: WGPUInstance,
+  adapter:  WGPUAdapter,
+  device:   WGPUDevice,
+  queue:    WGPUQueue,
+  surface:  WGPUSurface,
+  width:    uint32,
+  height:   uint32,
+  format:   WGPUTextureFormat,
+}
+
+-- 回调函数：Adapter 请求完成
+local adapter_result: WGPUAdapter = nilptr
+local function on_adapter(status: uint32, adapter: WGPUAdapter, msg: WGPUStringView, ud1: pointer, ud2: pointer): void
+  if status == 1 then -- WGPURequestAdapterStatus_Success
+    adapter_result = adapter
+  else
+    printf("wgpu: adapter request failed\n")
+  end
+end
+
+-- 回调函数：Device 请求完成
+local device_result: WGPUDevice = nilptr
+local function on_device(status: uint32, device: WGPUDevice, msg: WGPUStringView, ud1: pointer, ud2: pointer): void
+  if status == 1 then -- WGPURequestDeviceStatus_Success
+    device_result = device
+  else
+    printf("wgpu: device request failed\n")
+  end
+end
+
+function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
+  self.width  = w
+  self.height = h
+
+  -- 1. 创建 Instance（使用默认后端选择，Vulkan 优先）
+  local inst_extras = WGPUInstanceExtras{
+    chain    = WGPUChainedStruct{ next = nilptr, sType = WGPUSType_InstanceExtras },
+    backends = WGPUInstanceBackend_All,
+    flags    = 0,
+    dx12ShaderCompiler = 0,
+    gles3MinorVersion  = 0,
+    glFenceBehaviour   = 0,
+    dxcPath   = wgpu_str_null(),
+    dxcMaxShaderModel  = 0,
+    dx12PresentationSystem = 0,
+    budgetForDeviceCreation = nilptr,
+    budgetForDeviceLoss     = nilptr,
+  }
+  local inst_desc = WGPUInstanceDescriptor{
+    nextInChain = (@pointer)(&inst_extras)
+  }
+  self.instance = wgpuCreateInstance(&inst_desc)
+  if self.instance == nilptr then
+    printf("wgpu: failed to create instance\n")
+    return false
+  end
+
+  -- 2. 创建 Surface（Linux X11 / WSLg）
+  local xlib_src = WGPUSurfaceSourceXlibWindow{
+    chain   = WGPUChainedStruct{
+      next  = nilptr,
+      sType = WGPUSType_SurfaceSourceXlibWindow,
+    },
+    display = glfwGetX11Display(),
+    window  = glfwGetX11Window(window),
+  }
+  local surf_desc = WGPUSurfaceDescriptor{
+    nextInChain = (@*WGPUChainedStruct)(&xlib_src),
+    label       = wgpu_str_null(),
+  }
+  self.surface = wgpuInstanceCreateSurface(self.instance, &surf_desc)
+  if self.surface == nilptr then
+    printf("wgpu: failed to create surface\n")
+    return false
+  end
+
+  -- 3. 请求 Adapter
+  local adapter_opts = WGPURequestAdapterOptions{
+    nextInChain       = nilptr,
+    compatibleSurface = self.surface,
+    powerPreference   = 0,
+    backendType       = 0,
+    forceFallbackAdapter = false,
+  }
+  local adapter_cb = WGPURequestAdapterCallbackInfo{
+    nextInChain = nilptr,
+    mode        = WGPUCallbackMode_AllowSpontaneous,
+    callback    = (@pointer)(&on_adapter),
+    userdata1   = nilptr,
+    userdata2   = nilptr,
+  }
+  adapter_result = nilptr
+  wgpuInstanceRequestAdapter(self.instance, &adapter_opts, adapter_cb)
+  self.adapter = adapter_result
+  if self.adapter == nilptr then
+    printf("wgpu: no adapter\n")
+    return false
+  end
+
+  -- 4. 请求 Device
+  local dev_desc = WGPUDeviceDescriptor{
+    nextInChain          = nilptr,
+    label                = wgpu_str("nebula-device"),
+    requiredFeatureCount = 0,
+    requiredFeatures     = nilptr,
+    requiredLimits       = nilptr,
+    defaultQueue         = {nextInChain = nilptr, label = wgpu_str_null()},
+    deviceLostCallbackInfo = {
+      nextInChain = nilptr,
+      mode        = WGPUCallbackMode_AllowSpontaneous,
+      callback    = nilptr,
+      userdata1   = nilptr,
+      userdata2   = nilptr,
+    },
+    uncapturedErrorCallbackInfo = {
+      nextInChain = nilptr,
+      callback    = nilptr,
+      userdata1   = nilptr,
+      userdata2   = nilptr,
+    },
+  }
+  local device_cb = WGPURequestDeviceCallbackInfo{
+    nextInChain = nilptr,
+    mode        = WGPUCallbackMode_AllowSpontaneous,
+    callback    = (@pointer)(&on_device),
+    userdata1   = nilptr,
+    userdata2   = nilptr,
+  }
+  device_result = nilptr
+  wgpuAdapterRequestDevice(self.adapter, &dev_desc, device_cb)
+  self.device = device_result
+  if self.device == nilptr then
+    printf("wgpu: no device\n")
+    return false
+  end
+
+  self.queue = wgpuDeviceGetQueue(self.device)
+
+  -- 5. 动态查询 Surface 支持的格式
+  --    wgpu-native v29 要求通过 wgpuSurfaceGetCapabilities 查询，不可硬编码
+  local caps: WGPUSurfaceCapabilities = {}
+  local caps_status = wgpuSurfaceGetCapabilities(self.surface, self.adapter, &caps)
+  if caps_status ~= 1 or caps.formatCount == 0 then
+    printf("wgpu: failed to get surface capabilities\n")
+    return false
+  end
+
+  -- 选择非 sRGB 格式（sRGB 格式会对线性输出做自动 gamma 编码，导致颜色变暗）
+  -- 优先级：BGRA8Unorm(27) > RGBA8Unorm(22) > 第一个可用格式
+  local fmt_ptr = (@*[0]WGPUTextureFormat)(caps.formats)
+  self.format = fmt_ptr[0]
+  local found_preferred = false
+
+  local i: uint32 = 0
+  while i < caps.formatCount do
+    if fmt_ptr[i] == 27 then  -- WGPUTextureFormat_BGRA8Unorm
+      self.format = 27
+      found_preferred = true
+      break
+    end
+    i = i + 1
+  end
+
+  if not found_preferred then
+    i = 0
+    while i < caps.formatCount do
+      if fmt_ptr[i] == 22 then  -- WGPUTextureFormat_RGBA8Unorm
+        self.format = 22
+        found_preferred = true
+        break
+      end
+      i = i + 1
+    end
+  end
+
+  if not found_preferred then
+    self.format = 27  -- 回退：强制尝试 BGRA8Unorm
+  end
+
+  printf("wgpu: surface format = %u (non-sRGB)\n", self.format)
+  wgpuSurfaceCapabilitiesFreeMembers(caps)
+
+  -- 6. 配置 Surface
+  local surf_cfg = WGPUSurfaceConfiguration{
+    nextInChain     = nilptr,
+    device          = self.device,
+    format          = self.format,
+    usage           = 0x00000010, -- WGPUTextureUsage_RenderAttachment
+    viewFormatCount = 0,
+    viewFormats     = nilptr,
+    alphaMode       = 1, -- WGPUCompositeAlphaMode_Auto
+    width           = self.width,
+    height          = self.height,
+    presentMode     = WGPUPresentMode_Fifo,
+  }
+  wgpuSurfaceConfigure(self.surface, &surf_cfg)
+
+  printf("wgpu: renderer initialized (%dx%d)\n", self.width, self.height)
+  return true
+end
+
+-- =============================================================================
+-- NebulaRectUniforms：圆角矩形 SDF 渲染所需的 Uniform 数据
+-- Phase 0 手写布局；Phase 1 起将由推导引擎自动生成
+-- =============================================================================
+-- WebGPU uniform buffer 布局规则（std140）：
+--   f32  = 4B，对齐 4B    vec2 = 8B，对齐 8B    vec4 = 16B，对齐 16B
+--
+-- 内存布局（与 WGSL struct Uniforms 严格对应，共 96 字节）：
+--   offset  0: pos          vec2  8B
+--   offset  8: size         vec2  8B
+--   offset 16: radius       f32   4B
+--   offset 20: _pad0        f32   4B
+--   offset 24: _pad1        f32   4B
+--   offset 28: _pad2        f32   4B  -> bg_color 从 offset 32 开始（16B 对齐）
+--   offset 32: bg_color     vec4  16B
+--   offset 48: border_color vec4  16B
+--   offset 64: border_width f32   4B
+--   offset 68: _pad3        f32   4B
+--   offset 72: _pad4        f32   4B
+--   offset 76: _pad5        f32   4B  -> viewport 从 offset 80 开始（8B 对齐）
+--   offset 80: viewport     vec2  8B
+--   offset 88: _pad6        f32   4B
+--   offset 92: _pad7        f32   4B
+global NebulaRectUniforms = @record{
+  pos:          Vec2,    -- offset  0
+  size:         Vec2,    -- offset  8
+  radius:       float32, -- offset 16
+  _pad0:        float32, -- offset 20
+  _pad1:        float32, -- offset 24
+  _pad2:        float32, -- offset 28
+  bg_color:     Color,   -- offset 32  (vec4, 16B 对齐)
+  border_color: Color,   -- offset 48
+  border_width: float32, -- offset 64
+  _pad3:        float32, -- offset 68
+  _pad4:        float32, -- offset 72
+  _pad5:        float32, -- offset 76
+  viewport:     Vec2,    -- offset 80  (vec2, 8B 对齐)
+  _pad6:        float32, -- offset 88
+  _pad7:        float32, -- offset 92
+}                        -- total: 96 bytes
+
+-- =============================================================================
+-- WGSL 着色器源码
+-- 全屏三角形 + 圆角矩形 SDF + Alpha 混合 + 抗锯齿
+-- =============================================================================
+local RECT_SHADER_WGSL = [[
+// Uniform 布局与 Nelua 端 NebulaRectUniforms 严格对应（共 96 字节）
+struct Uniforms {
+  pos:          vec2<f32>,   // offset  0
+  size:         vec2<f32>,   // offset  8
+  radius:       f32,         // offset 16
+  _pad0:        f32,         // offset 20
+  _pad1:        f32,         // offset 24
+  _pad2:        f32,         // offset 28
+  bg_color:     vec4<f32>,   // offset 32  (16B 对齐)
+  border_color: vec4<f32>,   // offset 48
+  border_width: f32,         // offset 64
+  _pad3:        f32,         // offset 68
+  _pad4:        f32,         // offset 72
+  _pad5:        f32,         // offset 76
+  viewport:     vec2<f32>,   // offset 80  (8B 对齐)
+  _pad6:        f32,         // offset 88
+  _pad7:        f32,         // offset 92
+}
+
+@group(0) @binding(0) var<uniform> u: Uniforms;
+
+struct VertexOutput {
+  @builtin(position) clip_position: vec4<f32>,
+}
+
+// 全屏三角形：3 个顶点覆盖整个 NDC 空间
+@vertex
+fn vs_main(@builtin(vertex_index) vi: u32) -> VertexOutput {
+  var pos = array<vec2<f32>, 3>(
+    vec2<f32>(-1.0, -1.0),
+    vec2<f32>( 3.0, -1.0),
+    vec2<f32>(-1.0,  3.0),
+  );
+  var out: VertexOutput;
+  out.clip_position = vec4<f32>(pos[vi], 0.0, 1.0);
+  return out;
+}
+
+// SDF：圆角矩形的有符号距离函数
+fn sdf_rounded_rect(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
+  let q = abs(p) - b + vec2<f32>(r, r);
+  return length(max(q, vec2<f32>(0.0, 0.0))) + min(max(q.x, q.y), 0.0) - r;
+}
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+  // @builtin(position).xy 直接提供像素坐标（y 向下，原点在左上角）
+  let pixel = in.clip_position.xy;
+  let center = u.pos + u.size * 0.5;
+  let p = pixel - center;
+  let half_size = u.size * 0.5;
+
+  let dist = sdf_rounded_rect(p, half_size, u.radius);
+
+  // 抗锯齿：在边界附近平滑过渡（1px 宽度）
+  let aa = 1.0;
+  let fill_alpha  = 1.0 - smoothstep(-aa, aa, dist);
+  let border_alpha = (1.0 - smoothstep(-aa, aa, dist + u.border_width)) - fill_alpha;
+
+  var color = u.bg_color * fill_alpha;
+  color = color + u.border_color * border_alpha;
+
+  if color.a < 0.001 {
+    discard;
+  }
+
+  return color;
+}
+]]
+
+-- =============================================================================
+-- NebulaRectPipeline：圆角矩形渲染管线
+-- =============================================================================
+global NebulaRectPipeline = @record{
+  pipeline:      WGPURenderPipeline,
+  bind_layout:   WGPUBindGroupLayout,
+  uniform_buf:   WGPUBuffer,
+  bind_group:    WGPUBindGroup,
+}
+
+function NebulaRectPipeline:init(renderer: *NebulaRenderer): boolean
+  local device = renderer.device
+
+  -- 1. 创建 Uniform Buffer
+  local buf_size = #NebulaRectUniforms
+  local buf_desc = WGPUBufferDescriptor{
+    nextInChain      = nilptr,
+    label            = wgpu_str("nebula-rect-uniforms"),
+    usage            = (@uint32)(WGPUBufferUsage_Uniform) | (@uint32)(WGPUBufferUsage_CopyDst),
+    size             = (@uint64)(buf_size),
+    mappedAtCreation = false,
+  }
+  self.uniform_buf = wgpuDeviceCreateBuffer(device, &buf_desc)
+
+  -- 2. 创建 BindGroupLayout
+  local entry = WGPUBindGroupLayoutEntry{
+    nextInChain = nilptr,
+    binding     = 0,
+    visibility  = (@uint32)(WGPUShaderStage_Vertex) | (@uint32)(WGPUShaderStage_Fragment),
+    buffer      = {
+      nextInChain      = nilptr,
+      type             = (@uint32)(WGPUBufferBindingType_Uniform),
+      hasDynamicOffset = false,
+      minBindingSize   = (@uint64)(buf_size),
+    },
+    sampler        = {nextInChain = nilptr, type = 0},
+    texture        = {nextInChain = nilptr, sampleType = 0, viewDimension = 0, multisampled = false},
+    storageTexture = {nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0},
+  }
+  local bgl_desc = WGPUBindGroupLayoutDescriptor{
+    nextInChain = nilptr,
+    label       = wgpu_str("nebula-rect-bgl"),
+    entryCount  = 1,
+    entries     = &entry,
+  }
+  self.bind_layout = wgpuDeviceCreateBindGroupLayout(device, &bgl_desc)
+
+  -- 3. 创建 BindGroup
+  local bg_entry = WGPUBindGroupEntry{
+    nextInChain = nilptr,
+    binding     = 0,
+    buffer      = self.uniform_buf,
+    offset      = 0,
+    size        = (@uint64)(buf_size),
+    sampler     = nilptr,
+    textureView = nilptr,
+  }
+  local bg_desc = WGPUBindGroupDescriptor{
+    nextInChain = nilptr,
+    label       = wgpu_str("nebula-rect-bg"),
+    layout      = self.bind_layout,
+    entryCount  = 1,
+    entries     = &bg_entry,
+  }
+  self.bind_group = wgpuDeviceCreateBindGroup(device, &bg_desc)
+
+  -- 4. 创建着色器模块
+  local wgsl_src = WGPUShaderSourceWGSL{
+    chain = WGPUChainedStruct{
+      next  = nilptr,
+      sType = WGPUSType_ShaderSourceWGSL,
+    },
+    code = wgpu_str(RECT_SHADER_WGSL),
+  }
+  local shader_desc = WGPUShaderModuleDescriptor{
+    nextInChain = (@*WGPUChainedStruct)(&wgsl_src),
+    label       = wgpu_str("nebula-rect-shader"),
+  }
+  local shader = wgpuDeviceCreateShaderModule(device, &shader_desc)
+
+  -- 5. 创建 PipelineLayout
+  local pl_desc = WGPUPipelineLayoutDescriptor{
+    nextInChain          = nilptr,
+    label                = wgpu_str("nebula-rect-pl"),
+    bindGroupLayoutCount = 1,
+    bindGroupLayouts     = &self.bind_layout,
+  }
+  local pipeline_layout = wgpuDeviceCreatePipelineLayout(device, &pl_desc)
+
+  -- 6. Alpha 混合状态
+  local blend_state = WGPUBlendState{
+    color = WGPUBlendComponent{
+      operation = WGPUBlendOperation_Add,
+      srcFactor = WGPUBlendFactor_SrcAlpha,
+      dstFactor = WGPUBlendFactor_OneMinusSrcAlpha,
+    },
+    alpha = WGPUBlendComponent{
+      operation = WGPUBlendOperation_Add,
+      srcFactor = WGPUBlendFactor_One,
+      dstFactor = WGPUBlendFactor_OneMinusSrcAlpha,
+    },
+  }
+  local color_target = WGPUColorTargetState{
+    nextInChain = nilptr,
+    format      = renderer.format,
+    blend       = &blend_state,
+    writeMask   = (@uint32)(WGPUColorWriteMask_All),
+  }
+  local frag_state = WGPUFragmentState{
+    nextInChain  = nilptr,
+    module       = shader,
+    entryPoint   = wgpu_str("fs_main"),
+    constantCount = 0,
+    constants    = nilptr,
+    targetCount  = 1,
+    targets      = &color_target,
+  }
+
+  -- 7. 创建渲染管线
+  local rp_desc = WGPURenderPipelineDescriptor{
+    nextInChain = nilptr,
+    label       = wgpu_str("nebula-rect-pipeline"),
+    layout      = pipeline_layout,
+    vertex      = {
+      nextInChain   = nilptr,
+      module        = shader,
+      entryPoint    = wgpu_str("vs_main"),
+      constantCount = 0,
+      constants     = nilptr,
+      bufferCount   = 0,
+      buffers       = nilptr,
+    },
+    primitive = {
+      nextInChain       = nilptr,
+      topology          = WGPUPrimitiveTopology_TriangleList,
+      stripIndexFormat  = 0,
+      frontFace         = 0,
+      cullMode          = 0,
+      unclippedDepth    = false,
+    },
+    depthStencil = nilptr,
+    multisample  = {
+      nextInChain             = nilptr,
+      count                   = 1,
+      mask                    = 0xFFFFFFFF,
+      alphaToCoverageEnabled  = false,
+    },
+    fragment = &frag_state,
+  }
+  self.pipeline = wgpuDeviceCreateRenderPipeline(device, &rp_desc)
+
+  printf("wgpu: rect pipeline created\n")
+  return true
+end
+
+function NebulaRectPipeline:update_uniforms(renderer: *NebulaRenderer, uniforms: *NebulaRectUniforms): void
+  wgpuQueueWriteBuffer(renderer.queue, self.uniform_buf, 0, uniforms, #NebulaRectUniforms)
+end
+
+function NebulaRectPipeline:draw(pass: WGPURenderPassEncoder): void
+  wgpuRenderPassEncoderSetPipeline(pass, self.pipeline)
+  wgpuRenderPassEncoderSetBindGroup(pass, 0, self.bind_group, 0, nilptr)
+  wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0)  -- 全屏三角形
+end

@@ -1,0 +1,25 @@
+# 编译产物
+*.o
+*.a
+*.so
+*.dll
+*.dylib
+*.exe
+
+# Nelua 缓存
+.cache/
+~/.cache/nelua/
+
+# 第三方依赖（体积大，用户需自行下载）
+vendor/wgpu-native/
+*.zip
+
+# 编辑器与 IDE
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# 构建日志
+*.log
