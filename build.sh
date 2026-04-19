@@ -24,21 +24,32 @@ TARGET="${1:-button_demo}"
 
 case "$TARGET" in
   button_demo|login_demo)
+    NEEDS_GPU=1
+    ;;
+  uniform_layout_test)
+    NEEDS_GPU=0
     ;;
   *)
     echo "[nebula] Error: unknown target '$TARGET'"
-    echo "         Available targets: button_demo, login_demo"
+    echo "         Available targets: button_demo, login_demo, uniform_layout_test"
     exit 1
     ;;
 esac
 
 echo "[nebula] Building $TARGET..."
 
-nelua \
-  -L "$SCRIPT_DIR/src" \
-  --cflags="-I$VENDOR/include" \
-  --ldflags="-L$VENDOR/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,$VENDOR/lib" \
-  "$SCRIPT_DIR/examples/$TARGET.nelua"
+if [ "$NEEDS_GPU" = "1" ]; then
+  nelua \
+    -L "$SCRIPT_DIR/src" \
+    --cflags="-I$VENDOR/include" \
+    --ldflags="-L$VENDOR/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,$VENDOR/lib" \
+    "$SCRIPT_DIR/examples/$TARGET.nelua"
+else
+  # 纯编译期 / 运行期测试：不链接 wgpu/glfw
+  nelua \
+    -L "$SCRIPT_DIR/src" \
+    "$SCRIPT_DIR/examples/$TARGET.nelua"
+fi
 
 echo "[nebula] Build complete: ~/.cache/nelua/$TARGET"
 echo ""
