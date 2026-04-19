@@ -243,47 +243,31 @@ end
 --   offset 80: viewport     vec2  8B
 --   offset 88: _pad6        f32   4B
 --   offset 92: _pad7        f32   4B
-global NebulaRectUniforms = @record{
-  pos:          Vec2,    -- offset  0
-  size:         Vec2,    -- offset  8
-  radius:       float32, -- offset 16
-  _pad0:        float32, -- offset 20
-  _pad1:        float32, -- offset 24
-  _pad2:        float32, -- offset 28
-  bg_color:     Color,   -- offset 32  (vec4, 16B 对齐)
-  border_color: Color,   -- offset 48
-  border_width: float32, -- offset 64
-  _pad3:        float32, -- offset 68
-  _pad4:        float32, -- offset 72
-  _pad5:        float32, -- offset 76
-  viewport:     Vec2,    -- offset 80  (vec2, 8B 对齐)
-  _pad6:        float32, -- offset 88
-  _pad7:        float32, -- offset 92
-}                        -- total: 96 bytes
+-- =============================================================================
+-- Phase 2.1: NebulaRectUniforms 由编译期 std140 推导器生成
+--   完全与 Phase 0/1 手写版本二进制等价（8 个 _pad，总长 96B）
+--   force_viewport_align=16 是为了保持历史布局，该选项在 Phase 2.3
+--   重新派生为 <Visual>Pipeline 时会被去除，还到 std140 原生的 80B 紧凑布局。
+## local rect_layout = nebula_emit_uniform_record_from_fields({
+##   record_name = "NebulaRectUniforms",
+##   wgsl_struct_name = "Uniforms",
+##   fields = {
+##     {name="pos",          type="Vec2"},
+##     {name="size",         type="Vec2"},
+##     {name="radius",       type="float32"},
+##     {name="bg_color",     type="Color"},
+##     {name="border_color", type="Color"},
+##     {name="border_width", type="float32"},
+##   },
+##   append_viewport      = true,
+##   force_viewport_align = 16,
+## })
 
 -- =============================================================================
 -- WGSL 着色器源码
 -- 全屏三角形 + 圆角矩形 SDF + Alpha 混合 + 抗锯齿
 -- =============================================================================
-local RECT_SHADER_WGSL = [[
-// Uniform 布局与 Nelua 端 NebulaRectUniforms 严格对应（共 96 字节）
-struct Uniforms {
-  pos:          vec2<f32>,   // offset  0
-  size:         vec2<f32>,   // offset  8
-  radius:       f32,         // offset 16
-  _pad0:        f32,         // offset 20
-  _pad1:        f32,         // offset 24
-  _pad2:        f32,         // offset 28
-  bg_color:     vec4<f32>,   // offset 32  (16B 对齐)
-  border_color: vec4<f32>,   // offset 48
-  border_width: f32,         // offset 64
-  _pad3:        f32,         // offset 68
-  _pad4:        f32,         // offset 72
-  _pad5:        f32,         // offset 76
-  viewport:     vec2<f32>,   // offset 80  (8B 对齐)
-  _pad6:        f32,         // offset 88
-  _pad7:        f32,         // offset 92
-}
+local RECT_SHADER_WGSL = #[rect_layout.wgsl_struct]# .. [[
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
 

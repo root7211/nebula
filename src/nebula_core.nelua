@@ -166,6 +166,240 @@ function nebula_gen_state_machine(type_name)
 end
 
 -- =============================================================================
+-- ★ Phase 2.1: nebula_gen_uniform_layout(type_name)
+--
+-- 根据注解按 std140 规则推导 Uniform 完整布局，返回：
+--   {
+--     fields              = { {name, type, offset, size, is_pad}, ... },
+--     total_size          = 16-aligned bytes,
+--     wgsl_struct         = "struct <Name>Uniforms { ... }",
+--     nelua_record_source = "global <Name>Uniforms = @record{ ... }",
+--     pad_count           = N,
+--   }
+--
+-- std140 子集（足以支撑 Phase 2 以内的 Visual）：
+--   f32      : align 4,  size 4
+--   Vec2     : align 8,  size 8
+--   Vec4/Color: align 16, size 16
+-- struct 总大小向 16 对齐。
+-- 不支持 vec3/array/嵌套 struct（Phase 2.5 蛋增量）。
+-- =============================================================================
+
+local STD140_ALIGN_MAP = {
+  Vec2    = 8,
+  Vec4    = 16,
+  Color   = 16,
+  float32 = 4,
+}
+
+-- 在所有字段列表中追加必要的 _pad<N> 使下一字段起始 offset 满足 align
+local function pad_to(layout_fields, current_offset, target_align, pad_seq)
+  local rem = current_offset % target_align
+  if rem == 0 then return current_offset, pad_seq end
+  local pad_bytes = target_align - rem
+  local n_floats  = pad_bytes // 4
+  for _ = 1, n_floats do
+    table.insert(layout_fields, {
+      name = "_pad" .. pad_seq,
+      type = "float32",
+      wgsl_type = "f32",
+      offset = current_offset,
+      size = 4,
+      is_pad = true,
+    })
+    current_offset = current_offset + 4
+    pad_seq = pad_seq + 1
+  end
+  return current_offset, pad_seq
+end
+
+-- 按顺序依次放入字段，自动插入 _pad
+local function place_field(layout_fields, current_offset, pad_seq, field_name, field_type)
+  local align = STD140_ALIGN_MAP[field_type]
+  assert(align, ("std140: unsupported field type '%s' for field '%s'"):format(
+    tostring(field_type), tostring(field_name)))
+  current_offset, pad_seq = pad_to(layout_fields, current_offset, align, pad_seq)
+  local size      = TYPE_SIZE_MAP[field_type]
+  local wgsl_type = WGSL_TYPE_MAP[field_type]
+  table.insert(layout_fields, {
+    name      = field_name,
+    type      = field_type,
+    wgsl_type = wgsl_type,
+    offset    = current_offset,
+    size      = size,
+    is_pad    = false,
+  })
+  return current_offset + size, pad_seq
+end
+
+-- opts (可选):
+--   record_name           : string  — 生成的 record 名称（默认 = type_name .. "Uniforms"）
+--   wgsl_struct_name      : string  — WGSL struct 名称（默认与 record_name 同）
+--   force_viewport_align  : number  — 强制把 viewport 对齐到该边界（默认 nil = std140 原生）
+--                                     用于保持与 Phase 0/1 手写 NebulaRectUniforms 二进制等价
+function nebula_gen_uniform_layout(type_name, opts)
+  opts = opts or {}
+  local record_name      = opts.record_name      or (type_name .. "Uniforms")
+  local wgsl_struct_name = opts.wgsl_struct_name or record_name
+
+  local base_fields, state_fields = nebula_parse_shape(type_name)
+  local reg = nebula_registry[type_name]
+  local all_props = collect_all_props(reg, state_fields)
+
+  local fields = {}
+  local offset = 0
+  local pad_seq = 0
+
+  -- 1. base 字段（原始顺序）
+  for _, f in ipairs(base_fields) do
+    if STD140_ALIGN_MAP[f.type] then
+      offset, pad_seq = place_field(fields, offset, pad_seq, f.name, f.type)
+    end
+  end
+
+  -- 2. 视觉属性（collect_all_props 已依字典序排序）
+  for _, p in ipairs(all_props) do
+    if STD140_ALIGN_MAP[p.type] then
+      offset, pad_seq = place_field(fields, offset, pad_seq, p.name, p.type)
+    end
+  end
+
+  -- 3. viewport 服务于像素坐标转换（与 Phase 0/1 一致）
+  if opts.force_viewport_align then
+    offset, pad_seq = pad_to(fields, offset, opts.force_viewport_align, pad_seq)
+  end
+  offset, pad_seq = place_field(fields, offset, pad_seq, "viewport", "Vec2")
+
+  -- 4. struct 末尾补齐到 16 字节
+  offset, pad_seq = pad_to(fields, offset, 16, pad_seq)
+
+  local total_size = offset
+
+  -- ---- 生成 Nelua record 源代码 ----
+  local rec_lines = { ("global %s = @record{"):format(record_name) }
+  for _, f in ipairs(fields) do
+    table.insert(rec_lines, ("  %-12s %s,  -- offset %d"):format(
+      f.name .. ":", f.type, f.offset))
+  end
+  table.insert(rec_lines, ("}                  -- total: %d bytes"):format(total_size))
+  local nelua_record_source = table.concat(rec_lines, "\n")
+
+  -- ---- 生成 WGSL struct 源代码 ----
+  local wgsl_lines = { ("struct %s {"):format(wgsl_struct_name) }
+  for _, f in ipairs(fields) do
+    table.insert(wgsl_lines, ("  %-12s %s,  // offset %d"):format(
+      f.name .. ":", f.wgsl_type, f.offset))
+  end
+  table.insert(wgsl_lines, "}")
+  local wgsl_struct = table.concat(wgsl_lines, "\n")
+
+  return {
+    fields              = fields,
+    total_size          = total_size,
+    wgsl_struct         = wgsl_struct,
+    nelua_record_source = nelua_record_source,
+    record_name         = record_name,
+    wgsl_struct_name    = wgsl_struct_name,
+    pad_count           = pad_seq,
+  }
+end
+
+-- 在调用点 emit Nelua record 源码
+function nebula_emit_uniform_record(type_name, opts)
+  local layout = nebula_gen_uniform_layout(type_name, opts)
+  print(("[uniform] %s: %d fields (%d real + %d pad), total %d bytes"):format(
+    layout.record_name, #layout.fields,
+    #layout.fields - layout.pad_count, layout.pad_count, layout.total_size))
+  local block_ast = aster.parse(layout.nelua_record_source,
+                                "<nebula_uniform:" .. layout.record_name .. ">")
+  for _, stat in ipairs(block_ast) do
+    inject_statement(stat)
+  end
+end
+
+-- ---------------------------------------------------------------------------
+-- nebula_gen_uniform_layout_from_fields(spec)
+--   spec = {
+--     record_name           = "NebulaRectUniforms",
+--     wgsl_struct_name      = "Uniforms",   -- 可选
+--     fields                = {              -- 序列依次放入
+--       {name="pos",          type="Vec2"},
+--       {name="size",         type="Vec2"},
+--       {name="radius",       type="float32"},
+--       {name="bg_color",     type="Color"},
+--       ...
+--     },
+--     append_viewport       = true,          -- 末尾追加 viewport: Vec2
+--     force_viewport_align  = 16,            -- 与 Phase 0/1 手写 96B 等价
+--   }
+-- 不依赖 nebula_annotate / nebula_parse_shape，供 renderer 这种独立于
+-- 具体 Visual 类型的代码使用。
+function nebula_gen_uniform_layout_from_fields(spec)
+  assert(spec.record_name, "nebula_gen_uniform_layout_from_fields: record_name required")
+  assert(spec.fields, "nebula_gen_uniform_layout_from_fields: fields required")
+  local wgsl_struct_name = spec.wgsl_struct_name or spec.record_name
+
+  local out_fields = {}
+  local offset = 0
+  local pad_seq = 0
+
+  for _, f in ipairs(spec.fields) do
+    if STD140_ALIGN_MAP[f.type] then
+      offset, pad_seq = place_field(out_fields, offset, pad_seq, f.name, f.type)
+    end
+  end
+
+  if spec.append_viewport then
+    if spec.force_viewport_align then
+      offset, pad_seq = pad_to(out_fields, offset, spec.force_viewport_align, pad_seq)
+    end
+    offset, pad_seq = place_field(out_fields, offset, pad_seq, "viewport", "Vec2")
+  end
+
+  offset, pad_seq = pad_to(out_fields, offset, 16, pad_seq)
+  local total_size = offset
+
+  local rec_lines = { ("global %s = @record{"):format(spec.record_name) }
+  for _, f in ipairs(out_fields) do
+    table.insert(rec_lines, ("  %-12s %s,  -- offset %d"):format(
+      f.name .. ":", f.type, f.offset))
+  end
+  table.insert(rec_lines, ("}                  -- total: %d bytes"):format(total_size))
+  local nelua_record_source = table.concat(rec_lines, "\n")
+
+  local wgsl_lines = { ("struct %s {"):format(wgsl_struct_name) }
+  for _, f in ipairs(out_fields) do
+    table.insert(wgsl_lines, ("  %-12s %s,  // offset %d"):format(
+      f.name .. ":", f.wgsl_type, f.offset))
+  end
+  table.insert(wgsl_lines, "}")
+  local wgsl_struct = table.concat(wgsl_lines, "\n")
+
+  return {
+    fields              = out_fields,
+    total_size          = total_size,
+    wgsl_struct         = wgsl_struct,
+    nelua_record_source = nelua_record_source,
+    record_name         = spec.record_name,
+    wgsl_struct_name    = wgsl_struct_name,
+    pad_count           = pad_seq,
+  }
+end
+
+function nebula_emit_uniform_record_from_fields(spec)
+  local layout = nebula_gen_uniform_layout_from_fields(spec)
+  print(("[uniform] %s: %d fields (%d real + %d pad), total %d bytes"):format(
+    layout.record_name, #layout.fields,
+    #layout.fields - layout.pad_count, layout.pad_count, layout.total_size))
+  local block_ast = aster.parse(layout.nelua_record_source,
+                                "<nebula_uniform:" .. layout.record_name .. ">")
+  for _, stat in ipairs(block_ast) do
+    inject_statement(stat)
+  end
+  return layout
+end
+
+-- =============================================================================
 -- ★ Phase 1 核心：nebula_derive(type_name)
 --
 -- 在调用点编译期生成：
