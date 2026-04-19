@@ -1,27 +1,33 @@
 -- =============================================================================
 -- nebula_core.nelua
--- Nebula GUI Compiler — Phase 0
--- 编译期推导引擎：类型系统 + 注解注册表 + WGSL 生成器 + 状态机生成器
+-- Nebula GUI Compiler — Phase 1
+--
+-- 编译期推导引擎：
+--   · 类型系统（Vec2 / Vec4 / Color）
+--   · 注解注册表（nebula_annotate）
+--   · WGSL Uniform 生成器、Uniform 字节大小计算（保留 Phase 0 API）
+--   · ★ Phase 1 新增：nebula_derive(type_name) —— 自动生成 State 枚举、
+--     StateMachine 记录与 Context 记录，开发者无需再手写样板代码
+--
+-- 所有 ## / ##[[ ]] 块中的代码在编译期由 Lua 执行；运行时不存在任何派生开销。
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
 -- 第一层：语义类型系统（Semantic Type System）
--- 这些类型携带"去往 GPU"的语义，编译期通过名称识别并映射到 WGSL
 -- -----------------------------------------------------------------------------
 global Vec2  = @record{ x: float32, y: float32 }
 global Vec4  = @record{ x: float32, y: float32, z: float32, w: float32 }
 global Color = @record{ r: float32, g: float32, b: float32, a: float32 }
 
--- -----------------------------------------------------------------------------
+-- =============================================================================
 -- 编译期推导引擎（Compile-Time Derivation Engine）
--- 所有 ## 块中的代码在编译期由 Lua 执行，不产生任何运行时代码
--- -----------------------------------------------------------------------------
+-- =============================================================================
 ##[[
 
 -- ===== 全局注解注册表 =====
 nebula_registry = nebula_registry or {}
 
--- ===== 类型名称到 WGSL 类型的映射表 =====
+-- ===== 类型映射表 =====
 local WGSL_TYPE_MAP = {
   Vec2    = "vec2<f32>",
   Vec4    = "vec4<f32>",
@@ -29,7 +35,6 @@ local WGSL_TYPE_MAP = {
   float32 = "f32",
 }
 
--- ===== 类型名称到字节大小的映射表 =====
 local TYPE_SIZE_MAP = {
   Vec2    = 8,
   Vec4    = 16,
@@ -37,16 +42,14 @@ local TYPE_SIZE_MAP = {
   float32 = 4,
 }
 
--- ===== 类型名称到 WGPUVertexFormat 的映射表 =====
-local VERTEX_FORMAT_MAP = {
-  Vec2    = "WGPUVertexFormat_Float32x2",
-  Vec4    = "WGPUVertexFormat_Float32x4",
-  Color   = "WGPUVertexFormat_Float32x4",
-  float32 = "WGPUVertexFormat_Float32",
+-- 类型名 -> 派生使用的 lerp 函数名
+local LERP_FN_MAP = {
+  Color   = "lerp_color",
+  float32 = "lerp_f32",
+  Vec2    = "lerp_vec2",
 }
 
 -- ===== 注解注册函数 =====
--- 用户调用此函数为一个 record 类型附加元数据
 function nebula_annotate(type_name, spec)
   nebula_registry[type_name] = {
     states      = spec.states     or {"default"},
@@ -56,9 +59,6 @@ function nebula_annotate(type_name, spec)
 end
 
 -- ===== Shape Parser：解析 record 字段，分组到各状态 =====
--- 返回: { base_fields, state_fields }
--- base_fields: 不属于任何状态的基础字段（如 pos, size）
--- state_fields: { state_name -> { field_name -> type_name } }
 function nebula_parse_shape(type_name)
   local reg = nebula_registry[type_name]
   assert(reg, "nebula_parse_shape: type '" .. type_name .. "' not annotated")
@@ -69,18 +69,14 @@ function nebula_parse_shape(type_name)
   local base_fields  = {}
   local state_fields = {}
 
-  -- 初始化每个状态的字段表
   for _, state in ipairs(reg.states) do
     state_fields[state] = {}
   end
 
-  -- 遍历 record 的所有字段（Nelua API: T.value.fields）
   for _, field in ipairs(T.value.fields) do
     local fname = field.name
-    -- 使用 nickname 获取用户定义类型名（如 Color、Vec2），否则回落到 name
     local ftype = field.type and (field.type.nickname or field.type.name) or "unknown"
 
-    -- 尝试匹配状态前缀（如 "hovered_bg_color" -> state="hovered", prop="bg_color"）
     local matched = false
     for _, state in ipairs(reg.states) do
       local prefix = state .. "_"
@@ -92,7 +88,6 @@ function nebula_parse_shape(type_name)
       end
     end
 
-    -- 未匹配到任何状态前缀，归入基础字段
     if not matched then
       table.insert(base_fields, { name = fname, type = ftype })
     end
@@ -101,15 +96,29 @@ function nebula_parse_shape(type_name)
   return base_fields, state_fields
 end
 
--- ===== WGSL 生成器：从 record 字段生成 WGSL Uniform 结构体字符串 =====
+-- 收集"所有出现过的视觉属性"（按首次出现顺序去重）
+local function collect_all_props(reg, state_fields)
+  local list, seen = {}, {}
+  for _, state in ipairs(reg.states) do
+    -- 为了稳定顺序，使用 pairs；首次出现即记录
+    for prop, info in pairs(state_fields[state]) do
+      if not seen[prop] then
+        table.insert(list, { name = prop, type = info.type })
+        seen[prop] = true
+      end
+    end
+  end
+  -- 字典序排序使生成代码确定性更强（避免 Lua pairs 顺序差异）
+  table.sort(list, function(a, b) return a.name < b.name end)
+  return list
+end
+
+-- ===== WGSL 生成器（Phase 0 API，保留向后兼容） =====
 function nebula_gen_wgsl_uniform(type_name)
   local base_fields, state_fields = nebula_parse_shape(type_name)
   local reg = nebula_registry[type_name]
+  local lines = {"struct NebulaUniforms {"}
 
-  local lines = {}
-  table.insert(lines, "struct NebulaUniforms {")
-
-  -- 基础字段
   for _, f in ipairs(base_fields) do
     local wgsl_type = WGSL_TYPE_MAP[f.type]
     if wgsl_type then
@@ -117,83 +126,376 @@ function nebula_gen_wgsl_uniform(type_name)
     end
   end
 
-  -- 当前激活状态的视觉字段（运行时插值后的结果）
-  -- 每个视觉属性只需要一个"当前值"字段发送到 GPU
-  local seen_props = {}
-  for _, state in ipairs(reg.states) do
-    for prop, info in pairs(state_fields[state]) do
-      if not seen_props[prop] then
-        local wgsl_type = WGSL_TYPE_MAP[info.type]
-        if wgsl_type then
-          table.insert(lines, "  " .. prop .. ": " .. wgsl_type .. ",")
-          seen_props[prop] = true
-        end
-      end
+  local all_props = collect_all_props(reg, state_fields)
+  for _, p in ipairs(all_props) do
+    local wgsl_type = WGSL_TYPE_MAP[p.type]
+    if wgsl_type then
+      table.insert(lines, "  " .. p.name .. ": " .. wgsl_type .. ",")
     end
   end
 
-  -- 视口尺寸（渲染必需）
   table.insert(lines, "  viewport: vec2<f32>,")
   table.insert(lines, "}")
-
   return table.concat(lines, "\n")
 end
 
--- ===== 状态机生成器：生成状态枚举和转换函数 =====
--- 返回一个包含所有生成代码片段的表
-function nebula_gen_state_machine(type_name)
-  local reg = nebula_registry[type_name]
-  local base_fields, state_fields = nebula_parse_shape(type_name)
-
-  -- 收集所有视觉属性名称
-  local all_props = {}
-  local seen = {}
-  for _, state in ipairs(reg.states) do
-    for prop, info in pairs(state_fields[state]) do
-      if not seen[prop] then
-        table.insert(all_props, { name = prop, type = info.type })
-        seen[prop] = true
-      end
-    end
-  end
-
-  return {
-    states      = reg.states,
-    transitions = reg.transitions,
-    all_props   = all_props,
-    state_fields = state_fields,
-  }
-end
-
--- ===== 计算 Uniform 结构体的总字节大小 =====
 function nebula_calc_uniform_size(type_name)
   local base_fields, state_fields = nebula_parse_shape(type_name)
   local reg = nebula_registry[type_name]
   local total = 0
-
   for _, f in ipairs(base_fields) do
     total = total + (TYPE_SIZE_MAP[f.type] or 0)
   end
+  local all_props = collect_all_props(reg, state_fields)
+  for _, p in ipairs(all_props) do
+    total = total + (TYPE_SIZE_MAP[p.type] or 0)
+  end
+  total = total + 8 -- viewport: vec2<f32>
+  return total
+end
 
-  local seen_props = {}
-  for _, state in ipairs(reg.states) do
-    for prop, info in pairs(state_fields[state]) do
-      if not seen_props[prop] then
-        total = total + (TYPE_SIZE_MAP[info.type] or 0)
-        seen_props[prop] = true
+function nebula_gen_state_machine(type_name)
+  local reg = nebula_registry[type_name]
+  local _, state_fields = nebula_parse_shape(type_name)
+  return {
+    states       = reg.states,
+    transitions  = reg.transitions,
+    all_props    = collect_all_props(reg, state_fields),
+    state_fields = state_fields,
+  }
+end
+
+-- =============================================================================
+-- ★ Phase 1 核心：nebula_derive(type_name)
+--
+-- 在调用点编译期生成：
+--   global <T>State          : enum
+--   global <T>StateMachine   : record + methods
+--   global <T>Context        : record + methods
+-- =============================================================================
+
+-- 字符串首字母大写
+local function cap(s)
+  return s:sub(1, 1):upper() .. s:sub(2)
+end
+
+-- tween 名称 -> 数值编码（与运行时 get_t() 中的判断保持一致）
+local TWEEN_CODE = { none = 0, ease_out = 1, ease_in = 2 }
+
+-- 是否包含某个原语
+local function has_prim(reg, name)
+  for _, p in ipairs(reg.primitives or {}) do
+    if p == name then return true end
+  end
+  return false
+end
+
+-- ---- 生成 State 枚举源代码 ----
+local function gen_state_enum(type_name, reg)
+  local lines = {("global %sState = @enum{"):format(type_name)}
+  for i, s in ipairs(reg.states) do
+    table.insert(lines, ("  %s = %d,"):format(cap(s), i - 1))
+  end
+  table.insert(lines, "}")
+  return table.concat(lines, "\n")
+end
+
+-- ---- 生成 StateMachine 记录 + 方法 ----
+local function gen_state_machine(type_name, reg)
+  local sm = type_name .. "StateMachine"
+  local st = type_name .. "State"
+  local lines = {}
+
+  table.insert(lines, ("global %s = @record{"):format(sm))
+  table.insert(lines, ("  current:  %s,"):format(st))
+  table.insert(lines, ("  target:   %s,"):format(st))
+  table.insert(lines,  "  progress: float32,")
+  table.insert(lines,  "  duration: float32,")
+  table.insert(lines,  "  tween:    uint8,")
+  table.insert(lines,  "}")
+
+  -- init
+  table.insert(lines, ("function %s:init(): void"):format(sm))
+  table.insert(lines, ("  self.current  = %s.%s"):format(st, cap(reg.states[1])))
+  table.insert(lines, ("  self.target   = %s.%s"):format(st, cap(reg.states[1])))
+  table.insert(lines,  "  self.progress = 1.0")
+  table.insert(lines,  "  self.duration = 0.0")
+  table.insert(lines,  "  self.tween    = 0")
+  table.insert(lines,  "end")
+
+  -- transition_to —— 展开 transitions 为 if-else 链
+  table.insert(lines, ("function %s:transition_to(new_target: %s): void"):format(sm, st))
+  table.insert(lines,  "  if new_target == self.target and self.progress >= 1.0 then return end")
+  table.insert(lines,  "  if new_target ~= self.target then")
+  table.insert(lines,  "    self.target   = new_target")
+  table.insert(lines,  "    self.progress = 0.0")
+  if #reg.transitions > 0 then
+    for i, tr in ipairs(reg.transitions) do
+      local kw = (i == 1) and "if" or "elseif"
+      local code = TWEEN_CODE[tr.tween] or 0
+      table.insert(lines, ("    %s self.current == %s.%s and new_target == %s.%s then"):format(
+        kw, st, cap(tr.from), st, cap(tr.to)))
+      table.insert(lines, ("      self.duration = %s"):format(tostring(tr.duration or 0.0)))
+      table.insert(lines, ("      self.tween    = %d"):format(code))
+    end
+    table.insert(lines, "    else")
+    table.insert(lines, "      self.duration = 0.0")
+    table.insert(lines, "      self.tween    = 0")
+    table.insert(lines, "    end")
+  else
+    table.insert(lines, "    self.duration = 0.0")
+    table.insert(lines, "    self.tween    = 0")
+  end
+  table.insert(lines, "  end")
+  table.insert(lines, "end")
+
+  -- update
+  table.insert(lines, ("function %s:update(dt: float32): void"):format(sm))
+  table.insert(lines,  "  if self.progress >= 1.0 then")
+  table.insert(lines,  "    self.current  = self.target")
+  table.insert(lines,  "    self.progress = 1.0")
+  table.insert(lines,  "    return")
+  table.insert(lines,  "  end")
+  table.insert(lines,  "  if self.duration <= 0.0 then")
+  table.insert(lines,  "    self.progress = 1.0")
+  table.insert(lines,  "    self.current  = self.target")
+  table.insert(lines,  "    return")
+  table.insert(lines,  "  end")
+  table.insert(lines,  "  self.progress = self.progress + dt / self.duration")
+  table.insert(lines,  "  if self.progress >= 1.0 then")
+  table.insert(lines,  "    self.progress = 1.0")
+  table.insert(lines,  "    self.current  = self.target")
+  table.insert(lines,  "  end")
+  table.insert(lines,  "end")
+
+  -- get_t
+  table.insert(lines, ("function %s:get_t(): float32"):format(sm))
+  table.insert(lines,  "  local t = self.progress")
+  table.insert(lines,  "  if self.tween == 1 then return ease_out(t) end")
+  table.insert(lines,  "  if self.tween == 2 then return ease_in(t) end")
+  table.insert(lines,  "  return t")
+  table.insert(lines,  "end")
+
+  return table.concat(lines, "\n")
+end
+
+-- ---- 生成 Context 记录 + 方法 ----
+-- visual_type_name: 原始视觉规格名（如 "ButtonVisual"）——用于字段类型引用
+-- base:             派生基名（如 "Button"）——用于生成 Context/SM/State 名称
+local function gen_context_for(visual_type_name, base, reg, state_fields, all_props)
+  local type_name = visual_type_name  -- 保持下文代码语义：*字段类型*仍指原规格
+  local ctx = base .. "Context"
+  local sm  = base .. "StateMachine"
+  local st  = base .. "State"
+  local has_hover = has_prim(reg, "hoverable")
+  local has_click = has_prim(reg, "clickable")
+
+  local lines = {}
+
+  -- ===== record =====
+  table.insert(lines, ("global %s = @record{"):format(ctx))
+  table.insert(lines, ("  visual: %s,"):format(type_name))
+  table.insert(lines, ("  sm:     %s,"):format(sm))
+  if has_hover then table.insert(lines, "  hover:  HoverableState,") end
+  if has_click then table.insert(lines, "  click:  ClickableState,") end
+  for _, p in ipairs(all_props) do
+    table.insert(lines, ("  current_%s: %s,"):format(p.name, p.type))
+  end
+  table.insert(lines, "}")
+
+  -- ===== init(vis) =====
+  table.insert(lines, ("function %s:init(vis: %s): void"):format(ctx, type_name))
+  table.insert(lines,  "  self.visual = vis")
+  table.insert(lines,  "  self.sm:init()")
+  if has_hover then table.insert(lines, "  self.hover = HoverableState{}") end
+  if has_click then table.insert(lines, "  self.click = ClickableState{}") end
+  -- 用初始状态（states[1]）的视觉值初始化 current_*
+  local init_state = reg.states[1]
+  for _, p in ipairs(all_props) do
+    -- 优先用初始状态的值；若初始状态没有该属性，回退到第一个出现该属性的状态
+    local field_name = nil
+    if state_fields[init_state] and state_fields[init_state][p.name] then
+      field_name = state_fields[init_state][p.name].name
+    else
+      for _, s in ipairs(reg.states) do
+        if state_fields[s][p.name] then
+          field_name = state_fields[s][p.name].name
+          break
+        end
       end
+    end
+    if field_name then
+      table.insert(lines, ("  self.current_%s = vis.%s"):format(p.name, field_name))
+    end
+  end
+  table.insert(lines, "end")
+
+  -- ===== 每个属性的 state-取值 helper =====
+  -- 用作内部的 if-else 选择器
+  for _, p in ipairs(all_props) do
+    local fn = ("%s_get_%s"):format(ctx, p.name)
+    table.insert(lines, ("local function %s(vis: *%s, s: %s): %s"):format(
+      fn, type_name, st, p.type))
+    -- 默认回退到第一个有此属性的状态
+    local default_field = nil
+    for _, s in ipairs(reg.states) do
+      if state_fields[s][p.name] then
+        default_field = state_fields[s][p.name].name
+        break
+      end
+    end
+    -- 为非默认状态生成 if 分支
+    for _, s in ipairs(reg.states) do
+      if state_fields[s][p.name] and s ~= reg.states[1] then
+        table.insert(lines, ("  if s == %s.%s then return vis.%s end"):format(
+          st, cap(s), state_fields[s][p.name].name))
+      end
+    end
+    -- 默认（第一个状态）
+    local first_state = reg.states[1]
+    local first_state_field = state_fields[first_state] and state_fields[first_state][p.name]
+    if first_state_field then
+      table.insert(lines, ("  return vis.%s"):format(first_state_field.name))
+    elseif default_field then
+      table.insert(lines, ("  return vis.%s"):format(default_field))
+    else
+      -- 不应到达此分支；写一个零值返回让编译通过
+      if p.type == "Color" then
+        table.insert(lines, "  return Color{}")
+      elseif p.type == "Vec2" then
+        table.insert(lines, "  return Vec2{}")
+      else
+        table.insert(lines, "  return 0.0")
+      end
+    end
+    table.insert(lines, "end")
+  end
+
+  -- ===== update(mx, my, is_btn_down, dt) =====
+  table.insert(lines, ("function %s:update(mx: float32, my: float32, is_btn_down: boolean, dt: float32): void"):format(ctx))
+  if has_hover then
+    table.insert(lines, "  self.hover:update(mx, my, self.visual.pos.x, self.visual.pos.y, self.visual.size.x, self.visual.size.y)")
+  end
+  if has_click then
+    table.insert(lines, "  self.click:update(&self.hover, is_btn_down)")
+  end
+
+  -- 状态优先级：pressed > hovered > 第一个状态
+  -- 自动检测注解中存在的状态名
+  local has_state = {}
+  for _, s in ipairs(reg.states) do has_state[s] = true end
+  local default_state = reg.states[1]
+
+  if has_click and has_state["pressed"] then
+    table.insert(lines, ("  if self.click.is_pressed then"))
+    table.insert(lines, ("    self.sm:transition_to(%s.Pressed)"):format(st))
+    if has_hover and has_state["hovered"] then
+      table.insert(lines, ("  elseif self.hover.is_hovered then"))
+      table.insert(lines, ("    self.sm:transition_to(%s.Hovered)"):format(st))
+    end
+    table.insert(lines, ("  else"))
+    table.insert(lines, ("    self.sm:transition_to(%s.%s)"):format(st, cap(default_state)))
+    table.insert(lines, ("  end"))
+  elseif has_hover and has_state["hovered"] then
+    table.insert(lines, ("  if self.hover.is_hovered then"))
+    table.insert(lines, ("    self.sm:transition_to(%s.Hovered)"):format(st))
+    table.insert(lines, ("  else"))
+    table.insert(lines, ("    self.sm:transition_to(%s.%s)"):format(st, cap(default_state)))
+    table.insert(lines, ("  end"))
+  end
+
+  table.insert(lines, "  self.sm:update(dt)")
+  table.insert(lines, "  local t = self.sm:get_t()")
+
+  for _, p in ipairs(all_props) do
+    local lerp = LERP_FN_MAP[p.type]
+    if lerp then
+      local fn = ("%s_get_%s"):format(ctx, p.name)
+      table.insert(lines, ("  self.current_%s = %s(%s(&self.visual, self.sm.current), %s(&self.visual, self.sm.target), t)"):format(
+        p.name, lerp, fn, fn))
     end
   end
 
-  total = total + 8 -- viewport: vec2<f32>
-  return total
+  table.insert(lines, "end")
+
+  -- ===== to_uniforms(vw, vh) =====
+  -- Phase 1 仍复用 Phase 0 的 NebulaRectUniforms 布局（手写 padding）；
+  -- Phase 2 将自动化 padding。
+  table.insert(lines, ("function %s:to_uniforms(vw: float32, vh: float32): NebulaRectUniforms"):format(ctx))
+  table.insert(lines,  "  return NebulaRectUniforms{")
+  table.insert(lines,  "    pos          = self.visual.pos,")
+  table.insert(lines,  "    size         = self.visual.size,")
+  table.insert(lines,  "    radius       = self.visual.radius,")
+  table.insert(lines,  "    _pad0 = 0.0, _pad1 = 0.0, _pad2 = 0.0,")
+  -- 已知的属性；若不存在则用 visual 字段或零值兜底
+  local has_prop = {}
+  for _, p in ipairs(all_props) do has_prop[p.name] = true end
+
+  if has_prop["bg_color"] then
+    table.insert(lines, "    bg_color     = self.current_bg_color,")
+  else
+    table.insert(lines, "    bg_color     = Color{r=0.0,g=0.0,b=0.0,a=1.0},")
+  end
+  if has_prop["border_color"] then
+    table.insert(lines, "    border_color = self.current_border_color,")
+  else
+    table.insert(lines, "    border_color = Color{r=0.0,g=0.0,b=0.0,a=0.0},")
+  end
+  if has_prop["border_width"] then
+    table.insert(lines, "    border_width = self.current_border_width,")
+  else
+    table.insert(lines, "    border_width = 0.0,")
+  end
+  table.insert(lines,  "    _pad3 = 0.0, _pad4 = 0.0, _pad5 = 0.0,")
+  table.insert(lines,  "    viewport     = Vec2{ x = vw, y = vh },")
+  table.insert(lines,  "    _pad6 = 0.0, _pad7 = 0.0,")
+  table.insert(lines,  "  }")
+  table.insert(lines,  "end")
+
+  return table.concat(lines, "\n")
+end
+
+-- 获取派生名称的基名：
+--   "ButtonVisual" -> "Button"（派生 ButtonState / ButtonStateMachine / ButtonContext）
+--   "Foo"          -> "Foo"（派生 FooState / FooStateMachine / FooContext）
+local function derive_base_name(type_name)
+  if type_name:sub(-#"Visual") == "Visual" then
+    return type_name:sub(1, #type_name - #"Visual")
+  end
+  return type_name
+end
+
+-- ---- 主入口：派生并 inject 到调用点 ----
+function nebula_derive(type_name)
+  local reg = nebula_registry[type_name]
+  assert(reg, "nebula_derive: type '" .. type_name .. "' must be annotated first via nebula_annotate")
+
+  local _, state_fields = nebula_parse_shape(type_name)
+  local all_props = collect_all_props(reg, state_fields)
+  local base = derive_base_name(type_name)
+
+  local parts = {
+    gen_state_enum(base, reg),
+    gen_state_machine(base, reg),
+    gen_context_for(type_name, base, reg, state_fields, all_props),
+  }
+  local source = table.concat(parts, "\n\n")
+
+  -- 编译期日志，便于排查
+  print(("[derive] %s: emit State + StateMachine + Context (%d props, %d transitions)"):format(
+    type_name, #all_props, #reg.transitions))
+
+  -- 解析整段 Nelua 源码，逐条注入到调用点
+  local block_ast = aster.parse(source, "<nebula_derive:" .. type_name .. ">")
+  for _, stat in ipairs(block_ast) do
+    inject_statement(stat)
+  end
 end
 
 ]]
 
 -- =============================================================================
 -- 数学工具函数（运行时，完全内联）
--- 使用 global 以便其他模块（如 button_demo）可以直接调用
 -- =============================================================================
 global function lerp_f32(a: float32, b: float32, t: float32): float32
   return a + (b - a) * t
@@ -215,14 +517,12 @@ global function lerp_vec2(a: Vec2, b: Vec2, t: float32): Vec2
   }
 end
 
--- ease_out 缓动函数（二次方）
 global function ease_out(t: float32): float32
   if t <= 0.0 then return 0.0 end
   if t >= 1.0 then return 1.0 end
   return 1.0 - (1.0 - t) * (1.0 - t)
 end
 
--- ease_in 缓动函数（二次方）
 global function ease_in(t: float32): float32
   if t <= 0.0 then return 0.0 end
   if t >= 1.0 then return 1.0 end
