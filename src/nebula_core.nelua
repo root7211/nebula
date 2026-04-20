@@ -636,7 +636,7 @@ end
 -- ---- 生成 Context 记录 + 方法 ----
 -- visual_type_name: 原始视觉规格名（如 "ButtonVisual"）——用于字段类型引用
 -- base:             派生基名（如 "Button"）——用于生成 Context/SM/State 名称
-local function gen_context_for(visual_type_name, base, reg, state_fields, all_props)
+local function gen_context_for(visual_type_name, base, reg, state_fields, all_props, base_fields)
   local type_name = visual_type_name  -- 保持下文代码语义：*字段类型*仍指原规格
   local ctx = base .. "Context"
   local sm  = base .. "StateMachine"
@@ -775,13 +775,22 @@ local function gen_context_for(visual_type_name, base, reg, state_fields, all_pr
   -- ===== to_uniforms(vw, vh) =====
   -- Phase 1 仍复用 Phase 0 的 NebulaRectUniforms 布局（手写 padding）；
   -- Phase 2 将自动化 padding。
+  -- 检测 base_fields 中是否存在 radius
+  local has_base = {}
+  for _, f in ipairs(base_fields) do has_base[f.name] = true end
+
   table.insert(lines, ("function %s:to_uniforms(vw: float32, vh: float32): NebulaRectUniforms"):format(ctx))
   table.insert(lines,  "  return NebulaRectUniforms{")
   table.insert(lines,  "    pos          = self.visual.pos,")
   table.insert(lines,  "    size         = self.visual.size,")
-  table.insert(lines,  "    radius       = self.visual.radius,")
+  -- radius：仅当 Visual 中存在 radius 字段时从 visual 取值，否则填 0
+  if has_base["radius"] then
+    table.insert(lines, "    radius       = self.visual.radius,")
+  else
+    table.insert(lines, "    radius       = 0.0,")
+  end
   table.insert(lines,  "    _pad0 = 0.0, _pad1 = 0.0, _pad2 = 0.0,")
-  -- 已知的属性；若不存在则用 visual 字段或零值兜底
+  -- 已知的动画属性；若不存在则用零值兜底
   local has_prop = {}
   for _, p in ipairs(all_props) do has_prop[p.name] = true end
 
@@ -824,14 +833,14 @@ function nebula_derive(type_name)
   local reg = nebula_registry[type_name]
   assert(reg, "nebula_derive: type '" .. type_name .. "' must be annotated first via nebula_annotate")
 
-  local _, state_fields = nebula_parse_shape(type_name)
+  local base_fields, state_fields = nebula_parse_shape(type_name)
   local all_props = collect_all_props(reg, state_fields)
   local base = derive_base_name(type_name)
 
   local parts = {
     gen_state_enum(base, reg),
     gen_state_machine(base, reg),
-    gen_context_for(type_name, base, reg, state_fields, all_props),
+    gen_context_for(type_name, base, reg, state_fields, all_props, base_fields),
   }
   local source = table.concat(parts, "\n\n")
 
