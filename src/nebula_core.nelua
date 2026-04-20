@@ -641,9 +641,11 @@ end
 -- ---- 生成 Context 记录 + 方法 ----
 -- visual_type_name: 原始视觉规格名（如 "ButtonVisual"）——用于字段类型引用
 -- base:             派生基名（如 "Button"）——用于生成 Context/SM/State 名称
-local function gen_context_for(visual_type_name, base, reg, state_fields, all_props, base_fields, opts)
-  opts = opts or {}
-  local emit_to_uniforms = (opts.emit_to_uniforms ~= false)  -- 默认 true，Phase 2.3.3 传 false
+--
+-- Phase 2.3.4 清理：原先的 opts.emit_to_uniforms 参数已移除。
+-- to_uniforms 完全由 nebula_gen_to_uniforms_typed 生成强类型版本，
+-- 不再需要 gen_context_for 此处再重复生成硬编码分支。
+local function gen_context_for(visual_type_name, base, reg, state_fields, all_props, base_fields)
   local type_name = visual_type_name  -- 保持下文代码语义：*字段类型*仍指原规格
   local ctx = base .. "Context"
   local sm  = base .. "StateMachine"
@@ -779,55 +781,8 @@ local function gen_context_for(visual_type_name, base, reg, state_fields, all_pr
 
   table.insert(lines, "end")
 
-  -- ===== to_uniforms(vw, vh) =====
-  -- Phase 2.3.3：如果 emit_to_uniforms=false（由 nebula_derive 传入），直接跳过
-  -- 下方对 NebulaRectUniforms 的硬编码，改由 pipeline_factory 生成强类型版本。
-  if not emit_to_uniforms then
-    return table.concat(lines, "\n")
-  end
-
-  -- Phase 1 仍复用 Phase 0 的 NebulaRectUniforms 布局（手写 padding）；
-  -- Phase 2 将自动化 padding。
-  -- 检测 base_fields 中是否存在 radius
-  local has_base = {}
-  for _, f in ipairs(base_fields) do has_base[f.name] = true end
-
-  table.insert(lines, ("function %s:to_uniforms(vw: float32, vh: float32): NebulaRectUniforms"):format(ctx))
-  table.insert(lines,  "  return NebulaRectUniforms{")
-  table.insert(lines,  "    pos          = self.visual.pos,")
-  table.insert(lines,  "    size         = self.visual.size,")
-  -- radius：仅当 Visual 中存在 radius 字段时从 visual 取值，否则填 0
-  if has_base["radius"] then
-    table.insert(lines, "    radius       = self.visual.radius,")
-  else
-    table.insert(lines, "    radius       = 0.0,")
-  end
-  table.insert(lines,  "    _pad0 = 0.0, _pad1 = 0.0, _pad2 = 0.0,")
-  -- 已知的动画属性；若不存在则用零值兜底
-  local has_prop = {}
-  for _, p in ipairs(all_props) do has_prop[p.name] = true end
-
-  if has_prop["bg_color"] then
-    table.insert(lines, "    bg_color     = self.current_bg_color,")
-  else
-    table.insert(lines, "    bg_color     = Color{r=0.0,g=0.0,b=0.0,a=1.0},")
-  end
-  if has_prop["border_color"] then
-    table.insert(lines, "    border_color = self.current_border_color,")
-  else
-    table.insert(lines, "    border_color = Color{r=0.0,g=0.0,b=0.0,a=0.0},")
-  end
-  if has_prop["border_width"] then
-    table.insert(lines, "    border_width = self.current_border_width,")
-  else
-    table.insert(lines, "    border_width = 0.0,")
-  end
-  table.insert(lines,  "    _pad3 = 0.0, _pad4 = 0.0, _pad5 = 0.0,")
-  table.insert(lines,  "    viewport     = Vec2{ x = vw, y = vh },")
-  table.insert(lines,  "    _pad6 = 0.0, _pad7 = 0.0,")
-  table.insert(lines,  "  }")
-  table.insert(lines,  "end")
-
+  -- Phase 2.3.4 清理：to_uniforms 完全由 nebula_gen_to_uniforms_typed 生成，
+  -- 返回强类型 <T>Uniforms。原先的 NebulaRectUniforms 硬编码分支已删除。
   return table.concat(lines, "\n")
 end
 
@@ -875,11 +830,11 @@ function nebula_derive(type_name)
     has_border   = feats.has_border,
   })
 
-  -- 生成 <T>State / StateMachine / Context〈不含 to_uniforms〉
+  -- 生成 <T>State / StateMachine / Context〈to_uniforms 由 pipeline_factory 单独生成〉
   local parts = {
     gen_state_enum(base, reg),
     gen_state_machine(base, reg),
-    gen_context_for(type_name, base, reg, state_fields, all_props, base_fields, { emit_to_uniforms = false }),
+    gen_context_for(type_name, base, reg, state_fields, all_props, base_fields),
   }
 
   -- Phase 2.3.3: 生成强类型 to_uniforms 和 <T>Pipeline
