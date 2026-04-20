@@ -1,0 +1,57 @@
+-- =============================================================================
+-- app.nelua
+-- Nebula GUI Compiler — Phase 2.4
+--
+-- 统一输入收集层（Unified Input Collection Layer）
+--
+-- 提供 nebula_collect_input()，在每帧主循环开头调用，将 GLFW 的原始事件
+-- 映射到 NebulaInputState 结构。调用方只需维护一个 NebulaInputState 局部变量，并在
+-- 每帧开头调用此函数即可；不再需要手动查询 glfwGetMouseButton / glfwGetCursorPos。
+--
+-- 用法：
+--   local input: NebulaInputState
+--   while glfwWindowShouldClose(window) == 0 do
+--     glfwPollEvents()
+--     nebula_collect_input(window, &input, dt)
+--     -- 之后直接把 &input 传给各组件的 process_input()
+--   end
+-- =============================================================================
+
+## cinclude "<stdio.h>"
+
+require "nebula_core"
+require "glfw_bindings"
+
+-- =============================================================================
+-- nebula_collect_input(window, input, dt)
+--
+-- 参数：
+--   window : GLFWwindow*  — 当前窗口句柄
+--   input  : *NebulaInputState  — 输出：本帧的输入快照（原地更新）
+--   dt     : float32      — 本帧时长（秒），保留供后续手势检测扩展使用
+--
+-- 行为：
+--   · 读取鼠标坐标（glfwGetCursorPos）
+--   · 读取左键当前状态（glfwGetMouseButton）
+--   · 推导 mouse_left_pressed（本帧新按下）和 mouse_left_released（本帧新释放）
+--   · 不修改 focused_id：焦点由 process_input() 内部管理
+-- =============================================================================
+global function nebula_collect_input(
+  window:  GLFWwindow,
+  input:   *NebulaInputState,
+  dt:      float32
+): void
+  -- 鼠标坐标
+  local mx_f64: float64 = 0.0
+  local my_f64: float64 = 0.0
+  glfwGetCursorPos(window, &mx_f64, &my_f64)
+  input.mouse_x = (@float32)(mx_f64)
+  input.mouse_y = (@float32)(my_f64)
+
+  -- 左键状态：推导上升沿与下降沿
+  local prev_down = input.mouse_left_down
+  local cur_down  = (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
+  input.mouse_left_down     = cur_down
+  input.mouse_left_pressed  = (cur_down and not prev_down)   -- 本帧新按下
+  input.mouse_left_released = (not cur_down and prev_down)   -- 本帧新释放
+end

@@ -1,17 +1,13 @@
 -- =============================================================================
 -- login_demo.nelua
--- Nebula GUI Compiler — Phase 1 Login Demo
+-- Nebula GUI Compiler — Phase 2.4 Login Demo
 --
--- Phase 1 升级：
---   · 全部三种组件（Card / Input / Button）的 State + StateMachine + Context
---     由 nebula_derive 在编译期自动生成，开发者不再写一行样板代码。
---   · Input 组件展示派生器对"非标准状态拓扑"（含 focused）的支持，
---     focus 优先级由 demo 在调用 update 后通过额外的 transition_to 覆盖
---     （Phase 1 派生器默认仅识别 hovered/pressed；focused 留给 Phase 1.1 扩展）。
---
--- 注意：login_demo 在 Phase 0 时存在多管线渲染待修复问题。Phase 1 重点是验证
--- 派生器的正确性与编译可行性，多管线渲染的运行时显示问题作为 Phase 0 遗留 issue
--- 单独跟踪，不在本次 Phase 1 验收范围。
+-- Phase 2.4 升级：
+--   · 全部三种组件（Card / Input / Button）的交互逻辑由 nebula_derive 自动生成
+--   · update() 签名改为 (input: *NebulaInputState, dt: float32)
+--   · Input 组件的 focused 状态通过 focusable 原语 + component_id 自动管理
+--   · 不再需要手写 focused_input_id / click.just_clicked 焦点切换代码
+--   · 输入收集统一由 nebula_collect_input() 完成
 -- =============================================================================
 
 ## cinclude "<stdio.h>"
@@ -21,6 +17,7 @@ require "glfw_bindings"
 require "wgpu_bindings"
 require "primitives"
 require "renderer"
+require "app"
 
 global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
 
@@ -46,6 +43,7 @@ nebula_annotate("CardVisual", { states={"default"}, primitives={}, transitions={
 ## nebula_derive("CardVisual")
 
 -- ---- 输入框：default + hovered + focused ----
+-- Phase 2.4: 声明 focusable 原语 + component_id，焦点管理由派生器自动处理
 global InputVisual = @record{
   pos:    Vec2,
   size:   Vec2,
@@ -63,10 +61,12 @@ global InputVisual = @record{
   focused_border_color: Color,
   focused_border_width: float32,
 }
+
+-- 输入框：focusable 原语，component_id 在运行时赋值
 ##[[
 nebula_annotate("InputVisual", {
   states     = {"default", "hovered", "focused"},
-  primitives = {"hoverable", "clickable"},
+  primitives = {"hoverable", "clickable", "focusable"},
   transitions = {
     {from="default", to="hovered", tween="ease_out", duration=0.12},
     {from="hovered", to="default", tween="ease_out", duration=0.12},
@@ -111,11 +111,6 @@ nebula_annotate("ButtonVisual", {
 ## nebula_derive("ButtonVisual")
 
 -- =============================================================================
--- 全局聚焦管理（Phase 1 演示用，Phase 1.1 派生器将吸收此模式）
--- =============================================================================
-global focused_input_id: int32 = 0
-
--- =============================================================================
 -- 主程序
 -- =============================================================================
 local function main(): int32
@@ -123,13 +118,13 @@ local function main(): int32
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
 
-  local window = glfwCreateWindow(WIN_W, WIN_H, "Nebula Phase 1 — Login Demo", nilptr, nilptr)
+  local window = glfwCreateWindow(WIN_W, WIN_H, "Nebula Phase 2.4 — Login Demo", nilptr, nilptr)
   if window == nilptr then printf("glfw: window creation failed\n") return 1 end
 
   local renderer: NebulaRenderer
   if not renderer:init(window, WIN_W, WIN_H) then return 1 end
 
-  -- Phase 2.3.3: 四个组件各自拥有独立派生的管线（符合验收标准）
+  -- 四个组件各自拥有独立派生的管线
   local pipe_card:     CardPipeline
   local pipe_email:    InputPipeline
   local pipe_password: InputPipeline
@@ -150,7 +145,7 @@ local function main(): int32
     default_border_width = 1.0,
   })
 
-  -- Email 输入框
+  -- Email 输入框（component_id = 1）
   local email_input: InputContext
   email_input:init(InputVisual{
     pos    = Vec2{ x = 252.0, y = 196.0 },
@@ -166,8 +161,9 @@ local function main(): int32
     focused_border_color = Color{ r=0.35, g=0.60, b=1.00, a=1.0 },
     focused_border_width = 2.0,
   })
+  email_input.component_id = 1
 
-  -- Password 输入框
+  -- Password 输入框（component_id = 2）
   local password_input: InputContext
   password_input:init(InputVisual{
     pos    = Vec2{ x = 252.0, y = 264.0 },
@@ -183,6 +179,7 @@ local function main(): int32
     focused_border_color = Color{ r=0.35, g=0.60, b=1.00, a=1.0 },
     focused_border_width = 2.0,
   })
+  password_input.component_id = 2
 
   -- 登录按钮
   local login_btn: ButtonContext
@@ -201,6 +198,8 @@ local function main(): int32
     pressed_border_width = 2.0,
   })
 
+  -- Phase 2.4: 统一输入状态
+  local input: NebulaInputState
   local prev_time = glfwGetTime()
 
   while glfwWindowShouldClose(window) == 0 do
@@ -209,27 +208,15 @@ local function main(): int32
     local dt  = (@float32)(now - prev_time)
     prev_time = now
 
-    local mx_f64: float64 = 0.0
-    local my_f64: float64 = 0.0
-    glfwGetCursorPos(window, (@*float64)(&mx_f64), (@*float64)(&my_f64))
-    local mx = (@float32)(mx_f64)
-    local my = (@float32)(my_f64)
-    local is_btn_down = (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
+    -- Phase 2.4: 一行收集输入
+    nebula_collect_input(window, &input, dt)
 
-    -- Card 是静态组件，update 仍可调用（派生器为无原语规格生成的 update 是空体）
-    card:update(mx, my, is_btn_down, dt)
-    email_input:update(mx, my, is_btn_down, dt)
-    password_input:update(mx, my, is_btn_down, dt)
-    login_btn:update(mx, my, is_btn_down, dt)
-
-    -- focus 管理：点击后追加 transition_to(InputState.Focused)
-    if email_input.click.just_clicked    then focused_input_id = 1 end
-    if password_input.click.just_clicked then focused_input_id = 2 end
-    if is_btn_down and not email_input.hover.is_hovered and not password_input.hover.is_hovered then
-      focused_input_id = 0
-    end
-    if focused_input_id == 1 then email_input.sm:transition_to(InputState.Focused)    end
-    if focused_input_id == 2 then password_input.sm:transition_to(InputState.Focused) end
+    -- Phase 2.4: 所有组件统一调用 update，交互逻辑全部自动处理
+    -- 不再需要手写 focused_input_id / click.just_clicked 焦点切换代码
+    card:update(&input, dt)
+    email_input:update(&input, dt)
+    password_input:update(&input, dt)
+    login_btn:update(&input, dt)
 
     -- 渲染
     local surface_tex: WGPUSurfaceTexture

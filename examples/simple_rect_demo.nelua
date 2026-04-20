@@ -1,6 +1,6 @@
 -- =============================================================================
 -- simple_rect_demo.nelua
--- Nebula GUI Compiler — Phase 2.2 边界验证 Demo
+-- Nebula GUI Compiler — Phase 2.4 边界验证 Demo
 --
 -- 验证目标：
 --   · 着色器组合器在"最小字段集"下能正确生成精简的 WGSL
@@ -8,8 +8,9 @@
 --   · 无 border 字段 → 不注入 border_alpha 计算
 --   · 仅有 bg_color  → 纯填充着色器
 --
--- 本 Demo 同时验证 nebula_derive 对"极简 Visual"的兼容性：
---   仅 default + hovered 两态，仅 hoverable 原语，无 clickable。
+-- Phase 2.4 升级：
+--   · update() 签名改为 (input: *NebulaInputState, dt: float32)
+--   · 碰撞检测由 hit_test / process_input 自动处理
 -- =============================================================================
 
 ## cinclude "<stdio.h>"
@@ -19,6 +20,7 @@ require "glfw_bindings"
 require "wgpu_bindings"
 require "primitives"
 require "renderer"
+require "app"
 
 global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
 
@@ -72,7 +74,7 @@ local function main(): int32
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
 
-  local window = glfwCreateWindow(WIN_W, WIN_H, "Nebula Phase 2.2 - Simple Rect Demo", nilptr, nilptr)
+  local window = glfwCreateWindow(WIN_W, WIN_H, "Nebula Phase 2.4 - Simple Rect Demo", nilptr, nilptr)
   if window == nilptr then
     printf("glfw: window creation failed\n")
     return 1
@@ -81,7 +83,6 @@ local function main(): int32
   local renderer: NebulaRenderer
   if not renderer:init(window, WIN_W, WIN_H) then return 1 end
 
-  -- Phase 2.3.3: 使用派生的专属管线
   local rect_pipeline: SimpleRectPipeline
   if not rect_pipeline:init(&renderer) then return 1 end
 
@@ -96,6 +97,7 @@ local function main(): int32
   local rect: SimpleRectContext
   rect:init(rect_vis)
 
+  local input: NebulaInputState
   local prev_time = glfwGetTime()
 
   while glfwWindowShouldClose(window) == 0 do
@@ -105,14 +107,9 @@ local function main(): int32
     local dt  = (@float32)(now - prev_time)
     prev_time = now
 
-    local mx_f64: float64 = 0.0
-    local my_f64: float64 = 0.0
-    glfwGetCursorPos(window, (@*float64)(&mx_f64), (@*float64)(&my_f64))
-    local mx = (@float32)(mx_f64)
-    local my = (@float32)(my_f64)
-    local is_btn_down = (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
-
-    rect:update(mx, my, is_btn_down, dt)
+    -- Phase 2.4: 统一输入收集 + 自动交互处理
+    nebula_collect_input(window, &input, dt)
+    rect:update(&input, dt)
 
     -- Surface 渲染
     local surface_tex: WGPUSurfaceTexture

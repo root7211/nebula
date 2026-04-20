@@ -1,13 +1,16 @@
 -- =============================================================================
 -- nebula_core.nelua
--- Nebula GUI Compiler — Phase 1
+-- Nebula GUI Compiler — Phase 2.4
 --
 -- 编译期推导引擎：
---   · 类型系统（Vec2 / Vec4 / Color）
+--   · 类型系统（Vec2 / Vec4 / Color / NebulaInputState）
 --   · 注解注册表（nebula_annotate）
 --   · WGSL Uniform 生成器、Uniform 字节大小计算（保留 Phase 0 API）
---   · ★ Phase 1 新增：nebula_derive(type_name) —— 自动生成 State 枚举、
---     StateMachine 记录与 Context 记录，开发者无需再手写样板代码
+--   · Phase 1：nebula_derive(type_name) —— 自动生成 State 枚举、StateMachine、Context
+--   · Phase 2.1：nebula_gen_uniform_layout —— std140 自动对齐
+--   · Phase 2.2：nebula_gen_wgsl_shader —— 着色器按字段自动组合
+--   · Phase 2.3：nebula_gen_pipeline_source —— <T>Pipeline 专属自动派生
+--   · ★ Phase 2.4 新增：NebulaInputState + interaction_factory —— 交互原语自动派生
 --
 -- 所有 ## / ##[[ ]] 块中的代码在编译期由 Lua 执行；运行时不存在任何派生开销。
 -- =============================================================================
@@ -18,6 +21,22 @@
 global Vec2  = @record{ x: float32, y: float32 }
 global Vec4  = @record{ x: float32, y: float32, z: float32, w: float32 }
 global Color = @record{ r: float32, g: float32, b: float32, a: float32 }
+
+-- =============================================================================
+-- ★ Phase 2.4: 统一输入状态（Unified Input State）
+--
+-- 封装单帧内的鼠标位置、按键状态和焦点 ID。
+-- 由 app.nelua 的 nebula_collect_input() 在每帧开头填充。
+-- 交互原语派生的 process_input() 方法接收指向此结构的指针。
+-- =============================================================================
+global NebulaInputState = @record{
+  mouse_x:            float32,   -- 当前帧鼠标 X 坐标（像素）
+  mouse_y:            float32,   -- 当前帧鼠标 Y 坐标（像素）
+  mouse_left_down:    boolean,   -- 左键当前是否按下（持续状态）
+  mouse_left_pressed: boolean,   -- 左键本帧是否刚刚按下（上升沿）
+  mouse_left_released:boolean,   -- 左键本帧是否刚刚释放（下降沿）
+  focused_id:         uint32,    -- 当前获得焦点的组件 ID；0 表示无焦点
+}
 
 -- =============================================================================
 -- 编译期推导引擎（Compile-Time Derivation Engine）
@@ -52,9 +71,10 @@ local LERP_FN_MAP = {
 -- ===== 注解注册函数 =====
 function nebula_annotate(type_name, spec)
   nebula_registry[type_name] = {
-    states      = spec.states     or {"default"},
-    primitives  = spec.primitives or {},
-    transitions = spec.transitions or {},
+    states       = spec.states       or {"default"},
+    primitives   = spec.primitives   or {},
+    transitions  = spec.transitions  or {},
+    component_id = spec.component_id or 0,  -- Phase 2.4: focusable 原语的组件 ID
   }
 end
 
@@ -424,6 +444,11 @@ local pipeline_factory_mod = require "derive.pipeline_factory"
 assert(pipeline_factory_mod == "nebula_pipeline_factory_v0.1",
   "nebula: failed to load derive/pipeline_factory.lua")
 
+-- ★ Phase 2.4: 加载交互原语工厂模块
+local interaction_factory_mod = require "derive.interaction_factory"
+assert(interaction_factory_mod == "nebula_interaction_factory_v0.1",
+  "nebula: failed to load derive/interaction_factory.lua")
+
 -- 从 Visual 字段集合中检测着色器特性
 local function detect_shader_features(base_fields, all_props)
   local has_radius   = false
@@ -652,6 +677,7 @@ local function gen_context_for(visual_type_name, base, reg, state_fields, all_pr
   local st  = base .. "State"
   local has_hover = has_prim(reg, "hoverable")
   local has_click = has_prim(reg, "clickable")
+  local has_focus = has_prim(reg, "focusable")
 
   local lines = {}
 
@@ -661,6 +687,8 @@ local function gen_context_for(visual_type_name, base, reg, state_fields, all_pr
   table.insert(lines, ("  sm:     %s,"):format(sm))
   if has_hover then table.insert(lines, "  hover:  HoverableState,") end
   if has_click then table.insert(lines, "  click:  ClickableState,") end
+  -- Phase 2.4: focusable 组件需要运行时 component_id 来区分同类型的不同实例
+  if has_focus then table.insert(lines, "  component_id: uint32,") end
   for _, p in ipairs(all_props) do
     table.insert(lines, ("  current_%s: %s,"):format(p.name, p.type))
   end
@@ -734,39 +762,22 @@ local function gen_context_for(visual_type_name, base, reg, state_fields, all_pr
     table.insert(lines, "end")
   end
 
-  -- ===== update(mx, my, is_btn_down, dt) =====
-  table.insert(lines, ("function %s:update(mx: float32, my: float32, is_btn_down: boolean, dt: float32): void"):format(ctx))
-  if has_hover then
-    table.insert(lines, "  self.hover:update(mx, my, self.visual.pos.x, self.visual.pos.y, self.visual.size.x, self.visual.size.y)")
-  end
-  if has_click then
-    table.insert(lines, "  self.click:update(&self.hover, is_btn_down)")
-  end
+  -- Phase 2.3.4 清理：to_uniforms 完全由 nebula_gen_to_uniforms_typed 生成，
+  -- 返回强类型 <T>Uniforms。原先的 NebulaRectUniforms 硬编码分支已删除。
+  -- Phase 2.4: update() 方法已移出，由 gen_update_for() 单独生成，
+  -- 确保在 hit_test / process_input 声明之后再注入。
+  return table.concat(lines, "\n")
+end
 
-  -- 状态优先级：pressed > hovered > 第一个状态
-  -- 自动检测注解中存在的状态名
-  local has_state = {}
-  for _, s in ipairs(reg.states) do has_state[s] = true end
-  local default_state = reg.states[1]
+-- ---- 单独生成 <T>Context:update()，必须在 hit_test / process_input 之后注入 ----
+-- Phase 2.4: update() 调用 self:process_input()，Nelua 要求被调方法已声明。
+local function gen_update_for(base, reg, all_props)
+  local ctx = base .. "Context"
+  local lines = {}
 
-  if has_click and has_state["pressed"] then
-    table.insert(lines, ("  if self.click.is_pressed then"))
-    table.insert(lines, ("    self.sm:transition_to(%s.Pressed)"):format(st))
-    if has_hover and has_state["hovered"] then
-      table.insert(lines, ("  elseif self.hover.is_hovered then"))
-      table.insert(lines, ("    self.sm:transition_to(%s.Hovered)"):format(st))
-    end
-    table.insert(lines, ("  else"))
-    table.insert(lines, ("    self.sm:transition_to(%s.%s)"):format(st, cap(default_state)))
-    table.insert(lines, ("  end"))
-  elseif has_hover and has_state["hovered"] then
-    table.insert(lines, ("  if self.hover.is_hovered then"))
-    table.insert(lines, ("    self.sm:transition_to(%s.Hovered)"):format(st))
-    table.insert(lines, ("  else"))
-    table.insert(lines, ("    self.sm:transition_to(%s.%s)"):format(st, cap(default_state)))
-    table.insert(lines, ("  end"))
-  end
-
+  table.insert(lines, ("-- [update] %s:update (Phase 2.4: delegates to process_input)"):format(ctx))
+  table.insert(lines, ("function %s:update(input: *NebulaInputState, dt: float32): void"):format(ctx))
+  table.insert(lines, "  self:process_input(input)")
   table.insert(lines, "  self.sm:update(dt)")
   table.insert(lines, "  local t = self.sm:get_t()")
 
@@ -780,9 +791,6 @@ local function gen_context_for(visual_type_name, base, reg, state_fields, all_pr
   end
 
   table.insert(lines, "end")
-
-  -- Phase 2.3.4 清理：to_uniforms 完全由 nebula_gen_to_uniforms_typed 生成，
-  -- 返回强类型 <T>Uniforms。原先的 NebulaRectUniforms 硬编码分支已删除。
   return table.concat(lines, "\n")
 end
 
@@ -830,11 +838,33 @@ function nebula_derive(type_name)
     has_border   = feats.has_border,
   })
 
-  -- 生成 <T>State / StateMachine / Context〈to_uniforms 由 pipeline_factory 单独生成〉
+  -- Phase 2.4: 先生成 hit_test 和 process_input，必须在 Context:update() 之前注入
+  -- （Nelua 要求方法在调用前已声明）
+  local interaction_spec = {
+    base         = base,
+    state_type   = base .. "State",
+    primitives   = reg.primitives or {},
+    states       = reg.states,
+    component_id = reg.component_id or 0,
+  }
+  local hit_test_src      = nebula_gen_hit_test(interaction_spec)
+  local process_input_src = nebula_gen_process_input(interaction_spec)
+
+  -- 生成 <T>State / StateMachine / Context record+helpers / hit_test / process_input / update
+  -- 顺序关键：
+  --   1. gen_state_enum       — 状态枚举
+  --   2. gen_state_machine    — 状态机
+  --   3. gen_context_for      — Context record + init + state helpers（不含 update）
+  --   4. hit_test_src         — 必须在 Context 定义后
+  --   5. process_input_src    — 必须在 hit_test 后
+  --   6. gen_update_for       — 必须在 process_input 后，因为内部调用 process_input
   local parts = {
     gen_state_enum(base, reg),
     gen_state_machine(base, reg),
     gen_context_for(type_name, base, reg, state_fields, all_props, base_fields),
+    hit_test_src,
+    process_input_src,
+    gen_update_for(base, reg, all_props),
   }
 
   -- Phase 2.3.3: 生成强类型 to_uniforms 和 <T>Pipeline
@@ -854,9 +884,10 @@ function nebula_derive(type_name)
   local source = table.concat(parts, "\n\n")
 
   -- 编译期日志：验收标准要求的格式
-  print(("[derive] %s: emit State + StateMachine + Context + Uniforms + Shader + Pipeline (%d props, %d transitions, %dB uniforms, features=[%s])"):format(
+  print(("[derive] %s: emit State + StateMachine + Context + Uniforms + Shader + Pipeline + Interaction (%d props, %d transitions, %dB uniforms, features=[%s], primitives=[%s])"):format(
     type_name, #all_props, #reg.transitions, layout.total_size,
-    table.concat(shader_result.features, ", ")))
+    table.concat(shader_result.features, ", "),
+    table.concat(reg.primitives or {}, ", ")))
 
   -- 先单独注入 <T>Uniforms（由 nebula_emit_uniform_record 使用与刚才相同的 layout 生成）
   local rec_ast = aster.parse(layout.nelua_record_source,

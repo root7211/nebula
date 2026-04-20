@@ -1,15 +1,14 @@
 -- =============================================================================
 -- button_demo.nelua
--- Nebula GUI Compiler — Phase 1 Demo
+-- Nebula GUI Compiler — Phase 2.4 Demo
 --
--- "形即"范式 Phase 1：开发者只写形状声明 + 注解，框架自动派生一切。
+-- "形即"范式 Phase 2.4：开发者只写形状声明 + 注解，框架自动派生一切。
 --
--- 与 Phase 0 相比，本文件不再手写：
---   · ButtonState 枚举
---   · ButtonStateMachine 记录及其 init/transition_to/update/get_t
---   · ButtonContext 记录及其 init/update/to_uniforms
---
--- 全部由 ## nebula_derive("ButtonVisual") 一行在编译期生成。
+-- Phase 2.4 升级：
+--   · update() 签名改为 (input: *NebulaInputState, dt: float32)
+--   · 碰撞检测与状态转换由 nebula_derive 自动生成的 hit_test / process_input 处理
+--   · 输入收集统一由 nebula_collect_input() 完成
+--   · 不再手写 glfwGetCursorPos / glfwGetMouseButton 调用
 -- =============================================================================
 
 ## cinclude "<stdio.h>"
@@ -19,6 +18,7 @@ require "glfw_bindings"
 require "wgpu_bindings"
 require "primitives"
 require "renderer"
+require "app"
 
 global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
 
@@ -69,7 +69,7 @@ print("===========================")
 ]]
 
 -- =============================================================================
--- 第三步：★ Phase 1 核心：一行代码自动派生 State + StateMachine + Context
+-- 第三步：★ 一行代码自动派生 State + StateMachine + Context + Pipeline + Interaction
 -- =============================================================================
 ## nebula_derive("ButtonVisual")
 
@@ -87,7 +87,7 @@ local function main(): int32
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
 
-  local window = glfwCreateWindow(WIN_W, WIN_H, "Nebula Phase 1 - Button Demo", nilptr, nilptr)
+  local window = glfwCreateWindow(WIN_W, WIN_H, "Nebula Phase 2.4 - Button Demo", nilptr, nilptr)
   if window == nilptr then
     printf("glfw: window creation failed\n")
     return 1
@@ -96,11 +96,9 @@ local function main(): int32
   local renderer: NebulaRenderer
   if not renderer:init(window, WIN_W, WIN_H) then return 1 end
 
-  -- Phase 2.3.3: 使用派生的专属管线（ButtonPipeline 由 nebula_derive 生成）
   local button_pipeline: ButtonPipeline
   if not button_pipeline:init(&renderer) then return 1 end
 
-  -- 开发者只填写视觉规格，其余全部由派生器在编译期生成
   local button_vis = ButtonVisual{
     pos    = Vec2{ x = 300.0, y = 250.0 },
     size   = Vec2{ x = 200.0, y = 60.0 },
@@ -119,9 +117,11 @@ local function main(): int32
     pressed_border_width = 2.5,
   }
 
-  local button: ButtonContext   -- ★ 类型由 nebula_derive 编译期生成
+  local button: ButtonContext
   button:init(button_vis)
 
+  -- Phase 2.4: 统一输入状态，每帧由 nebula_collect_input 填充
+  local input: NebulaInputState
   local prev_time = glfwGetTime()
 
   while glfwWindowShouldClose(window) == 0 do
@@ -131,14 +131,11 @@ local function main(): int32
     local dt  = (@float32)(now - prev_time)
     prev_time = now
 
-    local mx_f64: float64 = 0.0
-    local my_f64: float64 = 0.0
-    glfwGetCursorPos(window, (@*float64)(&mx_f64), (@*float64)(&my_f64))
-    local mx = (@float32)(mx_f64)
-    local my = (@float32)(my_f64)
-    local is_btn_down = (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
+    -- Phase 2.4: 一行收集输入，不再手写 glfwGetCursorPos / glfwGetMouseButton
+    nebula_collect_input(window, &input, dt)
 
-    button:update(mx, my, is_btn_down, dt)
+    -- Phase 2.4: update 内部自动调用 process_input 处理碰撞与状态转换
+    button:update(&input, dt)
 
     -- Surface 渲染
     local surface_tex: WGPUSurfaceTexture
