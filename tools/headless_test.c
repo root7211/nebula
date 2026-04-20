@@ -3,6 +3,9 @@
  * 无头离屏渲染验证程序
  * 直接用 wgpu-native C API 渲染圆角矩形到离屏纹理，
  * 读回像素并保存为 PPM 图像，验证 Uniform 布局和 WGSL 着色器是否正确。
+ *
+ * Phase 2.2: 结构体和着色器源码现在从 fixture_shader.h 导入，
+ * 该头文件由 tools/export_shader_fixture.nelua 在编译期自动生成。
  */
 
 #include <stdio.h>
@@ -11,31 +14,10 @@
 #include <stdint.h>
 #include "webgpu/webgpu.h"
 #include "webgpu/wgpu.h"
+#include "fixture_shader.h"
 
 #define WIDTH  800
 #define HEIGHT 600
-
-/* ── 与 Nelua NebulaRectUniforms 完全一致的 C 结构体 ── */
-typedef struct { float x, y; }       Vec2;
-typedef struct { float r, g, b, a; } Color;
-
-typedef struct {
-    Vec2    pos;           /* offset  0 */
-    Vec2    size;          /* offset  8 */
-    float   radius;        /* offset 16 */
-    float   _pad0;         /* offset 20 */
-    float   _pad1;         /* offset 24 */
-    float   _pad2;         /* offset 28 */
-    Color   bg_color;      /* offset 32 */
-    Color   border_color;  /* offset 48 */
-    float   border_width;  /* offset 64 */
-    float   _pad3;         /* offset 68 */
-    float   _pad4;         /* offset 72 */
-    float   _pad5;         /* offset 76 */
-    Vec2    viewport;      /* offset 80 */
-    float   _pad6;         /* offset 88 */
-    float   _pad7;         /* offset 92 */
-} NebulaRectUniforms;      /* total: 96 bytes */
 
 /* ── 全局回调结果 ── */
 static WGPUAdapter  g_adapter = NULL;
@@ -66,65 +48,8 @@ static void on_map(WGPUMapAsyncStatus status, WGPUStringView msg,
     else fprintf(stderr, "map failed: %d\n", status);
 }
 
-/* ── WGSL 着色器（与 renderer.nelua 完全一致） ── */
-static const char* WGSL = 
-"// 布局与 C 端 NebulaRectUniforms 严格对应（共 96 字节）\n"
-"struct Uniforms {\n"
-"  pos:          vec2<f32>,   // offset  0\n"
-"  size:         vec2<f32>,   // offset  8\n"
-"  radius:       f32,         // offset 16\n"
-"  _pad0:        f32,         // offset 20\n"
-"  _pad1:        f32,         // offset 24\n"
-"  _pad2:        f32,         // offset 28\n"
-"  bg_color:     vec4<f32>,   // offset 32  (16B 对齐)\n"
-"  border_color: vec4<f32>,   // offset 48\n"
-"  border_width: f32,         // offset 64\n"
-"  _pad3:        f32,         // offset 68\n"
-"  _pad4:        f32,         // offset 72\n"
-"  _pad5:        f32,         // offset 76\n"
-"  viewport:     vec2<f32>,   // offset 80  (8B 对齐)\n"
-"  _pad6:        f32,         // offset 88\n"
-"  _pad7:        f32,         // offset 92\n"
-"}\n"
-"\n"
-"@group(0) @binding(0) var<uniform> u: Uniforms;\n"
-"\n"
-"struct VertexOutput {\n"
-"  @builtin(position) clip_position: vec4<f32>,\n"
-"}\n"
-"\n"
-"@vertex\n"
-"fn vs_main(@builtin(vertex_index) vi: u32) -> VertexOutput {\n"
-"  var pos = array<vec2<f32>, 3>(\n"
-"    vec2<f32>(-1.0, -1.0),\n"
-"    vec2<f32>( 3.0, -1.0),\n"
-"    vec2<f32>(-1.0,  3.0),\n"
-"  );\n"
-"  var out: VertexOutput;\n"
-"  out.clip_position = vec4<f32>(pos[vi], 0.0, 1.0);\n"
-"  return out;\n"
-"}\n"
-"\n"
-"fn sdf_rounded_rect(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {\n"
-"  let q = abs(p) - b + vec2<f32>(r, r);\n"
-"  return length(max(q, vec2<f32>(0.0, 0.0))) + min(max(q.x, q.y), 0.0) - r;\n"
-"}\n"
-"\n"
-"@fragment\n"
-"fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {\n"
-"  let pixel = in.clip_position.xy;\n"
-"  let center = u.pos + u.size * 0.5;\n"
-"  let p = pixel - center;\n"
-"  let half_size = u.size * 0.5;\n"
-"  let dist = sdf_rounded_rect(p, half_size, u.radius);\n"
-"  let aa = 1.0;\n"
-"  let fill_alpha   = 1.0 - smoothstep(-aa, aa, dist);\n"
-"  let border_alpha = (1.0 - smoothstep(-aa, aa, dist + u.border_width)) - fill_alpha;\n"
-"  var color = u.bg_color * fill_alpha;\n"
-"  color = color + u.border_color * border_alpha;\n"
-"  if color.a < 0.001 { discard; }\n"
-"  return color;\n"
-"}\n";
+/* ── WGSL 着色器（Phase 2.2: 从 fixture_shader.h 导入） ── */
+static const char* WGSL = FIXTURE_WGSL;
 
 /* ── 保存 PPM ── */
 static void save_ppm(const char* path, const uint8_t* data,

@@ -400,6 +400,126 @@ function nebula_emit_uniform_record_from_fields(spec)
 end
 
 -- =============================================================================
+-- ★ Phase 2.2: nebula_gen_wgsl_shader(type_name, opts)
+--
+-- 根据 Visual 规格中声明的字段，自动拼装出对应的 WGSL 着色器代码。
+-- 本阶段仅支持单 Pass 渲染（radius / fill / border 条件组合）。
+-- 多 Pass（如 Shadow）留给 Phase 2.3。
+--
+-- 返回值：
+--   {
+--     source          = "完整 WGSL 源码",
+--     features        = {"radius", "fill", "border"},
+--     required_passes = {"main"},
+--   }
+-- =============================================================================
+
+-- 加载着色器组合器模块
+local shader_compose_mod = require "derive.shader_compose"
+assert(shader_compose_mod == "nebula_shader_compose_v0.1",
+  "nebula: failed to load derive/shader_compose.lua")
+
+-- 从 Visual 字段集合中检测着色器特性
+local function detect_shader_features(base_fields, all_props)
+  local has_radius   = false
+  local has_bg_color = false
+  local has_border_color = false
+  local has_border_width = false
+
+  -- 扫描 base_fields（如 radius）
+  for _, f in ipairs(base_fields) do
+    if f.name == "radius" then has_radius = true end
+  end
+
+  -- 扫描 all_props（动画属性，如 bg_color / border_color / border_width）
+  for _, p in ipairs(all_props) do
+    if p.name == "bg_color"     then has_bg_color     = true end
+    if p.name == "border_color" then has_border_color = true end
+    if p.name == "border_width" then has_border_width = true end
+  end
+
+  return {
+    has_radius   = has_radius,
+    has_bg_color = has_bg_color,
+    has_border   = has_border_color and has_border_width,
+  }
+end
+
+-- 公开 API：根据注解类型名生成完整的 WGSL 着色器
+function nebula_gen_wgsl_shader(type_name, opts)
+  opts = opts or {}
+  local base_fields, state_fields = nebula_parse_shape(type_name)
+  local reg = nebula_registry[type_name]
+  local all_props = collect_all_props(reg, state_fields)
+
+  -- 获取 uniform 布局（复用 Phase 2.1 的 API）
+  local layout_opts = {
+    record_name      = opts.record_name      or nil,
+    wgsl_struct_name = opts.wgsl_struct_name  or "Uniforms",
+    force_viewport_align = opts.force_viewport_align or nil,
+  }
+  local layout = nebula_gen_uniform_layout(type_name, layout_opts)
+
+  -- 检测着色器特性
+  local features = detect_shader_features(base_fields, all_props)
+
+  -- 调用着色器组合器
+  local result = nebula_compose_shader({
+    wgsl_struct  = layout.wgsl_struct,
+    struct_name  = layout.wgsl_struct_name,
+    has_radius   = features.has_radius,
+    has_bg_color = features.has_bg_color,
+    has_border   = features.has_border,
+  })
+
+  -- 编译期日志
+  print(("[shader] %s: features=[%s]  (%dB uniforms, %d pass)"):format(
+    type_name,
+    table.concat(result.features, ", "),
+    layout.total_size,
+    #result.required_passes))
+
+  return result
+end
+
+-- 便捷 API：根据手动指定的字段列表生成着色器（供 renderer.nelua 使用）
+function nebula_gen_wgsl_shader_from_fields(spec)
+  assert(spec.fields, "nebula_gen_wgsl_shader_from_fields: fields required")
+
+  -- 生成 uniform 布局
+  local layout = nebula_gen_uniform_layout_from_fields(spec)
+
+  -- 从字段列表中检测特性
+  local has_radius   = false
+  local has_bg_color = false
+  local has_border_color = false
+  local has_border_width = false
+  for _, f in ipairs(spec.fields) do
+    if f.name == "radius"       then has_radius       = true end
+    if f.name == "bg_color"     then has_bg_color     = true end
+    if f.name == "border_color" then has_border_color = true end
+    if f.name == "border_width" then has_border_width = true end
+  end
+
+  local result = nebula_compose_shader({
+    wgsl_struct  = layout.wgsl_struct,
+    struct_name  = layout.wgsl_struct_name,
+    has_radius   = has_radius,
+    has_bg_color = has_bg_color,
+    has_border   = has_border_color and has_border_width,
+  })
+
+  -- 编译期日志
+  print(("[shader] %s: features=[%s]  (%dB uniforms, %d pass)"):format(
+    spec.record_name or "<anonymous>",
+    table.concat(result.features, ", "),
+    layout.total_size,
+    #result.required_passes))
+
+  return result, layout
+end
+
+-- =============================================================================
 -- ★ Phase 1 核心：nebula_derive(type_name)
 --
 -- 在调用点编译期生成：
@@ -516,7 +636,7 @@ end
 -- ---- 生成 Context 记录 + 方法 ----
 -- visual_type_name: 原始视觉规格名（如 "ButtonVisual"）——用于字段类型引用
 -- base:             派生基名（如 "Button"）——用于生成 Context/SM/State 名称
-local function gen_context_for(visual_type_name, base, reg, state_fields, all_props)
+local function gen_context_for(visual_type_name, base, reg, state_fields, all_props, base_fields)
   local type_name = visual_type_name  -- 保持下文代码语义：*字段类型*仍指原规格
   local ctx = base .. "Context"
   local sm  = base .. "StateMachine"
@@ -655,13 +775,22 @@ local function gen_context_for(visual_type_name, base, reg, state_fields, all_pr
   -- ===== to_uniforms(vw, vh) =====
   -- Phase 1 仍复用 Phase 0 的 NebulaRectUniforms 布局（手写 padding）；
   -- Phase 2 将自动化 padding。
+  -- 检测 base_fields 中是否存在 radius
+  local has_base = {}
+  for _, f in ipairs(base_fields) do has_base[f.name] = true end
+
   table.insert(lines, ("function %s:to_uniforms(vw: float32, vh: float32): NebulaRectUniforms"):format(ctx))
   table.insert(lines,  "  return NebulaRectUniforms{")
   table.insert(lines,  "    pos          = self.visual.pos,")
   table.insert(lines,  "    size         = self.visual.size,")
-  table.insert(lines,  "    radius       = self.visual.radius,")
+  -- radius：仅当 Visual 中存在 radius 字段时从 visual 取值，否则填 0
+  if has_base["radius"] then
+    table.insert(lines, "    radius       = self.visual.radius,")
+  else
+    table.insert(lines, "    radius       = 0.0,")
+  end
   table.insert(lines,  "    _pad0 = 0.0, _pad1 = 0.0, _pad2 = 0.0,")
-  -- 已知的属性；若不存在则用 visual 字段或零值兜底
+  -- 已知的动画属性；若不存在则用零值兜底
   local has_prop = {}
   for _, p in ipairs(all_props) do has_prop[p.name] = true end
 
@@ -704,14 +833,14 @@ function nebula_derive(type_name)
   local reg = nebula_registry[type_name]
   assert(reg, "nebula_derive: type '" .. type_name .. "' must be annotated first via nebula_annotate")
 
-  local _, state_fields = nebula_parse_shape(type_name)
+  local base_fields, state_fields = nebula_parse_shape(type_name)
   local all_props = collect_all_props(reg, state_fields)
   local base = derive_base_name(type_name)
 
   local parts = {
     gen_state_enum(base, reg),
     gen_state_machine(base, reg),
-    gen_context_for(type_name, base, reg, state_fields, all_props),
+    gen_context_for(type_name, base, reg, state_fields, all_props, base_fields),
   }
   local source = table.concat(parts, "\n\n")
 
