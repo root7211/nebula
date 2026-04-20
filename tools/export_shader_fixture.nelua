@@ -67,7 +67,7 @@ table.insert(h_lines, "")
 
 -- WGSL 着色器源码（转为 C 字符串）
 table.insert(h_lines, "/* ── WGSL 着色器源码（由着色器组合器自动生成） ── */")
-table.insert(h_lines, "static const char* FIXTURE_WGSL = ")
+table.insert(h_lines, "static const char FIXTURE_WGSL[] = ")
 
 -- 将 WGSL 源码按行拆分，每行转为 C 字符串字面量
 local wgsl_source = shader_result.source

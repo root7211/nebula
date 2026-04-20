@@ -49,7 +49,7 @@ static void on_map(WGPUMapAsyncStatus status, WGPUStringView msg,
 }
 
 /* ── WGSL 着色器（Phase 2.2: 从 fixture_shader.h 导入） ── */
-static const char* WGSL = FIXTURE_WGSL;
+#define WGSL FIXTURE_WGSL
 
 /* ── 保存 PPM ── */
 static void save_ppm(const char* path, const uint8_t* data,

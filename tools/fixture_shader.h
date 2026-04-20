@@ -29,7 +29,7 @@ typedef struct {
 } NebulaRectUniforms;      /* total: 96 bytes */
 
 /* ── WGSL 着色器源码（由着色器组合器自动生成） ── */
-static const char* FIXTURE_WGSL =
+static const char FIXTURE_WGSL[] =
 "struct Uniforms {\n"
 "  pos:         vec2<f32>,  // offset 0\n"
 "  size:        vec2<f32>,  // offset 8\n"
