@@ -265,60 +265,24 @@ end
 
 -- =============================================================================
 -- WGSL 着色器源码
--- 全屏三角形 + 圆角矩形 SDF + Alpha 混合 + 抗锯齿
+-- Phase 2.2: 由 nebula_gen_wgsl_shader_from_fields 按字段自动组合
+-- 替代原有的硬编码 RECT_SHADER_WGSL 字符串
 -- =============================================================================
-local RECT_SHADER_WGSL = #[rect_layout.wgsl_struct]# .. [[
-
-@group(0) @binding(0) var<uniform> u: Uniforms;
-
-struct VertexOutput {
-  @builtin(position) clip_position: vec4<f32>,
-}
-
-// 全屏三角形：3 个顶点覆盖整个 NDC 空间
-@vertex
-fn vs_main(@builtin(vertex_index) vi: u32) -> VertexOutput {
-  var pos = array<vec2<f32>, 3>(
-    vec2<f32>(-1.0, -1.0),
-    vec2<f32>( 3.0, -1.0),
-    vec2<f32>(-1.0,  3.0),
-  );
-  var out: VertexOutput;
-  out.clip_position = vec4<f32>(pos[vi], 0.0, 1.0);
-  return out;
-}
-
-// SDF：圆角矩形的有符号距离函数
-fn sdf_rounded_rect(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
-  let q = abs(p) - b + vec2<f32>(r, r);
-  return length(max(q, vec2<f32>(0.0, 0.0))) + min(max(q.x, q.y), 0.0) - r;
-}
-
-@fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-  // @builtin(position).xy 直接提供像素坐标（y 向下，原点在左上角）
-  let pixel = in.clip_position.xy;
-  let center = u.pos + u.size * 0.5;
-  let p = pixel - center;
-  let half_size = u.size * 0.5;
-
-  let dist = sdf_rounded_rect(p, half_size, u.radius);
-
-  // 抗锯齿：在边界附近平滑过渡（1px 宽度）
-  let aa = 1.0;
-  let fill_alpha  = 1.0 - smoothstep(-aa, aa, dist);
-  let border_alpha = (1.0 - smoothstep(-aa, aa, dist + u.border_width)) - fill_alpha;
-
-  var color = u.bg_color * fill_alpha;
-  color = color + u.border_color * border_alpha;
-
-  if color.a < 0.001 {
-    discard;
-  }
-
-  return color;
-}
-]]
+## local rect_shader_result, _rect_shader_layout = nebula_gen_wgsl_shader_from_fields({
+##   record_name      = "NebulaRectUniforms",
+##   wgsl_struct_name = "Uniforms",
+##   fields = {
+##     {name="pos",          type="Vec2"},
+##     {name="size",         type="Vec2"},
+##     {name="radius",       type="float32"},
+##     {name="bg_color",     type="Color"},
+##     {name="border_color", type="Color"},
+##     {name="border_width", type="float32"},
+##   },
+##   append_viewport      = true,
+##   force_viewport_align = 16,
+## })
+local RECT_SHADER_WGSL = #[rect_shader_result.source]#
 
 -- =============================================================================
 -- NebulaRectPipeline：圆角矩形渲染管线

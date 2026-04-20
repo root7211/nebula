@@ -1,22 +1,19 @@
-# Nebula GUI Compiler — Phase 1
+# Nebula GUI Compiler — Phase 2.2
 
-> "形即（Shape-Is）"范式的编译期代码生成阶段：开发者只写**形状声明 + 注解**，框架在编译期自动派生 `State` 枚举、`StateMachine` 与 `Context` 全部样板代码。运行时仍然只是数据插值与一次 GPU 提交。
-
-Phase 1 在 Phase 0 的"编译期推导引擎可看到形状"基础上，进一步把 Phase 0 中需要在 demo 文件内手写的 **状态枚举 / 状态机记录与方法 / 运行时上下文** 全部下沉到 `nebula_derive()`，由 Lua 预处理器在编译期通过 `aster.parse + inject_statement` 直接注入到调用点。
+> "形即（Shape-Is）"范式的编译期代码生成阶段：开发者只写**形状声明 + 注解**，框架在编译期自动派生 `State` 枚举、`StateMachine`、`Context` 全部样板代码，并按字段自动组合 WGSL 着色器。运行时仍然只是数据插值与一次 GPU 提交。
 
 ---
 
-## 与 Phase 0 的对比
+## 各阶段演进
 
-| 项目 | Phase 0 | Phase 1 |
-|---|---|---|
-| 状态枚举 `<T>State` | 手写 | **`nebula_derive` 自动生成** |
-| 状态机 `<T>StateMachine` 记录 + 方法 | 手写 | **`nebula_derive` 自动生成** |
-| 上下文 `<T>Context` 记录 + `init` / `update` / `to_uniforms` | 手写 | **`nebula_derive` 自动生成** |
-| 状态间属性插值（`lerp_color` / `lerp_f32` / …） | 手写调用链 | **按字段类型自动派生调用** |
-| `nebula_annotate` / `nebula_gen_wgsl_uniform` | 已有 | 完全保留，向后兼容 |
-| Uniform std140 padding | 手写 `_pad` | 仍手写（**Phase 2 的目标**） |
-| 着色器 WGSL | 硬编码字符串 | 仍硬编码（**Phase 2 的目标**） |
+| 项目 | Phase 0 | Phase 1 | Phase 2.1 | Phase 2.2 |
+|---|---|---|---|---|
+| 状态枚举 `<T>State` | 手写 | **`nebula_derive` 自动生成** | 同左 | 同左 |
+| 状态机 `<T>StateMachine` | 手写 | **`nebula_derive` 自动生成** | 同左 | 同左 |
+| 上下文 `<T>Context` | 手写 | **`nebula_derive` 自动生成** | 同左 | 同左 |
+| 属性插值 | 手写调用链 | **按字段类型自动派生** | 同左 | 同左 |
+| Uniform std140 padding | 手写 `_pad` | 手写 `_pad` | **`nebula_gen_uniform_layout` 自动生成** | 同左 |
+| 着色器 WGSL | 硬编码字符串 | 硬编码字符串 | 硬编码（struct 部分自动） | **`nebula_gen_wgsl_shader` 按字段自动组合** |
 
 ---
 
@@ -25,25 +22,65 @@ Phase 1 在 Phase 0 的"编译期推导引擎可看到形状"基础上，进一�
 ```text
 nebula/
 ├── src/
-│   ├── nebula_core.nelua      # 编译期推导引擎 + ★ nebula_derive() 生成器
+│   ├── nebula_core.nelua      # 编译期推导引擎 + nebula_derive + nebula_gen_wgsl_shader
+│   ├── derive/
+│   │   └── shader_compose.lua # ★ Phase 2.2: WGSL 片段表 + 着色器组合器
 │   ├── wgpu_bindings.nelua    # wgpu-native v29.0.0.0 的 Nelua FFI 绑定
 │   ├── glfw_bindings.nelua    # GLFW 3 的 Nelua FFI 绑定
 │   ├── primitives.nelua       # 交互原语层（HoverableState、ClickableState）
-│   └── renderer.nelua         # WebGPU 渲染层（Phase 0 沿用）
+│   └── renderer.nelua         # WebGPU 渲染层（Phase 2.2: 着色器由引擎自动生成）
 ├── examples/
 │   ├── button_demo.nelua      # Phase 1 单组件 Demo（仅形状 + 注解 + derive）
-│   └── login_demo.nelua       # Phase 1 多组件 Demo（Card / Input / Button 全派生）
+│   ├── login_demo.nelua       # Phase 1 多组件 Demo（Card / Input / Button 全派生）
+│   ├── simple_rect_demo.nelua # ★ Phase 2.2: 边界验证 Demo（无 radius、无 border）
+│   └── uniform_layout_test.nelua  # Phase 2.1 布局验证
 ├── docs/
-│   └── DESIGN_PHASE1.md       # Phase 1 设计说明
+│   ├── DESIGN_PHASE1.md       # Phase 1 设计说明
+│   ├── PLAN_PHASE2.md         # Phase 2 总体开发计划
+│   └── PLAN_PHASE2_2.md       # Phase 2.2 开发计划
 ├── tools/
-│   └── headless_test.c        # 离屏渲染验证工具
-├── build.sh                   # 一键构建脚本（与 Phase 0 兼容）
+│   ├── headless_test.c        # 离屏渲染验证工具（Phase 2.2: 使用 fixture_shader.h）
+│   ├── fixture_shader.h       # ★ Phase 2.2: 自动生成的着色器 C 头文件
+│   └── export_shader_fixture.nelua  # ★ Phase 2.2: 着色器 Fixture 导出工具
+├── build.sh                   # 一键构建脚本
 └── README.md
 ```
 
 ---
 
-## Phase 1 的核心 API：`nebula_derive(type_name)`
+## Phase 2.2 核心 API：`nebula_gen_wgsl_shader(type_name)`
+
+Phase 2.2 新增了着色器按字段自动组合能力。着色器组合器根据 Visual 规格中声明的字段，自动选择并拼装 WGSL 片段：
+
+```lua
+-- 编译期调用
+local result = nebula_gen_wgsl_shader("ButtonVisual", {
+  wgsl_struct_name = "Uniforms",
+  force_viewport_align = 16,
+})
+-- result.source   = "完整 WGSL 着色器源码"
+-- result.features = {"radius", "fill", "border"}
+-- result.required_passes = {"main"}
+```
+
+**字段 → 着色器片段映射**：
+
+| Visual 字段 | 触发的着色器行为 |
+|---|---|
+| `radius: float32` | 注入 `sdf_rounded_rect` 圆角距离函数 |
+| 无 `radius` | 注入 `sdf_rect` 简单矩形距离函数 |
+| `bg_color: Color` | 注入填充颜色计算 |
+| `border_color` + `border_width` | 注入边框 alpha 计算与颜色叠加 |
+
+**编译期日志**输出形如：
+
+```text
+[shader] NebulaRectUniforms: features=[radius, fill, border]  (96B uniforms, 1 pass)
+```
+
+---
+
+## Phase 1 核心 API：`nebula_derive(type_name)`
 
 调用者只需要：
 
@@ -93,6 +130,8 @@ nebula_annotate("ButtonVisual", {
 | 注解注册 | `nebula_annotate(type_name, spec)` | 仅在编译期 Lua 表存活 |
 | 形状解析 | `nebula_parse_shape` 遍历 `T.value.fields` | 无运行时反射 |
 | 代码生成 | Lua 拼接 Nelua 源码 → `aster.parse` → 逐条 `inject_statement` | 注入产物等价于手写代码 |
+| Uniform 布局 | `nebula_gen_uniform_layout` 按 std140 规则自动对齐 | 编译期确定 |
+| 着色器组合 | `nebula_compose_shader` 按字段选择 WGSL 片段 | 编译期字符串拼接 |
 | 命名映射 | `<Visual>` 后缀剥离 → 派生 `<Base>State / <Base>StateMachine / <Base>Context` | 静态确定 |
 | 状态优先级 | `pressed > hovered > default` 自动展开为 if-else | 无虚分发 |
 | 属性插值 | `Color → lerp_color`、`float32 → lerp_f32`、`Vec2 → lerp_vec2` | 全部内联 |
@@ -120,8 +159,9 @@ rm wgpu-linux-x86_64-release.zip
 
 ```bash
 chmod +x build.sh
-./build.sh button_demo   # 单组件 Phase 1 Demo
-./build.sh login_demo    # 多组件 Phase 1 Demo
+./build.sh button_demo       # 单组件 Demo
+./build.sh login_demo        # 多组件 Demo
+./build.sh simple_rect_demo  # Phase 2.2 边界验证 Demo
 ```
 
 ### 运行
@@ -142,8 +182,15 @@ DISPLAY=:99 LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/button_demo
 
 ---
 
-## Phase 2 展望
+## Phase 2 进度
 
-- WGSL 着色器按字段自动组合（`radius` → SDF 圆角矩形分支、`shadow` → 高斯模糊 Pass）。
-- Uniform 内存布局完全自动化，删除手写 `_pad` 字段。
-- 原语自动派生（`hoverable` 直接从 `pos/size` 字段派生 AABB 测试代码）。
+- [x] **Phase 2.1** — Uniform std140 自动对齐（`nebula_gen_uniform_layout`）
+- [x] **Phase 2.2** — WGSL 着色器按字段组合（`nebula_gen_wgsl_shader`）
+- [ ] **Phase 2.3** — 渲染管线工厂自动派生 + 多 Pass + Shadow
+- [ ] **Phase 2.4** — 交互原语自动派生（碰撞检测内联）
+
+## Phase 3+ 展望
+
+- 多组件布局（`@layout` 宏 + Flexbox 编译期解算）。
+- 文本渲染管线（字形光栅化 / 图集 / Shaping）。
+- 动态列表与条件渲染（运行时对象池）。
