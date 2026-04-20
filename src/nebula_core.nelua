@@ -419,6 +419,11 @@ local shader_compose_mod = require "derive.shader_compose"
 assert(shader_compose_mod == "nebula_shader_compose_v0.1",
   "nebula: failed to load derive/shader_compose.lua")
 
+-- ★ Phase 2.3.2: 加载管线工厂模块
+local pipeline_factory_mod = require "derive.pipeline_factory"
+assert(pipeline_factory_mod == "nebula_pipeline_factory_v0.1",
+  "nebula: failed to load derive/pipeline_factory.lua")
+
 -- 从 Visual 字段集合中检测着色器特性
 local function detect_shader_features(base_fields, all_props)
   local has_radius   = false
@@ -636,7 +641,9 @@ end
 -- ---- 生成 Context 记录 + 方法 ----
 -- visual_type_name: 原始视觉规格名（如 "ButtonVisual"）——用于字段类型引用
 -- base:             派生基名（如 "Button"）——用于生成 Context/SM/State 名称
-local function gen_context_for(visual_type_name, base, reg, state_fields, all_props, base_fields)
+local function gen_context_for(visual_type_name, base, reg, state_fields, all_props, base_fields, opts)
+  opts = opts or {}
+  local emit_to_uniforms = (opts.emit_to_uniforms ~= false)  -- 默认 true，Phase 2.3.3 传 false
   local type_name = visual_type_name  -- 保持下文代码语义：*字段类型*仍指原规格
   local ctx = base .. "Context"
   local sm  = base .. "StateMachine"
@@ -773,6 +780,12 @@ local function gen_context_for(visual_type_name, base, reg, state_fields, all_pr
   table.insert(lines, "end")
 
   -- ===== to_uniforms(vw, vh) =====
+  -- Phase 2.3.3：如果 emit_to_uniforms=false（由 nebula_derive 传入），直接跳过
+  -- 下方对 NebulaRectUniforms 的硬编码，改由 pipeline_factory 生成强类型版本。
+  if not emit_to_uniforms then
+    return table.concat(lines, "\n")
+  end
+
   -- Phase 1 仍复用 Phase 0 的 NebulaRectUniforms 布局（手写 padding）；
   -- Phase 2 将自动化 padding。
   -- 检测 base_fields 中是否存在 radius
@@ -829,6 +842,13 @@ local function derive_base_name(type_name)
 end
 
 -- ---- 主入口：派生并 inject 到调用点 ----
+--
+-- Phase 2.3.3: 扩展 nebula_derive 在调用点额外发出：
+--   (1) <T>Uniforms          —— 紧凑 std140 record（无 force_viewport_align）
+--   (2) <T>Pipeline           —— 专属渲染管线，委托 nebula_pipeline_base_init
+--   (3) <T>Context:to_uniforms—— 强类型版本，返回 <T>Uniforms
+--
+-- 相关 WGSL 着色器在编译期由 nebula_compose_shader 按字段组合。
 function nebula_derive(type_name)
   local reg = nebula_registry[type_name]
   assert(reg, "nebula_derive: type '" .. type_name .. "' must be annotated first via nebula_annotate")
@@ -836,19 +856,61 @@ function nebula_derive(type_name)
   local base_fields, state_fields = nebula_parse_shape(type_name)
   local all_props = collect_all_props(reg, state_fields)
   local base = derive_base_name(type_name)
+  local uniforms_record = base .. "Uniforms"
 
+  -- Phase 2.3.3: 先生成紧凑 Uniform 布局作为着色器组合输入
+  local layout = nebula_gen_uniform_layout(type_name, {
+    record_name      = uniforms_record,
+    wgsl_struct_name = "Uniforms",
+    -- 不传 force_viewport_align，使用 std140 原生紧凑布局
+  })
+
+  -- 根据字段检测着色器特性
+  local feats = detect_shader_features(base_fields, all_props)
+  local shader_result = nebula_compose_shader({
+    wgsl_struct  = layout.wgsl_struct,
+    struct_name  = layout.wgsl_struct_name,
+    has_radius   = feats.has_radius,
+    has_bg_color = feats.has_bg_color,
+    has_border   = feats.has_border,
+  })
+
+  -- 生成 <T>State / StateMachine / Context〈不含 to_uniforms〉
   local parts = {
     gen_state_enum(base, reg),
     gen_state_machine(base, reg),
-    gen_context_for(type_name, base, reg, state_fields, all_props, base_fields),
+    gen_context_for(type_name, base, reg, state_fields, all_props, base_fields, { emit_to_uniforms = false }),
   }
+
+  -- Phase 2.3.3: 生成强类型 to_uniforms 和 <T>Pipeline
+  local pipeline_spec = {
+    base            = base,
+    visual_type     = type_name,
+    uniforms_record = uniforms_record,
+    wgsl_source     = shader_result.source,
+    uniform_size    = layout.total_size,
+    layout_fields   = layout.fields,
+    base_fields     = base_fields,
+    all_props       = all_props,
+  }
+  table.insert(parts, nebula_gen_to_uniforms_typed(pipeline_spec))
+  table.insert(parts, nebula_gen_pipeline_source(pipeline_spec))
+
   local source = table.concat(parts, "\n\n")
 
-  -- 编译期日志，便于排查
-  print(("[derive] %s: emit State + StateMachine + Context (%d props, %d transitions)"):format(
-    type_name, #all_props, #reg.transitions))
+  -- 编译期日志：验收标准要求的格式
+  print(("[derive] %s: emit State + StateMachine + Context + Uniforms + Shader + Pipeline (%d props, %d transitions, %dB uniforms, features=[%s])"):format(
+    type_name, #all_props, #reg.transitions, layout.total_size,
+    table.concat(shader_result.features, ", ")))
 
-  -- 解析整段 Nelua 源码，逐条注入到调用点
+  -- 先单独注入 <T>Uniforms（由 nebula_emit_uniform_record 使用与刚才相同的 layout 生成）
+  local rec_ast = aster.parse(layout.nelua_record_source,
+                              "<nebula_derive:" .. uniforms_record .. ">")
+  for _, stat in ipairs(rec_ast) do
+    inject_statement(stat)
+  end
+
+  -- 然后注入其余部分
   local block_ast = aster.parse(source, "<nebula_derive:" .. type_name .. ">")
   for _, stat in ipairs(block_ast) do
     inject_statement(stat)

@@ -81,7 +81,8 @@ local function main(): int32
   local renderer: NebulaRenderer
   if not renderer:init(window, WIN_W, WIN_H) then return 1 end
 
-  local rect_pipeline: NebulaRectPipeline
+  -- Phase 2.3.3: 使用派生的专属管线
+  local rect_pipeline: SimpleRectPipeline
   if not rect_pipeline:init(&renderer) then return 1 end
 
   local rect_vis = SimpleRectVisual{

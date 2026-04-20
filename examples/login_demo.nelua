@@ -129,10 +129,11 @@ local function main(): int32
   local renderer: NebulaRenderer
   if not renderer:init(window, WIN_W, WIN_H) then return 1 end
 
-  local pipe_card:     NebulaRectPipeline
-  local pipe_email:    NebulaRectPipeline
-  local pipe_password: NebulaRectPipeline
-  local pipe_button:   NebulaRectPipeline
+  -- Phase 2.3.3: 四个组件各自拥有独立派生的管线（符合验收标准）
+  local pipe_card:     CardPipeline
+  local pipe_email:    InputPipeline
+  local pipe_password: InputPipeline
+  local pipe_button:   ButtonPipeline
   if not pipe_card:init(&renderer)     then return 1 end
   if not pipe_email:init(&renderer)    then return 1 end
   if not pipe_password:init(&renderer) then return 1 end

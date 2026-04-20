@@ -96,8 +96,9 @@ local function main(): int32
   local renderer: NebulaRenderer
   if not renderer:init(window, WIN_W, WIN_H) then return 1 end
 
-  local rect_pipeline: NebulaRectPipeline
-  if not rect_pipeline:init(&renderer) then return 1 end
+  -- Phase 2.3.3: 使用派生的专属管线（ButtonPipeline 由 nebula_derive 生成）
+  local button_pipeline: ButtonPipeline
+  if not button_pipeline:init(&renderer) then return 1 end
 
   -- 开发者只填写视觉规格，其余全部由派生器在编译期生成
   local button_vis = ButtonVisual{
@@ -163,7 +164,7 @@ local function main(): int32
     local view = wgpuTextureCreateView(surface_tex.texture, &view_desc)
 
     local u = button:to_uniforms(WIN_W, WIN_H)
-    rect_pipeline:update_uniforms(&renderer, &u)
+    button_pipeline:update_uniforms(&renderer, &u)
 
     local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, nilptr)
     local clear_color = WGPURenderPassColorAttachment{
@@ -185,7 +186,7 @@ local function main(): int32
       timestampWrites         = nilptr,
     }
     local pass = wgpuCommandEncoderBeginRenderPass(encoder, &pass_desc)
-    rect_pipeline:draw(pass)
+    button_pipeline:draw(pass)
     wgpuRenderPassEncoderEnd(pass)
     wgpuRenderPassEncoderRelease(pass)
 

@@ -4,20 +4,43 @@
  * 直接用 wgpu-native C API 渲染圆角矩形到离屏纹理，
  * 读回像素并保存为 PPM 图像，验证 Uniform 布局和 WGSL 着色器是否正确。
  *
- * Phase 2.2: 结构体和着色器源码现在从 fixture_shader.h 导入，
- * 该头文件由 tools/export_shader_fixture.nelua 在编译期自动生成。
+ * Phase 2.2: 结构体和着色器源码从 fixture_shader.h 导入，
+ *            该头文件由 tools/export_shader_fixture.nelua 在编译期自动生成。
+ *
+ * Phase 2.3.4: 改用 ButtonUniforms 紧凑 std140 布局（80 字节）。
+ *              添加 static_assert 验证所有关键字段偏移量。
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <stddef.h>   /* offsetof */
+#include <assert.h>   /* static_assert */
 #include "webgpu/webgpu.h"
 #include "webgpu/wgpu.h"
 #include "fixture_shader.h"
 
 #define WIDTH  800
 #define HEIGHT 600
+
+/* ── Phase 2.3.4: 编译期布局断言 ── */
+static_assert(sizeof(ButtonUniforms) == NEBULA_BUTTON_UNIFORMS_SIZE,
+    "ButtonUniforms size mismatch: expected 80 bytes (compact std140)");
+static_assert(offsetof(ButtonUniforms, pos)          == NEBULA_OFFSET_POS,
+    "ButtonUniforms.pos offset mismatch");
+static_assert(offsetof(ButtonUniforms, size)         == NEBULA_OFFSET_SIZE,
+    "ButtonUniforms.size offset mismatch");
+static_assert(offsetof(ButtonUniforms, radius)       == NEBULA_OFFSET_RADIUS,
+    "ButtonUniforms.radius offset mismatch");
+static_assert(offsetof(ButtonUniforms, bg_color)     == NEBULA_OFFSET_BG_COLOR,
+    "ButtonUniforms.bg_color offset mismatch");
+static_assert(offsetof(ButtonUniforms, border_color) == NEBULA_OFFSET_BORDER_COLOR,
+    "ButtonUniforms.border_color offset mismatch");
+static_assert(offsetof(ButtonUniforms, border_width) == NEBULA_OFFSET_BORDER_WIDTH,
+    "ButtonUniforms.border_width offset mismatch");
+static_assert(offsetof(ButtonUniforms, viewport)     == NEBULA_OFFSET_VIEWPORT,
+    "ButtonUniforms.viewport offset mismatch");
 
 /* ── 全局回调结果 ── */
 static WGPUAdapter  g_adapter = NULL;
@@ -48,8 +71,8 @@ static void on_map(WGPUMapAsyncStatus status, WGPUStringView msg,
     else fprintf(stderr, "map failed: %d\n", status);
 }
 
-/* ── WGSL 着色器（Phase 2.2: 从 fixture_shader.h 导入） ── */
-static const char* WGSL = FIXTURE_WGSL;
+/* ── WGSL 着色器（Phase 2.3.4: 从 fixture_shader.h 导入，80B 紧凑布局） ── */
+#define WGSL FIXTURE_WGSL
 
 /* ── 保存 PPM ── */
 static void save_ppm(const char* path, const uint8_t* data,
@@ -72,14 +95,23 @@ static void save_ppm(const char* path, const uint8_t* data,
 }
 
 int main(void) {
-    printf("sizeof(NebulaRectUniforms) = %zu (expected 96)\n",
-           sizeof(NebulaRectUniforms));
-    printf("offset bg_color    = %zu\n",
-           (size_t)&((NebulaRectUniforms*)0)->bg_color);
-    printf("offset border_color= %zu\n",
-           (size_t)&((NebulaRectUniforms*)0)->border_color);
-    printf("offset viewport    = %zu\n",
-           (size_t)&((NebulaRectUniforms*)0)->viewport);
+    /* Phase 2.3.4: 验证 80B 紧凑布局 */
+    printf("sizeof(ButtonUniforms) = %zu (expected %d)\n",
+           sizeof(ButtonUniforms), NEBULA_BUTTON_UNIFORMS_SIZE);
+    printf("offset pos          = %zu (expected %d)\n",
+           offsetof(ButtonUniforms, pos),          NEBULA_OFFSET_POS);
+    printf("offset size         = %zu (expected %d)\n",
+           offsetof(ButtonUniforms, size),         NEBULA_OFFSET_SIZE);
+    printf("offset radius       = %zu (expected %d)\n",
+           offsetof(ButtonUniforms, radius),       NEBULA_OFFSET_RADIUS);
+    printf("offset bg_color     = %zu (expected %d)\n",
+           offsetof(ButtonUniforms, bg_color),     NEBULA_OFFSET_BG_COLOR);
+    printf("offset border_color = %zu (expected %d)\n",
+           offsetof(ButtonUniforms, border_color), NEBULA_OFFSET_BORDER_COLOR);
+    printf("offset border_width = %zu (expected %d)\n",
+           offsetof(ButtonUniforms, border_width), NEBULA_OFFSET_BORDER_WIDTH);
+    printf("offset viewport     = %zu (expected %d)\n",
+           offsetof(ButtonUniforms, viewport),     NEBULA_OFFSET_VIEWPORT);
 
     /* ── 1. Instance ── */
     WGPUInstanceDescriptor inst_desc = {0};
@@ -154,18 +186,18 @@ int main(void) {
     WGPUTextureView offscreen_view = wgpuTextureCreateView(offscreen_tex, &view_desc);
     printf("offscreen texture OK\n");
 
-    /* ── 5. Uniform Buffer ── */
+    /* ── 5. Uniform Buffer（Phase 2.3.4: 使用 ButtonUniforms，80 字节） ── */
     WGPUBufferDescriptor ubuf_desc = {
         .nextInChain      = NULL,
         .label            = {.data = "uniforms", .length = 8},
         .usage            = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst,
-        .size             = sizeof(NebulaRectUniforms),
+        .size             = sizeof(ButtonUniforms),
         .mappedAtCreation = 0,
     };
     WGPUBuffer uniform_buf = wgpuDeviceCreateBuffer(g_device, &ubuf_desc);
 
     /* 填充 Uniform 数据（default 状态：深灰按钮，蓝色边框） */
-    NebulaRectUniforms u = {0};
+    ButtonUniforms u = {0};
     u.pos          = (Vec2){300.0f, 250.0f};
     u.size         = (Vec2){200.0f, 60.0f};
     u.radius       = 12.0f;
@@ -183,7 +215,7 @@ int main(void) {
         .buffer      = {
             .type            = WGPUBufferBindingType_Uniform,
             .hasDynamicOffset = 0,
-            .minBindingSize  = sizeof(NebulaRectUniforms),
+            .minBindingSize  = sizeof(ButtonUniforms),
         },
     };
     WGPUBindGroupLayoutDescriptor bgl_desc = {
@@ -198,7 +230,7 @@ int main(void) {
         .binding     = 0,
         .buffer      = uniform_buf,
         .offset      = 0,
-        .size        = sizeof(NebulaRectUniforms),
+        .size        = sizeof(ButtonUniforms),
     };
     WGPUBindGroupDescriptor bg_desc = {
         .nextInChain = NULL,
@@ -314,11 +346,7 @@ int main(void) {
     wgpuCommandBufferRelease(cmd);
     printf("render submitted\n");
 
-    /* ── 11. 用 wgpuDevicePoll 刷新并等待 GPU 完成（wgpu-native 扩展 API） ──
-     * wgpuDevicePoll(device, wait=true, wrappedSubmissionIndex=NULL)
-     * 这个 API 属于 wgpu-native 的扩展，不在标准 webgpu.h 中。
-     * 它会阻塞直到所有已提交的命令完成。
-     */
+    /* ── 11. 用 wgpuDevicePoll 刷新并等待 GPU 完成 ── */
     wgpuDevicePoll(g_device, 1, NULL);
     printf("GPU work done\n");
 
@@ -330,10 +358,8 @@ int main(void) {
         .userdata2 = NULL,
     };
     wgpuBufferMapAsync(readback_buf, WGPUMapMode_Read, 0, readback_size, map_cb);
-    /* 在 wgpuDevicePoll 后，回调应该已经就绪。再 poll 一次触发回调。 */
     wgpuDevicePoll(g_device, 0, NULL);
     if (!g_mapped) {
-        /* 如果还没有，再轮询一下 */
         int timeout = 200;
         while (!g_mapped && timeout-- > 0) {
             wgpuDevicePoll(g_device, 0, NULL);
@@ -343,7 +369,8 @@ int main(void) {
 
     const uint8_t* pixels = wgpuBufferGetMappedRange(readback_buf, 0, readback_size);
 
-    /* 验证：中心像素应该是按钮背景色（深灰 ~0.22） */
+    /* 验证：中心像素应该是按钮背景色（深灰 ~0.22）
+     * Phase 2.3.4: 使用 ButtonUniforms 80B 布局，渲染结果应与 Phase 2.2 完全一致 */
     uint32_t cx = WIDTH/2, cy = HEIGHT/2;
     const uint8_t* center = pixels + cy * bytes_per_row + cx * 4;
     printf("center pixel BGRA: %d %d %d %d\n", center[0], center[1], center[2], center[3]);
@@ -355,7 +382,7 @@ int main(void) {
     printf("expected ~(33, 33, 31, 255) for clearColor(0.12, 0.12, 0.13, 1.0)\n");
 
     /* 保存 PPM */
-    save_ppm("/tmp/nebula_render.ppm", pixels, WIDTH, HEIGHT, bytes_per_row);
+    save_ppm("/tmp/nebula_render_2_3_4.ppm", pixels, WIDTH, HEIGHT, bytes_per_row);
 
     wgpuBufferUnmap(readback_buf);
 
@@ -372,6 +399,6 @@ int main(void) {
     wgpuAdapterRelease(g_adapter);
     wgpuInstanceRelease(instance);
 
-    printf("headless test PASSED\n");
+    printf("headless test PASSED (Phase 2.3.4: ButtonUniforms 80B compact layout)\n");
     return 0;
 }
