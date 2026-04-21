@@ -461,7 +461,7 @@ global WGPUTextureDimension_2D <comptime> = (@WGPUTextureDimension)(0x00000002)
 
 -- ===== 纹理视图维度 =====
 global WGPUTextureViewDimension = @uint32
-global WGPUTextureViewDimension_2D <comptime> = (@WGPUTextureViewDimension)(0x00000005)
+global WGPUTextureViewDimension_2D <comptime> = (@WGPUTextureViewDimension)(0x00000002)
 
 -- ===== 纹理 Aspect =====
 global WGPUTextureAspect = @uint32

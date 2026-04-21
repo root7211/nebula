@@ -436,12 +436,12 @@ end
 
 -- 加载着色器组合器模块
 local shader_compose_mod = require "derive.shader_compose"
-assert(shader_compose_mod == "nebula_shader_compose_v0.2_phase2.5",
+assert(shader_compose_mod == "nebula_shader_compose_v0.2_phase2.5.1",
   "nebula: failed to load derive/shader_compose.lua")
 
 -- ★ Phase 2.3.2: 加载管线工厂模块
 local pipeline_factory_mod = require "derive.pipeline_factory"
-assert(pipeline_factory_mod == "nebula_pipeline_factory_v0.2_phase2.5",
+assert(pipeline_factory_mod == "nebula_pipeline_factory_v0.2_phase2.5.1",
   "nebula: failed to load derive/pipeline_factory.lua")
 
 -- ★ Phase 2.4: 加载交互原语工厂模块
@@ -900,6 +900,7 @@ function nebula_derive(type_name)
     shadow_mask_source  = shader_result.shadow_mask_source,
     blur_h_source       = shader_result.blur_h_source,
     blur_v_source       = shader_result.blur_v_source,
+    composite_source    = shader_result.composite_source,
   }
   table.insert(parts, nebula_gen_to_uniforms_typed(pipeline_spec))
   table.insert(parts, nebula_gen_pipeline_source(pipeline_spec))

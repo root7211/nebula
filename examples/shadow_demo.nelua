@@ -183,7 +183,7 @@ local function main(): int32
     local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, nilptr)
 
     -- Phase 2.5: 执行阴影的 3 个离屏 Pass（mask → blur_h → blur_v）
-    shadow_pipeline:draw_shadow(encoder, view, &renderer, button_vis.shadow_blur)
+    shadow_pipeline:draw_shadow(encoder, &renderer, button_vis.shadow_blur)
 
     -- Pass 4: Surface 主 Pass
     local clear_color = WGPURenderPassColorAttachment{
@@ -206,9 +206,8 @@ local function main(): int32
     }
     local pass = wgpuCommandEncoderBeginRenderPass(encoder, &pass_desc)
 
-    -- TODO Phase 2.5.next: 在此处先绘制模糊阴影纹理（tex_a），
-    -- 需要一个全屏纹理合成管线。当前版本先跳过合成步骤，
-    -- 仅绘制主组件以验证多 Pass 架构正确性。
+    -- Phase 2.5.1: 先合成模糊阴影，再绘制主组件本体
+    shadow_pipeline:draw_composite(pass)
     shadow_pipeline:draw(pass)
 
     wgpuRenderPassEncoderEnd(pass)

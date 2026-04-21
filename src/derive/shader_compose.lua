@@ -17,6 +17,7 @@
 --     shadow_mask_source,  -- 阴影遮罩 Pass WGSL（仅 has_shadow 时存在）
 --     blur_h_source,       -- 水平模糊 Pass WGSL（仅 has_shadow 时存在）
 --     blur_v_source,       -- 垂直模糊 Pass WGSL（仅 has_shadow 时存在）
+--     composite_source,    -- 最终阴影合成 Pass WGSL（仅 has_shadow 时存在）
 --   }
 --
 -- opts = {
@@ -275,6 +276,56 @@ end
 
 
 -- =============================================================================
+-- ★ Phase 2.5.1: 最终阴影合成 Pass 着色器
+--
+-- 从 blur_v 输出后的 tex_a 采样，并在 surface 主 Pass 中以标准 alpha
+-- 混合绘制出来。主组件本体仍由既有 main pipeline 负责绘制。
+-- =============================================================================
+local function gen_composite_shader(_opts)
+  return [[
+struct CompositeUniforms {
+  opacity: f32,
+  _pad0: f32,
+  _pad1: f32,
+  _pad2: f32,
+}
+
+@group(0) @binding(0) var<uniform> comp: CompositeUniforms;
+@group(0) @binding(1) var input_tex: texture_2d<f32>;
+@group(0) @binding(2) var input_sampler: sampler;
+
+struct VertexOutput {
+  @builtin(position) clip_position: vec4<f32>,
+}
+
+@vertex
+fn vs_main(@builtin(vertex_index) vi: u32) -> VertexOutput {
+  var pos = array<vec2<f32>, 3>(
+    vec2<f32>(-1.0, -1.0),
+    vec2<f32>( 3.0, -1.0),
+    vec2<f32>(-1.0,  3.0),
+  );
+  var out: VertexOutput;
+  out.clip_position = vec4<f32>(pos[vi], 0.0, 1.0);
+  return out;
+}
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+  let dims_u = textureDimensions(input_tex);
+  let dims = vec2<f32>(f32(dims_u.x), f32(dims_u.y));
+  let uv = in.clip_position.xy / dims;
+  let color = textureSample(input_tex, input_sampler, uv);
+  if color.a < 0.001 {
+    discard;
+  }
+  return vec4<f32>(color.rgb, color.a * comp.opacity);
+}
+]]
+end
+
+
+-- =============================================================================
 -- 公开 API：nebula_compose_shader(opts)
 -- =============================================================================
 function nebula_compose_shader(opts)
@@ -326,10 +377,11 @@ function nebula_compose_shader(opts)
   }
 
   if has_shadow then
-    result.required_passes    = {"shadow_mask", "blur_h", "blur_v", "main"}
+    result.required_passes    = {"shadow_mask", "blur_h", "blur_v", "composite", "main"}
     result.shadow_mask_source = gen_shadow_mask_shader(compose_opts)
     result.blur_h_source      = gen_blur_shader(compose_opts)
     result.blur_v_source      = gen_blur_shader(compose_opts)  -- 同一着色器，方向由 uniform 控制
+    result.composite_source   = gen_composite_shader(compose_opts)
   else
     result.required_passes = {"main"}
   end
@@ -338,4 +390,4 @@ function nebula_compose_shader(opts)
 end
 
 -- 返回模块标识，供 require 验证
-return "nebula_shader_compose_v0.2_phase2.5"
+return "nebula_shader_compose_v0.2_phase2.5.1"
