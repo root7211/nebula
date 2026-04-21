@@ -1,11 +1,11 @@
 -- =============================================================================
 -- shadow_demo.nelua
--- Nebula GUI Compiler — Phase 2.5 Demo
+-- Nebula GUI Compiler — Phase 2.5 主线 Demo
 --
 -- 展示多 Pass 渲染（Shadow / Blur）效果：
 --   · 组件声明 shadow_color / shadow_offset / shadow_blur 字段
 --   · nebula_derive 自动检测并生成 4-Pass 阴影管线
---   · 渲染循环中调用 draw_shadow() 编排多 Pass，再调用 draw() 绘制主组件
+--   · 渲染循环中先调用 draw_shadow() 编排离屏 Pass，再在 surface pass 中调用 draw_composite() 与 draw()
 --
 -- 架构：
 --   Pass 1: 阴影遮罩（组件 SDF 偏移后渲染到离屏纹理 A）

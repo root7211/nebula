@@ -1,10 +1,7 @@
-# Nebula GUI Compiler — Phase 2.5
-
-> "形即（Shape-Is）"范式的编译期代码生成阶段：开发者只写**形状声明 + 注解**，框架在编译期自动派生 `State` 枚举、`StateMachine`、`Context`、`hit_test`、`process_input` 全部样板代码，并按字段自动组合 WGSL 着色器。声明 `shadow_*` 字段即可触发多 Pass 阴影管线的自动生成。运行时仍然只是数据插值与一次 GPU 提交。
-
+# Nebula GUI Compiler — Phase 2.5 已完成，Phase 3.1 已合入
+> 当前仓库的**主线能力**已完成到 **Phase 2.5**：开发者只写**形状声明 + 注解**，框架即可在编译期自动派生 `State` 枚举、`StateMachine`、`Context`、`hit_test`、`process_input` 与多 Pass 阴影管线。与此同时，**Phase 3.1 的编译期静态布局系统也已合入仓库**，对应 `layout_engine.lua` 与 `layout_demo.nelua`。
 ---
-
-## 各阶段演进
+## 各阶段演进（主线到 Phase 2.5，布局子系统已进入 Phase 3.1）
 
 | 项目 | Phase 0 | Phase 1 | Phase 2.1 | Phase 2.2 | Phase 2.3 | Phase 2.4 | Phase 2.5 |
 |---|---|---|---|---|---|---|---|
@@ -28,21 +25,23 @@
 ```text
 nebula/
 ├── src/
-│   ├── nebula_core.nelua      # 编译期推导引擎 + nebula_derive + NebulaInputState
+│   ├── nebula_core.nelua      # 编译期推导引擎（主线到 Phase 2.5，并接入 Phase 3.1 布局模块）
 │   ├── app.nelua              # Phase 2.4: 统一输入收集层（nebula_collect_input）
 │   ├── derive/
 │   │   ├── shader_compose.lua     # Phase 2.5: WGSL 片段表 + 着色器组合器（含阴影/模糊）
 │   │   ├── pipeline_factory.lua   # Phase 2.5: 渲染管线工厂（含多 Sub-pipeline）
-│   │   └── interaction_factory.lua # Phase 2.4: 交互原语代码生成器
+│   │   ├── interaction_factory.lua # Phase 2.4: 交互原语代码生成器
+│   │   └── layout_engine.lua      # Phase 3.1: 编译期静态 Flexbox 布局引擎
 │   ├── wgpu_bindings.nelua    # wgpu-native v29.0.0.0 的 Nelua FFI 绑定
 │   ├── glfw_bindings.nelua    # GLFW 3 的 Nelua FFI 绑定
 │   ├── primitives.nelua       # 交互原语层（HoverableState、ClickableState）
 │   └── renderer.nelua         # WebGPU 渲染层（含离屏纹理 + textured pipeline 基础设施）
 ├── examples/
-│   ├── shadow_demo.nelua      # ★ Phase 2.5: 阴影 Demo（4-Pass 多管线渲染）
+│   ├── shadow_demo.nelua      # ★ Phase 2.5 主线 Demo（4-Pass 多管线渲染）
 │   ├── button_demo.nelua      # Phase 2.4: 单组件 Demo（hoverable + clickable）
 │   ├── login_demo.nelua       # Phase 2.4: 多组件 Demo（focusable 焦点自动管理）
 │   ├── simple_rect_demo.nelua # Phase 2.4: 边界验证 Demo（hoverable only）
+│   ├── layout_demo.nelua      # ★ Phase 3.1 子阶段 Demo（编译期静态 Flexbox 布局）
 │   └── uniform_layout_test.nelua  # Phase 2.1 布局验证
 ├── docs/
 │   ├── DESIGN_PHASE1.md       # Phase 1 设计说明
@@ -50,7 +49,8 @@ nebula/
 │   ├── PLAN_PHASE2_2.md       # Phase 2.2 开发计划
 │   ├── PLAN_PHASE2_3.md       # Phase 2.3 开发计划
 │   ├── PLAN_PHASE2_4.md       # Phase 2.4 开发计划
-│   └── PLAN_PHASE2_5.md       # ★ Phase 2.5 开发计划
+│   ├── PLAN_PHASE2_5.md       # ★ Phase 2.5 开发计划
+│   └── PLAN_PHASE3.md         # ★ Phase 3 开发计划（其中 3.1 已合入）
 ├── tools/
 │   ├── headless_test.c        # 离屏渲染验证工具
 │   ├── fixture_shader.h       # 自动生成的着色器 C 头文件
@@ -62,7 +62,7 @@ nebula/
 
 ---
 
-## ★ Phase 2.5 核心：多 Pass 渲染（Shadow / Blur）
+## ★ Phase 2.5 主线核心：多 Pass 渲染（Shadow / Blur）
 
 Phase 2.5 打破了单 Pass 渲染的限制。开发者只需在 Visual 中声明 `shadow_color`、`shadow_offset`、`shadow_blur` 三个字段，`nebula_derive` 即可自动检测并生成完整的 4-Pass 阴影管线。
 
@@ -83,7 +83,8 @@ Pass 4 (main):         Surface Pass：合成模糊阴影 + 绘制主组件
 | `<T>Pipeline:init()` | 委托 `nebula_pipeline_base_init` | 初始化 4 条子管线 + 2 张离屏纹理 + 采样器 + BindGroup |
 | `<T>Pipeline:draw()` | 单 Pass 全屏三角形 | 向后兼容，仅绘制主组件 |
 | `<T>Pipeline:draw_shadow()` | 不存在 | 编排 3 个离屏 Pass（mask → blur_h → blur_v） |
-| WGSL 着色器 | 1 个主着色器 | 3 个着色器（shadow_mask + blur + main） |
+| `<T>Pipeline:draw_composite()` | 不存在 | 在 surface 主 Pass 中合成模糊阴影 |
+| WGSL 着色器 | 1 个主着色器 | 4 个着色器（shadow_mask + blur + composite + main） |
 
 ### 使用示例
 
@@ -117,8 +118,10 @@ local pipeline: ShadowButtonPipeline
 pipeline:init(&renderer, WIN_W, WIN_H)
 
 -- 主循环中编排多 Pass
-pipeline:draw_shadow(encoder, surface_view, &renderer, button_vis.shadow_blur)
--- 然后在 surface pass 中调用 pipeline:draw(pass) 绘制主组件
+pipeline:draw_shadow(encoder, &renderer, button_vis.shadow_blur)
+-- 然后在 surface pass 中依次调用：
+--   pipeline:draw_composite(pass)
+--   pipeline:draw(pass)
 ```
 
 ### 编译期日志
@@ -242,7 +245,8 @@ rm wgpu-linux-x86_64-release.zip
 
 ```bash
 chmod +x build.sh
-./build.sh shadow_demo       # ★ Phase 2.5 阴影 Demo（4-Pass 多管线渲染）
+./build.sh shadow_demo       # ★ Phase 2.5 主线 Demo（4-Pass 多管线渲染）
+./build.sh layout_demo       # ★ Phase 3.1 子阶段 Demo（编译期静态 Flexbox 布局）
 ./build.sh button_demo       # Phase 2.4 单组件 Demo（hoverable + clickable）
 ./build.sh login_demo        # Phase 2.4 多组件 Demo（focusable 焦点自动管理）
 ./build.sh simple_rect_demo  # Phase 2.4 边界验证 Demo（hoverable only）
@@ -259,7 +263,9 @@ DISPLAY=:99 LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/shadow_demo
 
 ---
 
-## Phase 2 进度
+## 阶段状态汇总
+
+### Phase 2 主线进度
 
 - [x] **Phase 2.1** — Uniform std140 自动对齐（`nebula_gen_uniform_layout`）
 - [x] **Phase 2.2** — WGSL 着色器按字段组合（`nebula_gen_wgsl_shader`）
@@ -267,8 +273,14 @@ DISPLAY=:99 LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/shadow_demo
 - [x] **Phase 2.4** — 交互原语自动派生（`hit_test` + `process_input` + `focusable` 焦点管理）
 - [x] **Phase 2.5** — 多 Pass 渲染（Shadow / Blur：4-Pass 阴影管线自动派生）
 
-## Phase 3+ 展望
+### Phase 3 子阶段进度
 
-- 多组件布局（`@layout` 宏 + Flexbox 编译期解算）。
+- [x] **Phase 3.1** — 编译期静态 Flexbox 布局系统（`layout_engine.lua` + `layout_demo.nelua`）
+- [ ] **Phase 3.2** — GPU SDF 文本渲染管线
+- [ ] **Phase 3.3** — 运行时动态列表与实例渲染
+
+## Phase 3 后续展望
+
+- 在已合入的 Phase 3.1 静态布局基础上，继续推进文本渲染与动态列表能力。
 - 文本渲染管线（字形光栅化 / 图集 / Shaping）。
 - 动态列表与条件渲染（运行时对象池）。

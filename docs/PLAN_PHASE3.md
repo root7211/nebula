@@ -45,7 +45,7 @@ Nebula 的核心设计哲学是**“零运行时开销”**与**“编译期元�
 
 ## 2. Phase 3 详细开发周期计划
 
-### Phase 3.1 — 编译期静态 Flexbox 布局系统（已完成）
+### Phase 3.1 — 编译期静态 Flexbox 布局系统（已合入仓库）
 
 **目标**：消除硬编码的绝对坐标，允许开发者通过嵌套语法声明组件树，并在编译期运行简易 Flexbox 算法。
 **交付物**：`src/derive/layout_engine.lua`，支持 `direction`, `justify`, `align`, `padding`, `gap` 的编译期解算。

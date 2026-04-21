@@ -1,11 +1,14 @@
 #!/bin/bash
 # =============================================================================
-# Nebula GUI Compiler — Phase 0 Build Script
+# Nebula GUI Compiler — Current Build Script
+#
+# 当前仓库状态：Phase 2.5 主线已完成，Phase 3.1 静态布局子阶段已合入。
 #
 # Usage:
 #   ./build.sh               # 默认构建 button_demo
-#   ./build.sh button_demo   # 构建 button_demo
-#   ./build.sh login_demo    # 构建 login_demo
+#   ./build.sh button_demo   # 构建 Phase 2.4 button_demo
+#   ./build.sh shadow_demo   # 构建 Phase 2.5 主线 shadow_demo
+#   ./build.sh layout_demo   # 构建 Phase 3.1 子阶段 layout_demo
 # =============================================================================
 set -e
 

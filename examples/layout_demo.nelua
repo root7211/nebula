@@ -1,8 +1,8 @@
 -- =============================================================================
 -- layout_demo.nelua
--- Nebula GUI Compiler — Phase 3.1 Layout Demo
+-- Nebula GUI Compiler — Phase 3.1 子阶段 Demo
 --
--- 演示编译期 Flexbox 布局系统：
+-- 演示已合入仓库的 Phase 3.1 编译期 Flexbox 布局系统：
 --   · 使用 nebula_layout_node / nebula_layout_solve 在编译期声明布局树
 --   · 编译期自动解算所有组件的绝对坐标和尺寸
 --   · 解算结果直接注入到 Visual 初始化代码中
