@@ -23,7 +23,7 @@ fi
 TARGET="${1:-button_demo}"
 
 case "$TARGET" in
-  button_demo|login_demo|simple_rect_demo|shadow_demo)
+  button_demo|login_demo|simple_rect_demo|shadow_demo|layout_demo)
     NEEDS_GPU=1
     ;;
   uniform_layout_test)

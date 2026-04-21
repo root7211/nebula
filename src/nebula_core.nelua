@@ -449,6 +449,11 @@ local interaction_factory_mod = require "derive.interaction_factory"
 assert(interaction_factory_mod == "nebula_interaction_factory_v0.1",
   "nebula: failed to load derive/interaction_factory.lua")
 
+-- ★ Phase 3.1: 加载编译期布局引擎模块
+local layout_engine_mod = require "derive.layout_engine"
+assert(layout_engine_mod == "nebula_layout_engine_v0.1_phase3.1",
+  "nebula: failed to load derive/layout_engine.lua")
+
 -- 从 Visual 字段集合中检测着色器特性
 local function detect_shader_features(base_fields, all_props)
   local has_radius   = false
