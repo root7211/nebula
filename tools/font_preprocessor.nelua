@@ -1,0 +1,345 @@
+-- =============================================================================
+-- tools/font_preprocessor.nelua
+-- Nebula GUI Compiler — Phase 3.2.1
+--
+-- 字体预处理工具（第一版）：
+--   · 通过 nldecl 生成的 stb_truetype 绑定读取 TTF
+--   · 为 ASCII 32..126 生成单通道 SDF 字形位图
+--   · 使用简单 shelf packer 打包到 1024x1024 图集
+--   · 导出 PGM 图集和可供后续渲染阶段引用的 Nelua 度量文件
+--
+-- 用法：
+--   mkdir -p assets/generated
+--   nelua -L src tools/font_preprocessor.nelua
+-- =============================================================================
+
+require 'stb_truetype_bindings'
+require 'io'
+
+##[==[
+linklib 'm'
+cinclude [[
+#define STB_TRUETYPE_IMPLEMENTATION
+#include <stb/stb_truetype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+]]
+cemitdecl [[
+static void nebula_blit_row(unsigned char* dst, int dst_offset,
+                            unsigned char* src, int src_offset,
+                            int count);
+]]
+cemitdefn [[
+static void nebula_blit_row(unsigned char* dst, int dst_offset,
+                            unsigned char* src, int src_offset,
+                            int count) {
+  memcpy(dst + dst_offset, src + src_offset, (size_t)count);
+}
+]]
+]==]
+
+global function printf(fmt: cstring, ...: cvarargs): cint <cimport, nodecl> end
+
+local FILE: type <cimport,cinclude'<stdio.h>',forwarddecl> = @record{}
+local function fopen(pathname: cstring, mode: cstring): *FILE <cimport,cinclude'<stdio.h>'> end
+local function fclose(fp: *FILE): cint <cimport,cinclude'<stdio.h>'> end
+local function fread(ptr: pointer, size: csize, n: csize, fp: *FILE): csize <cimport,cinclude'<stdio.h>'> end
+local function fwrite(ptr: pointer, size: csize, n: csize, fp: *FILE): csize <cimport,cinclude'<stdio.h>'> end
+local function fseek(fp: *FILE, offset: clong, whence: cint): cint <cimport,cinclude'<stdio.h>'> end
+local function ftell(fp: *FILE): clong <cimport,cinclude'<stdio.h>'> end
+local function malloc(size: csize): pointer <cimport,cinclude'<stdlib.h>'> end
+local function free(ptr: pointer): void <cimport,cinclude'<stdlib.h>'> end
+local function memset(ptr: pointer, ch: cint, count: csize): pointer <cimport,cinclude'<string.h>'> end
+local function nebula_blit_row(dst: *cuchar, dst_offset: cint, src: *cuchar, src_offset: cint, count: cint): void <cimport,nodecl> end
+
+local FONT_PATH <const> = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+local OUTPUT_ATLAS <const> = "assets/generated/liberation_sans_ascii_48_sdf.pgm"
+local OUTPUT_METRICS <const> = "assets/generated/liberation_sans_ascii_48_metrics.nelua"
+
+local PIXEL_HEIGHT <const> = 48.0
+local ATLAS_W <comptime> = 1024
+local ATLAS_H <comptime> = 1024
+local FIRST_CODEPOINT <comptime> = 32
+local LAST_CODEPOINT <comptime> = 126
+local GLYPH_COUNT <comptime> = LAST_CODEPOINT - FIRST_CODEPOINT + 1
+local GLYPH_GAP <comptime> = 2
+local SDF_PADDING <comptime> = 8
+local SDF_ONEDGE_VALUE <comptime> = 180
+local SDF_PIXEL_DIST_SCALE <const> = 22.5
+
+global GeneratedAsciiGlyph = @record{
+  codepoint: cint,
+  atlas_x: cint,
+  atlas_y: cint,
+  width: cint,
+  height: cint,
+  xoff: cint,
+  yoff: cint,
+  advance: float32,
+  lsb: float32,
+  u0: float32,
+  v0: float32,
+  u1: float32,
+  v1: float32,
+}
+
+local function load_file(path: string): (*cuchar, csize)
+  local fp = fopen(path, "rb")
+  if fp == nilptr then
+    return nilptr, 0
+  end
+
+  if fseek(fp, 0, 2) ~= 0 then
+    fclose(fp)
+    return nilptr, 0
+  end
+  local sz = ftell(fp)
+  if sz <= 0 then
+    fclose(fp)
+    return nilptr, 0
+  end
+  if fseek(fp, 0, 0) ~= 0 then
+    fclose(fp)
+    return nilptr, 0
+  end
+
+  local mem = (@*cuchar)(malloc((@csize)(sz)))
+  if mem == nilptr then
+    fclose(fp)
+    return nilptr, 0
+  end
+
+  local nread = fread(mem, 1, (@csize)(sz), fp)
+  fclose(fp)
+  if nread ~= (@csize)(sz) then
+    free(mem)
+    return nilptr, 0
+  end
+
+  return mem, (@csize)(sz)
+end
+
+local function write_pgm(path: string, pixels: *cuchar): boolean
+  local fp = fopen(path, "wb")
+  if fp == nilptr then
+    return false
+  end
+
+  local header = ("P5\n%d %d\n255\n"):format(ATLAS_W, ATLAS_H)
+  if fwrite(header.data, 1, (@csize)(#header), fp) ~= (@csize)(#header) then
+    fclose(fp)
+    return false
+  end
+
+  local atlas_bytes = (@csize)(ATLAS_W * ATLAS_H)
+  local written = fwrite(pixels, 1, atlas_bytes, fp)
+  fclose(fp)
+  return written == atlas_bytes
+end
+
+local function main(): cint
+  local font_data, font_size = load_file(FONT_PATH)
+  if font_data == nilptr or font_size == 0 then
+    printf("font_preprocessor: failed to load font: %s\n", FONT_PATH)
+    return 1
+  end
+
+  local font: stbtt_fontinfo
+  local offset = stbtt_GetFontOffsetForIndex(font_data, 0)
+  if offset < 0 then
+    printf("font_preprocessor: invalid TTF offset\n")
+    free(font_data)
+    return 1
+  end
+
+  if stbtt_InitFont(&font, font_data, offset) == 0 then
+    printf("font_preprocessor: stbtt_InitFont failed\n")
+    free(font_data)
+    return 1
+  end
+
+  local scale = stbtt_ScaleForPixelHeight(&font, PIXEL_HEIGHT)
+  local ascent: cint = 0
+  local descent: cint = 0
+  local line_gap: cint = 0
+  stbtt_GetFontVMetrics(&font, &ascent, &descent, &line_gap)
+
+  local atlas_bytes = (@csize)(ATLAS_W * ATLAS_H)
+  local atlas = (@*cuchar)(malloc(atlas_bytes))
+  if atlas == nilptr then
+    printf("font_preprocessor: failed to allocate atlas\n")
+    free(font_data)
+    return 1
+  end
+  memset(atlas, 0, atlas_bytes)
+
+  local glyphs: [GLYPH_COUNT]GeneratedAsciiGlyph
+  local cursor_x: cint = 0
+  local cursor_y: cint = 0
+  local row_h: cint = 0
+
+  for i = 0, GLYPH_COUNT - 1 do
+    local cp: cint = FIRST_CODEPOINT + i
+    local w: cint = 0
+    local h: cint = 0
+    local xoff: cint = 0
+    local yoff: cint = 0
+    local adv: cint = 0
+    local lsb: cint = 0
+    stbtt_GetCodepointHMetrics(&font, cp, &adv, &lsb)
+
+    local bitmap = stbtt_GetCodepointSDF(
+      &font,
+      scale,
+      cp,
+      SDF_PADDING,
+      (@cuchar)(SDF_ONEDGE_VALUE),
+      SDF_PIXEL_DIST_SCALE,
+      &w,
+      &h,
+      &xoff,
+      &yoff
+    )
+
+    if bitmap == nilptr or w == 0 or h == 0 then
+      glyphs[i] = GeneratedAsciiGlyph{
+        codepoint = cp,
+        atlas_x = 0,
+        atlas_y = 0,
+        width = 0,
+        height = 0,
+        xoff = 0,
+        yoff = 0,
+        advance = (@float32)(adv) * (@float32)(scale),
+        lsb = (@float32)(lsb) * (@float32)(scale),
+        u0 = 0.0,
+        v0 = 0.0,
+        u1 = 0.0,
+        v1 = 0.0,
+      }
+      if bitmap ~= nilptr then
+        stbtt_FreeSDF(bitmap, nilptr)
+      end
+      continue
+    end
+
+    if cursor_x + w > ATLAS_W then
+      cursor_x = 0
+      cursor_y = cursor_y + row_h + GLYPH_GAP
+      row_h = 0
+    end
+
+    if cursor_y + h > ATLAS_H then
+      printf("font_preprocessor: atlas overflow at codepoint %d\n", cp)
+      stbtt_FreeSDF(bitmap, nilptr)
+      free(atlas)
+      free(font_data)
+      return 1
+    end
+
+    for row = 0, h - 1 do
+      local dst_base = (cursor_y + row) * ATLAS_W + cursor_x
+      local src_base = row * w
+      nebula_blit_row(atlas, dst_base, bitmap, src_base, w)
+    end
+
+    glyphs[i] = GeneratedAsciiGlyph{
+      codepoint = cp,
+      atlas_x = cursor_x,
+      atlas_y = cursor_y,
+      width = w,
+      height = h,
+      xoff = xoff,
+      yoff = yoff,
+      advance = (@float32)(adv) * (@float32)(scale),
+      lsb = (@float32)(lsb) * (@float32)(scale),
+      u0 = (@float32)(cursor_x) / (@float32)(ATLAS_W),
+      v0 = (@float32)(cursor_y) / (@float32)(ATLAS_H),
+      u1 = (@float32)(cursor_x + w) / (@float32)(ATLAS_W),
+      v1 = (@float32)(cursor_y + h) / (@float32)(ATLAS_H),
+    }
+
+    stbtt_FreeSDF(bitmap, nilptr)
+
+    cursor_x = cursor_x + w + GLYPH_GAP
+    if h > row_h then
+      row_h = h
+    end
+  end
+
+  if not write_pgm(OUTPUT_ATLAS, atlas) then
+    printf("font_preprocessor: failed to write atlas: %s\n", OUTPUT_ATLAS)
+    free(atlas)
+    free(font_data)
+    return 1
+  end
+
+  local metrics_text = "-- Auto-generated by tools/font_preprocessor.nelua (Phase 3.2.1)\n"
+  metrics_text = metrics_text .. "-- DO NOT EDIT — regenerate with: nelua -L src tools/font_preprocessor.nelua\n\n"
+  metrics_text = metrics_text .. "global NebulaGeneratedAsciiGlyph = @record{\n"
+  metrics_text = metrics_text .. "  codepoint: cint,\n"
+  metrics_text = metrics_text .. "  atlas_x: cint,\n"
+  metrics_text = metrics_text .. "  atlas_y: cint,\n"
+  metrics_text = metrics_text .. "  width: cint,\n"
+  metrics_text = metrics_text .. "  height: cint,\n"
+  metrics_text = metrics_text .. "  xoff: cint,\n"
+  metrics_text = metrics_text .. "  yoff: cint,\n"
+  metrics_text = metrics_text .. "  advance: float32,\n"
+  metrics_text = metrics_text .. "  lsb: float32,\n"
+  metrics_text = metrics_text .. "  u0: float32,\n"
+  metrics_text = metrics_text .. "  v0: float32,\n"
+  metrics_text = metrics_text .. "  u1: float32,\n"
+  metrics_text = metrics_text .. "  v1: float32,\n"
+  metrics_text = metrics_text .. "}\n\n"
+  metrics_text = metrics_text .. "global NEBULA_ASCII_FONT_PATH <const> = \"" .. FONT_PATH .. "\"\n"
+  metrics_text = metrics_text .. "global NEBULA_ASCII_ATLAS_PATH <const> = \"" .. OUTPUT_ATLAS .. "\"\n"
+  metrics_text = metrics_text .. ("global NEBULA_ASCII_ATLAS_WIDTH <const> = %d\n"):format(ATLAS_W)
+  metrics_text = metrics_text .. ("global NEBULA_ASCII_ATLAS_HEIGHT <const> = %d\n"):format(ATLAS_H)
+  metrics_text = metrics_text .. ("global NEBULA_ASCII_PIXEL_HEIGHT <const> = %.1f\n"):format(PIXEL_HEIGHT)
+  metrics_text = metrics_text .. ("global NEBULA_ASCII_ASCENT <const> = %.6f\n"):format((@float64)(ascent) * (@float64)(scale))
+  metrics_text = metrics_text .. ("global NEBULA_ASCII_DESCENT <const> = %.6f\n"):format((@float64)(descent) * (@float64)(scale))
+  metrics_text = metrics_text .. ("global NEBULA_ASCII_LINE_GAP <const> = %.6f\n"):format((@float64)(line_gap) * (@float64)(scale))
+  metrics_text = metrics_text .. ("global NEBULA_ASCII_FIRST_CODEPOINT <const> = %d\n"):format(FIRST_CODEPOINT)
+  metrics_text = metrics_text .. ("global NEBULA_ASCII_LAST_CODEPOINT <const> = %d\n"):format(LAST_CODEPOINT)
+  metrics_text = metrics_text .. ("global NEBULA_ASCII_GLYPH_COUNT <const> = %d\n\n"):format(GLYPH_COUNT)
+  metrics_text = metrics_text .. ("global NEBULA_ASCII_GLYPHS: [%d]NebulaGeneratedAsciiGlyph <const> = {\n"):format(GLYPH_COUNT)
+
+  for i = 0, GLYPH_COUNT - 1 do
+    local g = glyphs[i]
+    metrics_text = metrics_text ..
+      ("  { codepoint = %d, atlas_x = %d, atlas_y = %d, width = %d, height = %d, xoff = %d, yoff = %d, advance = %.6f, lsb = %.6f, u0 = %.6f, v0 = %.6f, u1 = %.6f, v1 = %.6f },\n")
+      :format(
+        g.codepoint, g.atlas_x, g.atlas_y, g.width, g.height, g.xoff, g.yoff,
+        g.advance, g.lsb, g.u0, g.v0, g.u1, g.v1
+      )
+  end
+
+  metrics_text = metrics_text .. "}\n"
+
+  local f = io.open(OUTPUT_METRICS, "w")
+  if not f then
+    printf("font_preprocessor: failed to write metrics: %s\n", OUTPUT_METRICS)
+    free(atlas)
+    free(font_data)
+    return 1
+  end
+  f:write(metrics_text)
+  f:close()
+
+  printf("font_preprocessor: loaded %s (%ld bytes)\n", FONT_PATH, (@clong)(font_size))
+  printf("font_preprocessor: generated ASCII SDF atlas -> %s\n", OUTPUT_ATLAS)
+  printf("font_preprocessor: generated metrics       -> %s\n", OUTPUT_METRICS)
+  printf("font_preprocessor: scale=%.4f ascent=%.4f descent=%.4f line_gap=%.4f glyphs=%d\n",
+    scale,
+    (@float32)(ascent) * (@float32)(scale),
+    (@float32)(descent) * (@float32)(scale),
+    (@float32)(line_gap) * (@float32)(scale),
+    GLYPH_COUNT)
+
+  free(atlas)
+  free(font_data)
+  return 0
+end
+
+main()

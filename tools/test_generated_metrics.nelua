@@ -1,0 +1,17 @@
+require 'liberation_sans_ascii_48_metrics'
+
+global function printf(fmt: cstring, ...: cvarargs): cint <cimport,cinclude'<stdio.h>'> end
+
+local function main(): cint
+  printf("glyph_count=%ld\n", (@clong)(NEBULA_ASCII_GLYPH_COUNT))
+  printf("first_cp=%d advance=%.4f\n", NEBULA_ASCII_GLYPHS[0].codepoint, NEBULA_ASCII_GLYPHS[0].advance)
+  printf("A_cp=%d atlas=(%d,%d %dx%d)\n",
+    NEBULA_ASCII_GLYPHS[65 - NEBULA_ASCII_FIRST_CODEPOINT].codepoint,
+    NEBULA_ASCII_GLYPHS[65 - NEBULA_ASCII_FIRST_CODEPOINT].atlas_x,
+    NEBULA_ASCII_GLYPHS[65 - NEBULA_ASCII_FIRST_CODEPOINT].atlas_y,
+    NEBULA_ASCII_GLYPHS[65 - NEBULA_ASCII_FIRST_CODEPOINT].width,
+    NEBULA_ASCII_GLYPHS[65 - NEBULA_ASCII_FIRST_CODEPOINT].height)
+  return 0
+end
+
+main()

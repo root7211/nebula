@@ -1,0 +1,13 @@
+##[[
+local nldecl = require 'nelua.plugins.nldecl'
+local fs = require 'nelua.utils.fs'
+
+local output = 'src/stb_truetype_bindings.nelua'
+if not fs.isfile(output) then
+  nldecl.generate_bindings_file{
+    output_file = output,
+    parse_includes = {'<stb/stb_truetype.h>'},
+    include_names = {'^stbtt_', '^STBTT_'}
+  }
+end
+]]##
