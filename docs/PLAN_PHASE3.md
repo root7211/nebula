@@ -50,35 +50,36 @@ Nebula 的核心设计哲学是**“零运行时开销”**与**“编译期元�
 **目标**：消除硬编码的绝对坐标，允许开发者通过嵌套语法声明组件树，并在编译期运行简易 Flexbox 算法。
 **交付物**：`src/derive/layout_engine.lua`，支持 `direction`, `justify`, `align`, `padding`, `gap` 的编译期解算。
 
-### Phase 3.2 — GPU SDF 文本渲染管线（预计 2 周）
+### Phase 3.2 — GPU SDF 文本渲染管线（已完成）
 
 **目标**：引入高质量文本显示能力，支持基于 SDF 的英文字符渲染。
 
 **子阶段计划：**
 
-1.  **Phase 3.2.1: 字体预处理与 SDF 图集生成 (3天)**
+1.  **Phase 3.2.1: 字体预处理与 SDF 图集生成 (已完成)**
     - 集成 `stb_truetype` 的 Nelua 绑定。
     - 开发 `tools/font_preprocessor.nelua`：读取 TTF，按像素高度生成 ASCII 字符的单通道 SDF 位图，并打包成 1024x1024 纹理。
     - 导出字形度量表（Advance, Bearing, UV 坐标）为 Nelua 静态数组。
 
-2.  **Phase 3.2.2: 纹理与顶点缓冲区基础设施 (3天)**
+2.  **Phase 3.2.2: 纹理与顶点缓冲区基础设施 (已完成)**
     - 在 `renderer.nelua` 中实现 `nebula_upload_texture`：支持从 CPU 像素数据创建 WGPUTexture。
     - 扩展 `pipeline_factory.lua`：支持 `nebula_pipeline_textured_init`，自动生成包含 TextureView 和 Sampler 的 BindGroup 布局。
     - 在 `pipeline_factory.lua` 中添加顶点属性声明支持（Position, UV）。
 
-3.  **Phase 3.2.3: 文本着色器组合器 (2天)**
+3.  **Phase 3.2.3: 文本着色器组合器 (已完成)**
     - 在 `shader_compose.lua` 中添加文本专属模板。
     - 顶点着色器：接收顶点位置与 UV，计算字形在屏幕上的位置。
     - 片段着色器：执行 SDF 阈值测试（Thresholding）与抗锯齿（基于 `fwidth` 的梯度计算）。
 
-4.  **Phase 3.2.4: `TextVisual` 派生引擎 (3天)**
+4.  **Phase 3.2.4: `TextVisual` 派生引擎与运行时文本更新 (已完成)**
     - 扩展 `nebula_derive` 支持 `TextVisual`：自动派生文本布局计算逻辑。
     - 实现 `TextContext:set_text(str)`：运行时动态更新顶点缓冲区（或使用 Storage Buffer 存储字形实例数据）。
     - 集成基础字距调整（Kerning）支持。
-
-5.  **Phase 3.2.5: 演示与回归测试 (2天)**
     - 开发 `examples/text_demo.nelua`：展示多字号、多颜色的清晰文本渲染。
+
+5.  **Phase 3.2.5: 演示与回归测试 (待完善)**
     - 验证文本在缩放和动画过程中的边缘清晰度。
+    - 完善 `text_demo`，使其作为一个独立的、可运行的文本显示示例。
 
 ### Phase 3.3 — 运行时动态列表与实例渲染 (预计 2-3 周)
 
@@ -88,7 +89,7 @@ Nebula 的核心设计哲学是**“零运行时开销”**与**“编译期元�
 
 ## 3. 下一步行动
 
-我们将立即启动 **Phase 3.2.1**，重点是利用 `stb_truetype` 建立字体预处理流水线。
+Phase 3.2 的所有子阶段（3.2.1 至 3.2.4）均已完成，文本渲染的基础设施已搭建完毕。下一步我们将重点关注 **Phase 3.2.5** 的完善工作，确保 `text_demo` 能够充分展示文本渲染能力，并进行全面的回归测试。在此之后，我们将启动 **Phase 3.3**，开始引入运行时动态列表与实例渲染能力，以支持更复杂的 UI 场景。
 
 ### 参考文献
 - [1] Tomasz Czajęcki. "How to Write a Flexbox Layout Engine."
