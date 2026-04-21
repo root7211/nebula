@@ -1,14 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Nebula GUI Compiler — Current Build Script
 #
-# 当前仓库状态：Phase 2.5 主线已完成，Phase 3.1 静态布局子阶段已合入。
+# 当前仓库状态：Phase 3.2.4 文本渲染子阶段开发中。
 #
 # Usage:
 #   ./build.sh               # 默认构建 button_demo
 #   ./build.sh button_demo   # 构建 Phase 2.4 button_demo
 #   ./build.sh shadow_demo   # 构建 Phase 2.5 主线 shadow_demo
 #   ./build.sh layout_demo   # 构建 Phase 3.1 子阶段 layout_demo
+#   ./build.sh text_demo     # 构建 Phase 3.2.4 文本渲染 demo
 # =============================================================================
 set -e
 
@@ -26,7 +27,7 @@ fi
 TARGET="${1:-button_demo}"
 
 case "$TARGET" in
-  button_demo|login_demo|simple_rect_demo|shadow_demo|layout_demo)
+  button_demo|login_demo|simple_rect_demo|shadow_demo|layout_demo|text_demo)
     NEEDS_GPU=1
     ;;
   uniform_layout_test)
@@ -34,7 +35,7 @@ case "$TARGET" in
     ;;
   *)
     echo "[nebula] Error: unknown target '$TARGET'"
-    echo "         Available targets: button_demo, login_demo, simple_rect_demo, shadow_demo, uniform_layout_test"
+    echo "         Available targets: button_demo, login_demo, simple_rect_demo, shadow_demo, layout_demo, text_demo, uniform_layout_test"
     exit 1
     ;;
 esac
@@ -44,6 +45,7 @@ echo "[nebula] Building $TARGET..."
 if [ "$NEEDS_GPU" = "1" ]; then
   nelua \
     -L "$SCRIPT_DIR/src" \
+    -L "$SCRIPT_DIR/assets/generated" \
     --cflags="-I$VENDOR/include" \
     --ldflags="-L$VENDOR/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,$VENDOR/lib" \
     "$SCRIPT_DIR/examples/$TARGET.nelua"
@@ -51,6 +53,7 @@ else
   # 纯编译期 / 运行期测试：不链接 wgpu/glfw
   nelua \
     -L "$SCRIPT_DIR/src" \
+    -L "$SCRIPT_DIR/assets/generated" \
     "$SCRIPT_DIR/examples/$TARGET.nelua"
 fi
 

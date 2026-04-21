@@ -176,12 +176,16 @@ local function gen_pipeline_textured_vertex(base, uniforms_record, wgsl_source)
   table.insert(lines,  "  return true")
   table.insert(lines,  "end")
 
-  table.insert(lines, ("function %s:draw(pass: WGPURenderPassEncoder): void"):format(pipe))
-  table.insert(lines,  "  if self.bind_group == nilptr or self.vertex_buf == nilptr or self.vertex_count == 0 then return end")
+  table.insert(lines, ("function %s:draw_buffer(pass: WGPURenderPassEncoder, vertex_buf: WGPUBuffer, vertex_buf_size: uint64, vertex_count: uint32): void"):format(pipe))
+  table.insert(lines,  "  if self.bind_group == nilptr or vertex_buf == nilptr or vertex_count == 0 then return end")
   table.insert(lines,  "  wgpuRenderPassEncoderSetPipeline(pass, self.pipeline)")
   table.insert(lines,  "  wgpuRenderPassEncoderSetBindGroup(pass, 0, self.bind_group, 0, nilptr)")
-  table.insert(lines,  "  wgpuRenderPassEncoderSetVertexBuffer(pass, 0, self.vertex_buf, 0, self.vertex_buf_size)")
-  table.insert(lines,  "  wgpuRenderPassEncoderDraw(pass, self.vertex_count, 1, 0, 0)")
+  table.insert(lines,  "  wgpuRenderPassEncoderSetVertexBuffer(pass, 0, vertex_buf, 0, vertex_buf_size)")
+  table.insert(lines,  "  wgpuRenderPassEncoderDraw(pass, vertex_count, 1, 0, 0)")
+  table.insert(lines,  "end")
+
+  table.insert(lines, ("function %s:draw(pass: WGPURenderPassEncoder): void"):format(pipe))
+  table.insert(lines,  "  self:draw_buffer(pass, self.vertex_buf, self.vertex_buf_size, self.vertex_count)")
   table.insert(lines,  "end")
 
   return table.concat(lines, "\n")
@@ -557,4 +561,4 @@ function nebula_gen_to_uniforms_typed(spec)
 end
 
 -- 返回模块标识
-return "nebula_pipeline_factory_v0.3_phase3.2.2"
+return "nebula_pipeline_factory_v0.4_phase3.2.4"

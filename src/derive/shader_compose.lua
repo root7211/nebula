@@ -39,11 +39,35 @@ WGSL_FRAGMENTS.binding = function(opts)
   return ("\n@group(0) @binding(0) var<uniform> u: %s;\n"):format(struct_name)
 end
 
+WGSL_FRAGMENTS.text_binding = function(opts)
+  local struct_name = opts.struct_name or "Uniforms"
+  return ([[
+@group(0) @binding(0) var<uniform> u: %s;
+@group(0) @binding(1) var glyph_atlas: texture_2d<f32>;
+@group(0) @binding(2) var glyph_sampler: sampler;
+]]):format(struct_name)
+end
+
 WGSL_FRAGMENTS.vertex_output = function(_opts)
   return [[
 
 struct VertexOutput {
   @builtin(position) clip_position: vec4<f32>,
+}
+]]
+end
+
+WGSL_FRAGMENTS.text_vertex_io = function(_opts)
+  return [[
+
+struct TextVertexInput {
+  @location(0) position: vec2<f32>,
+  @location(1) uv: vec2<f32>,
+}
+
+struct TextVertexOutput {
+  @builtin(position) clip_position: vec4<f32>,
+  @location(0) uv: vec2<f32>,
 }
 ]]
 end
@@ -65,6 +89,43 @@ fn vs_main(@builtin(vertex_index) vi: u32) -> VertexOutput {
   return out;
 }
 ]]
+end
+
+WGSL_FRAGMENTS.text_vs_main = function(_opts)
+  return [[
+
+@vertex
+fn vs_main(in: TextVertexInput) -> TextVertexOutput {
+  var out: TextVertexOutput;
+  let ndc = vec2<f32>(
+    (in.position.x / u.viewport.x) * 2.0 - 1.0,
+    1.0 - (in.position.y / u.viewport.y) * 2.0
+  );
+  out.clip_position = vec4<f32>(ndc, 0.0, 1.0);
+  out.uv = in.uv;
+  return out;
+}
+]]
+end
+
+WGSL_FRAGMENTS.text_fs_main = function(opts)
+  local color_expr = opts.text_color_field or "u.text_color"
+  return ([[
+
+@fragment
+fn fs_main(in: TextVertexOutput) -> @location(0) vec4<f32> {
+  let sdf_sample = textureSample(glyph_atlas, glyph_sampler, in.uv).r;
+  let distance = sdf_sample - 0.5;
+  let edge = max(fwidth(sdf_sample), 0.0001);
+  let alpha = smoothstep(-edge, edge, distance);
+  let color = %s;
+  let out_color = vec4<f32>(color.rgb, color.a * alpha);
+  if out_color.a < 0.001 {
+    discard;
+  }
+  return out_color;
+}
+]]):format(color_expr)
 end
 
 -- SDF 函数：圆角矩形
@@ -325,6 +386,23 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 end
 
 
+local function gen_text_shader(opts)
+  local parts = {}
+  table.insert(parts, opts.wgsl_struct)
+  table.insert(parts, WGSL_FRAGMENTS.text_binding(opts))
+  table.insert(parts, WGSL_FRAGMENTS.text_vertex_io(opts))
+  table.insert(parts, WGSL_FRAGMENTS.text_vs_main(opts))
+  table.insert(parts, WGSL_FRAGMENTS.text_fs_main(opts))
+
+  return {
+    source = table.concat(parts, ""),
+    features = {"text_sdf", "textured", "vertex_pos_uv"},
+    required_passes = {"main"},
+    textured = true,
+    vertex_layout = "pos_uv",
+  }
+end
+
 -- =============================================================================
 -- 公开 API：nebula_compose_shader(opts)
 -- =============================================================================
@@ -336,15 +414,22 @@ function nebula_compose_shader(opts)
   local has_bg_color = opts.has_bg_color or false
   local has_border   = opts.has_border   or false
   local has_shadow   = opts.has_shadow   or false
+  local text_sdf     = opts.text_sdf     or false
 
   local compose_opts = {
-    struct_name  = struct_name,
-    has_radius   = has_radius,
-    has_bg_color = has_bg_color,
-    has_border   = has_border,
-    has_shadow   = has_shadow,
-    wgsl_struct  = opts.wgsl_struct,
+    struct_name      = struct_name,
+    has_radius       = has_radius,
+    has_bg_color     = has_bg_color,
+    has_border       = has_border,
+    has_shadow       = has_shadow,
+    text_sdf         = text_sdf,
+    text_color_field = opts.text_color_field,
+    wgsl_struct      = opts.wgsl_struct,
   }
+
+  if text_sdf then
+    return gen_text_shader(compose_opts)
+  end
 
   -- 收集特性列表（用于编译期日志）
   local features = {}
@@ -389,5 +474,11 @@ function nebula_compose_shader(opts)
   return result
 end
 
+function nebula_compose_text_shader(opts)
+  opts = opts or {}
+  opts.text_sdf = true
+  return nebula_compose_shader(opts)
+end
+
 -- 返回模块标识，供 require 验证
-return "nebula_shader_compose_v0.2_phase2.5.1"
+return "nebula_shader_compose_v0.3_phase3.2.3"

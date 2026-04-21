@@ -1,0 +1,162 @@
+## cinclude "<stdio.h>"
+
+require "nebula_core"
+require "glfw_bindings"
+require "wgpu_bindings"
+require "renderer"
+require "text_runtime"
+
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+
+local WIN_W <comptime> = 960
+local WIN_H <comptime> = 540
+
+global TextVisual = @record{
+  pos: Vec2,
+  size: Vec2,
+  pixel_height: float32,
+  default_text_color: Color,
+}
+##[[
+nebula_annotate("TextVisual", {
+  states = {"default"},
+  primitives = {},
+  transitions = {},
+  text_mode = "ascii_sdf",
+  max_chars = 128,
+})
+]]
+## nebula_derive("TextVisual")
+
+local function main(): int32
+  if glfwInit() == 0 then
+    printf("glfw: init failed\n")
+    return 1
+  end
+  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
+
+  local window = glfwCreateWindow(WIN_W, WIN_H,
+    "Nebula Phase 3.2.4 — Text Demo", nilptr, nilptr)
+  if window == nilptr then
+    printf("glfw: window creation failed\n")
+    return 1
+  end
+
+  local renderer: NebulaRenderer
+  if not renderer:init(window, WIN_W, WIN_H) then
+    return 1
+  end
+
+  local font: NebulaAsciiFontAtlas
+  if not nebula_text_load_ascii_font(&font, &renderer) then
+    printf("text: failed to load ascii atlas\n")
+    return 1
+  end
+
+  local pipe: TextPipeline
+  if not pipe:init(&renderer) then
+    return 1
+  end
+  if not pipe:update_texture_binding(&renderer, font.view, font.sampler) then
+    printf("text: failed to bind atlas texture\n")
+    return 1
+  end
+
+  local title: TextContext
+  title:init(TextVisual{
+    pos = Vec2{ x = 72.0, y = 96.0 },
+    size = Vec2{ x = 0.0, y = 0.0 },
+    pixel_height = 48.0,
+    default_text_color = Color{ r = 0.96, g = 0.97, b = 1.00, a = 1.0 },
+  })
+  if not title:set_text(&renderer, "Nebula Phase 3.2.4") then
+    printf("text: failed to upload title vertices\n")
+    return 1
+  end
+
+  local subtitle: TextContext
+  subtitle:init(TextVisual{
+    pos = Vec2{ x = 72.0, y = 172.0 },
+    size = Vec2{ x = 0.0, y = 0.0 },
+    pixel_height = 28.0,
+    default_text_color = Color{ r = 0.72, g = 0.80, b = 0.96, a = 1.0 },
+  })
+  if not subtitle:set_text(&renderer, "ASCII SDF text via generated TextVisual pipeline") then
+    printf("text: failed to upload subtitle vertices\n")
+    return 1
+  end
+
+  printf("=== Phase 3.2.4 Text Demo ===\n")
+
+  while glfwWindowShouldClose(window) == 0 do
+    glfwPollEvents()
+
+    local surface_tex: WGPUSurfaceTexture
+    wgpuSurfaceGetCurrentTexture(renderer.surface, &surface_tex)
+    local status = surface_tex.status
+    if status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal and
+       status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal then
+      continue
+    end
+
+    local view_desc = WGPUTextureViewDescriptor{
+      nextInChain     = nilptr,
+      label           = wgpu_str_null(),
+      format          = renderer.format,
+      dimension       = 2,
+      baseMipLevel    = 0,
+      mipLevelCount   = 1,
+      baseArrayLayer  = 0,
+      arrayLayerCount = 1,
+      aspect          = 1,
+      usage           = 0,
+    }
+    local view = wgpuTextureCreateView(surface_tex.texture, &view_desc)
+
+    local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, nilptr)
+    local clear_color = WGPURenderPassColorAttachment{
+      nextInChain = nilptr,
+      view = view,
+      depthSlice = 0xFFFFFFFF,
+      resolveTarget = nilptr,
+      loadOp = WGPULoadOp_Clear,
+      storeOp = WGPUStoreOp_Store,
+      clearValue = WGPUColor{ r = 0.07, g = 0.08, b = 0.10, a = 1.0 },
+    }
+    local rp_desc = WGPURenderPassDescriptor{
+      nextInChain = nilptr,
+      label = wgpu_str_null(),
+      colorAttachmentCount = 1,
+      colorAttachments = &clear_color,
+      depthStencilAttachment = nilptr,
+      occlusionQuerySet = nilptr,
+      timestampWrites = nilptr,
+    }
+    local pass = wgpuCommandEncoderBeginRenderPass(encoder, &rp_desc)
+
+    local u_title = title:to_uniforms(WIN_W, WIN_H)
+    pipe:update_uniforms(&renderer, &u_title)
+    pipe:draw_buffer(pass, title.mesh.vertex_buffer, title.mesh.vertex_buffer_size, title.mesh.vertex_count)
+
+    local u_subtitle = subtitle:to_uniforms(WIN_W, WIN_H)
+    pipe:update_uniforms(&renderer, &u_subtitle)
+    pipe:draw_buffer(pass, subtitle.mesh.vertex_buffer, subtitle.mesh.vertex_buffer_size, subtitle.mesh.vertex_count)
+
+    wgpuRenderPassEncoderEnd(pass)
+    wgpuRenderPassEncoderRelease(pass)
+
+    local cmd = wgpuCommandEncoderFinish(encoder, nilptr)
+    wgpuQueueSubmit(renderer.queue, 1, &cmd)
+    wgpuCommandBufferRelease(cmd)
+    wgpuCommandEncoderRelease(encoder)
+    wgpuTextureViewRelease(view)
+    wgpuSurfacePresent(renderer.surface)
+  end
+
+  glfwDestroyWindow(window)
+  glfwTerminate()
+  return 0
+end
+
+return main()

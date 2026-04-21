@@ -1,0 +1,277 @@
+require "renderer"
+require "liberation_sans_ascii_48_metrics"
+
+## cinclude "<stdio.h>"
+## cinclude "<string.h>"
+## cinclude "<stdlib.h>"
+
+global FILE: type <cimport,nodecl,forwarddecl> = @record{}
+global function fopen(path: cstring, mode: cstring): *FILE <cimport, nodecl> end
+global function fclose(fp: *FILE): cint <cimport, nodecl> end
+global function fread(ptr: pointer, size: csize, count: csize, fp: *FILE): csize <cimport, nodecl> end
+global function fscanf(fp: *FILE, fmt: cstring, ...: cvarargs): cint <cimport, nodecl> end
+global function fgetc(fp: *FILE): cint <cimport, nodecl> end
+global function malloc(size: csize): pointer <cimport, nodecl> end
+global function free(ptr: pointer): void <cimport, nodecl> end
+global function strlen(s: cstring): csize <cimport, nodecl> end
+
+global NebulaAsciiFontAtlas = @record{
+  texture: WGPUTexture,
+  view:    WGPUTextureView,
+  sampler: WGPUSampler,
+  width:   uint32,
+  height:  uint32,
+}
+
+global NebulaTextMesh = @record{
+  vertex_buffer:      WGPUBuffer,
+  vertex_buffer_size: uint64,
+  vertex_count:       uint32,
+  width:              float32,
+  height:             float32,
+}
+
+function NebulaTextMesh:init(): void
+  self.vertex_buffer = nilptr
+  self.vertex_buffer_size = 0
+  self.vertex_count = 0
+  self.width = 0.0
+  self.height = 0.0
+end
+
+local function nebula_ascii_glyph_for_codepoint(cp: cint, out_glyph: *NebulaGeneratedAsciiGlyph): boolean
+  local fallback = 63 -- '?'
+  if cp < NEBULA_ASCII_FIRST_CODEPOINT or cp > NEBULA_ASCII_LAST_CODEPOINT then
+    cp = fallback
+  end
+  local idx = cp - NEBULA_ASCII_FIRST_CODEPOINT
+  if idx < 0 or idx >= NEBULA_ASCII_GLYPH_COUNT then
+    return false
+  end
+  $out_glyph = NEBULA_ASCII_GLYPHS[idx]
+  return true
+end
+
+local function nebula_text_read_pgm_gray8(path: cstring, out_pixels: **cuchar, out_w: *uint32, out_h: *uint32): boolean
+  local fp = fopen(path, "rb")
+  if fp == nilptr then
+    printf("text: failed to open atlas %s\n", path)
+    return false
+  end
+
+  local magic: [3]cchar
+  local w: cint = 0
+  local h: cint = 0
+  local maxv: cint = 0
+  if fscanf(fp, "%2s", &magic[0]) ~= 1 then fclose(fp) return false end
+  if magic[0] ~= 'P' or magic[1] ~= '5' then
+    printf("text: unsupported atlas header in %s\n", path)
+    fclose(fp)
+    return false
+  end
+  if fscanf(fp, "%d %d %d", &w, &h, &maxv) ~= 3 then
+    printf("text: failed to parse atlas header %s\n", path)
+    fclose(fp)
+    return false
+  end
+  if maxv ~= 255 then
+    printf("text: unsupported atlas max value %d\n", maxv)
+    fclose(fp)
+    return false
+  end
+  if fgetc(fp) < 0 then
+    fclose(fp)
+    return false
+  end
+
+  local bytes = (@csize)(w * h)
+  local pixels = (@*cuchar)(malloc(bytes))
+  if pixels == nilptr then
+    fclose(fp)
+    return false
+  end
+  local nread = fread(pixels, 1, bytes, fp)
+  fclose(fp)
+  if nread ~= bytes then
+    free(pixels)
+    printf("text: atlas payload truncated %s\n", path)
+    return false
+  end
+
+  $out_pixels = pixels
+  $out_w = (@uint32)(w)
+  $out_h = (@uint32)(h)
+  return true
+end
+
+global function nebula_text_create_sampler(renderer: *NebulaRenderer, label: cstring): WGPUSampler
+  local desc = WGPUSamplerDescriptor{
+    nextInChain   = nilptr,
+    label         = wgpu_str(label),
+    addressModeU  = WGPUAddressMode_ClampToEdge,
+    addressModeV  = WGPUAddressMode_ClampToEdge,
+    addressModeW  = WGPUAddressMode_ClampToEdge,
+    magFilter     = WGPUFilterMode_Linear,
+    minFilter     = WGPUFilterMode_Linear,
+    mipmapFilter  = WGPUMipmapFilterMode_Nearest,
+    lodMinClamp   = 0.0,
+    lodMaxClamp   = 1.0,
+    compare       = 0,
+    maxAnisotropy = 1,
+  }
+  return wgpuDeviceCreateSampler(renderer.device, &desc)
+end
+
+global function nebula_text_load_ascii_font(out_font: *NebulaAsciiFontAtlas, renderer: *NebulaRenderer): boolean
+  local pixels: *cuchar = nilptr
+  local w: uint32 = 0
+  local h: uint32 = 0
+  if not nebula_text_read_pgm_gray8(NEBULA_ASCII_ATLAS_PATH, &pixels, &w, &h) then
+    return false
+  end
+
+  local tex: WGPUTexture = nilptr
+  local view: WGPUTextureView = nilptr
+  local ok = nebula_upload_texture(
+    &tex,
+    &view,
+    renderer,
+    pixels,
+    w,
+    h,
+    WGPUTextureFormat_R8Unorm,
+    w,
+    "nebula-ascii-atlas"
+  )
+  free(pixels)
+  if not ok then
+    return false
+  end
+
+  local sampler = nebula_text_create_sampler(renderer, "nebula-ascii-sampler")
+  if sampler == nilptr then
+    return false
+  end
+
+  $out_font = NebulaAsciiFontAtlas{
+    texture = tex,
+    view = view,
+    sampler = sampler,
+    width = w,
+    height = h,
+  }
+  return true
+end
+
+global function nebula_text_mesh_upload(renderer: *NebulaRenderer, mesh: *NebulaTextMesh, data: pointer, size: csize, vertex_count: uint32, label: cstring): boolean
+  if mesh.vertex_buffer ~= nilptr and mesh.vertex_buffer_size < (@uint64)(size) then
+    wgpuBufferRelease(mesh.vertex_buffer)
+    mesh.vertex_buffer = nilptr
+    mesh.vertex_buffer_size = 0
+  end
+  if vertex_count == 0 or size == 0 then
+    mesh.vertex_count = 0
+    return true
+  end
+  if mesh.vertex_buffer == nilptr then
+    if not nebula_create_vertex_buffer(&mesh.vertex_buffer, renderer, data, size, label) then
+      return false
+    end
+    mesh.vertex_buffer_size = (@uint64)(size)
+  else
+    wgpuQueueWriteBuffer(renderer.queue, mesh.vertex_buffer, 0, data, size)
+  end
+  mesh.vertex_count = vertex_count
+  return true
+end
+
+global function nebula_ascii_text_build_vertices(
+  text: cstring,
+  origin_x: float32,
+  origin_y: float32,
+  pixel_height: float32,
+  out_vertices: *NebulaPosUvVertex,
+  max_vertices: uint32,
+  out_width: *float32,
+  out_height: *float32
+): uint32
+  if text == nilptr then
+    $out_width = 0.0
+    $out_height = 0.0
+    return 0
+  end
+
+  local scale = pixel_height / NEBULA_ASCII_PIXEL_HEIGHT
+  local line_height = (NEBULA_ASCII_ASCENT - NEBULA_ASCII_DESCENT + NEBULA_ASCII_LINE_GAP) * scale
+  local baseline_start = origin_y + NEBULA_ASCII_ASCENT * scale
+  local pen_x = origin_x
+  local baseline_y = baseline_start
+  local min_x = origin_x
+  local min_y = origin_y
+  local max_x = origin_x
+  local max_y = origin_y
+  local saw_quad = false
+  local vertex_count: uint32 = 0
+  local i: csize = 0
+  local text_len = strlen(text)
+  local text_bytes = (@*[0]uint8)(text)
+  local verts_ptr = (@*[0]NebulaPosUvVertex)(out_vertices)
+
+  while i < text_len and vertex_count + 6 <= max_vertices do
+    local cp = (@cint)(text_bytes[i])
+    if cp == 10 then
+      pen_x = origin_x
+      baseline_y = baseline_y + line_height
+      if baseline_y > max_y then max_y = baseline_y end
+      i = i + 1
+    elseif cp == 13 then
+      i = i + 1
+    else
+      local glyph: NebulaGeneratedAsciiGlyph
+      if nebula_ascii_glyph_for_codepoint(cp, &glyph) then
+        local x0 = pen_x + (@float32)(glyph.xoff) * scale
+        local y0 = baseline_y + (@float32)(glyph.yoff) * scale
+        local x1 = x0 + (@float32)(glyph.width) * scale
+        local y1 = y0 + (@float32)(glyph.height) * scale
+
+        if glyph.width > 0 and glyph.height > 0 then
+          verts_ptr[vertex_count + 0] = NebulaPosUvVertex{ position = Vec2{ x = x0, y = y0 }, uv = Vec2{ x = glyph.u0, y = glyph.v0 } }
+          verts_ptr[vertex_count + 1] = NebulaPosUvVertex{ position = Vec2{ x = x1, y = y0 }, uv = Vec2{ x = glyph.u1, y = glyph.v0 } }
+          verts_ptr[vertex_count + 2] = NebulaPosUvVertex{ position = Vec2{ x = x1, y = y1 }, uv = Vec2{ x = glyph.u1, y = glyph.v1 } }
+          verts_ptr[vertex_count + 3] = NebulaPosUvVertex{ position = Vec2{ x = x0, y = y0 }, uv = Vec2{ x = glyph.u0, y = glyph.v0 } }
+          verts_ptr[vertex_count + 4] = NebulaPosUvVertex{ position = Vec2{ x = x1, y = y1 }, uv = Vec2{ x = glyph.u1, y = glyph.v1 } }
+          verts_ptr[vertex_count + 5] = NebulaPosUvVertex{ position = Vec2{ x = x0, y = y1 }, uv = Vec2{ x = glyph.u0, y = glyph.v1 } }
+          vertex_count = vertex_count + 6
+          if not saw_quad then
+            min_x = x0
+            min_y = y0
+            max_x = x1
+            max_y = y1
+            saw_quad = true
+          else
+            if x0 < min_x then min_x = x0 end
+            if y0 < min_y then min_y = y0 end
+            if x1 > max_x then max_x = x1 end
+            if y1 > max_y then max_y = y1 end
+          end
+        end
+        pen_x = pen_x + glyph.advance * scale
+        if pen_x > max_x then max_x = pen_x end
+      end
+      i = i + 1
+    end
+  end
+
+  if not saw_quad then
+    max_y = origin_y + line_height
+    min_y = origin_y
+    max_x = pen_x
+    min_x = origin_x
+  end
+
+  if max_x < min_x then max_x = min_x end
+  if max_y < min_y then max_y = min_y end
+  $out_width = max_x - min_x
+  $out_height = max_y - min_y
+  return vertex_count
+end

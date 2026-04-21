@@ -75,6 +75,8 @@ function nebula_annotate(type_name, spec)
     primitives   = spec.primitives   or {},
     transitions  = spec.transitions  or {},
     component_id = spec.component_id or 0,  -- Phase 2.4: focusable 原语的组件 ID
+    text_mode    = spec.text_mode    or nil,
+    max_chars    = spec.max_chars    or 256,
   }
 end
 
@@ -436,12 +438,12 @@ end
 
 -- 加载着色器组合器模块
 local shader_compose_mod = require "derive.shader_compose"
-assert(shader_compose_mod == "nebula_shader_compose_v0.2_phase2.5.1",
+assert(shader_compose_mod == "nebula_shader_compose_v0.3_phase3.2.3",
   "nebula: failed to load derive/shader_compose.lua")
 
 -- ★ Phase 2.3.2: 加载管线工厂模块
 local pipeline_factory_mod = require "derive.pipeline_factory"
-assert(pipeline_factory_mod == "nebula_pipeline_factory_v0.3_phase3.2.2",
+assert(pipeline_factory_mod == "nebula_pipeline_factory_v0.4_phase3.2.4",
   "nebula: failed to load derive/pipeline_factory.lua")
 
 -- ★ Phase 2.4: 加载交互原语工厂模块
@@ -821,6 +823,125 @@ local function derive_base_name(type_name)
   return type_name
 end
 
+local function gen_text_context_for(type_name, base, reg, state_fields)
+  local ctx = base .. "Context"
+  local pipe = base .. "Pipeline"
+  local color_field = nil
+  for _, state in ipairs(reg.states) do
+    local info = state_fields[state] and state_fields[state].text_color or nil
+    if info then
+      color_field = info.name
+      break
+    end
+  end
+  assert(color_field, "text derive requires <state>_text_color field")
+
+  local max_chars = reg.max_chars or 256
+  local max_vertices = max_chars * 6
+  local lines = {}
+  table.insert(lines, ("global %s = @record{"):format(ctx))
+  table.insert(lines, ("  visual: %s,"):format(type_name))
+  table.insert(lines, ("  sm:     %sStateMachine,"):format(base))
+  table.insert(lines,  "  mesh:   NebulaTextMesh,")
+  table.insert(lines,  "  current_text_color: Color,")
+  table.insert(lines,  "}")
+
+  table.insert(lines, ("function %s:init(vis: %s): void"):format(ctx, type_name))
+  table.insert(lines,  "  self.visual = vis")
+  table.insert(lines,  "  self.sm:init()")
+  table.insert(lines,  "  self.mesh:init()")
+  table.insert(lines, ("  self.current_text_color = vis.%s"):format(color_field))
+  table.insert(lines,  "end")
+
+  table.insert(lines, ("function %s:update(_input: *NebulaInputState, _dt: float32): void"):format(ctx))
+  table.insert(lines, ("  self.current_text_color = self.visual.%s"):format(color_field))
+  table.insert(lines,  "end")
+
+  table.insert(lines, ("function %s:set_text(renderer: *NebulaRenderer, text: cstring): boolean"):format(ctx))
+  table.insert(lines, ("  local verts: [%d]NebulaPosUvVertex"):format(max_vertices))
+  table.insert(lines,  "  local mesh_w: float32 = 0.0")
+  table.insert(lines,  "  local mesh_h: float32 = 0.0")
+  table.insert(lines,  "  local vertex_count = nebula_ascii_text_build_vertices(")
+  table.insert(lines,  "    text,")
+  table.insert(lines,  "    self.visual.pos.x,")
+  table.insert(lines,  "    self.visual.pos.y,")
+  table.insert(lines,  "    self.visual.pixel_height,")
+  table.insert(lines,  "    &verts[0],")
+  table.insert(lines, ("    (@uint32)(%d),"):format(max_vertices))
+  table.insert(lines,  "    &mesh_w,")
+  table.insert(lines,  "    &mesh_h")
+  table.insert(lines,  "  )")
+  table.insert(lines,  "  self.visual.size = Vec2{ x = mesh_w, y = mesh_h }")
+  table.insert(lines,  "  self.mesh.width = mesh_w")
+  table.insert(lines,  "  self.mesh.height = mesh_h")
+  table.insert(lines,  "  local data_ptr: pointer = nilptr")
+  table.insert(lines,  "  local data_size: csize = 0")
+  table.insert(lines,  "  if vertex_count > 0 then")
+  table.insert(lines,  "    data_ptr = &verts[0]")
+  table.insert(lines,  "    data_size = (@csize)((@uint64)(vertex_count) * (@uint64)(#NebulaPosUvVertex))")
+  table.insert(lines,  "  end")
+  table.insert(lines, ("  if not nebula_text_mesh_upload(renderer, &self.mesh, data_ptr, data_size, vertex_count, \"%s\") then return false end"):format("nebula-" .. base:lower() .. "-mesh"))
+  table.insert(lines,  "  return true")
+  table.insert(lines,  "end")
+
+  return table.concat(lines, "\n")
+end
+
+function nebula_derive_text_visual(type_name)
+  local reg = nebula_registry[type_name]
+  assert(reg, "nebula_derive_text_visual: type '" .. type_name .. "' must be annotated first via nebula_annotate")
+
+  local base_fields, state_fields = nebula_parse_shape(type_name)
+  local all_props = collect_all_props(reg, state_fields)
+  local base = derive_base_name(type_name)
+  local uniforms_record = base .. "Uniforms"
+  local layout = nebula_gen_uniform_layout(type_name, {
+    record_name      = uniforms_record,
+    wgsl_struct_name = "Uniforms",
+  })
+
+  local shader_result = nebula_compose_text_shader({
+    wgsl_struct  = layout.wgsl_struct,
+    struct_name  = layout.wgsl_struct_name,
+  })
+
+  local parts = {
+    gen_state_enum(base, reg),
+    gen_state_machine(base, reg),
+    gen_text_context_for(type_name, base, reg, state_fields),
+  }
+
+  local pipeline_spec = {
+    base            = base,
+    visual_type     = type_name,
+    uniforms_record = uniforms_record,
+    wgsl_source     = shader_result.source,
+    uniform_size    = layout.total_size,
+    layout_fields   = layout.fields,
+    base_fields     = base_fields,
+    all_props       = all_props,
+    textured        = shader_result.textured,
+    vertex_layout   = shader_result.vertex_layout,
+  }
+  table.insert(parts, nebula_gen_to_uniforms_typed(pipeline_spec))
+  table.insert(parts, nebula_gen_pipeline_source(pipeline_spec))
+
+  local source = table.concat(parts, "\n\n")
+  print(("[derive-text] %s: emit TextContext + Uniforms + TextPipeline (%dB uniforms, max_chars=%d)"):format(
+    type_name, layout.total_size, reg.max_chars or 256))
+
+  local rec_ast = aster.parse(layout.nelua_record_source,
+                              "<nebula_derive_text:" .. uniforms_record .. ">")
+  for _, stat in ipairs(rec_ast) do
+    inject_statement(stat)
+  end
+
+  local block_ast = aster.parse(source, "<nebula_derive_text:" .. type_name .. ">")
+  for _, stat in ipairs(block_ast) do
+    inject_statement(stat)
+  end
+end
+
 -- ---- 主入口：派生并 inject 到调用点 ----
 --
 -- Phase 2.3.3: 扩展 nebula_derive 在调用点额外发出：
@@ -832,6 +953,10 @@ end
 function nebula_derive(type_name)
   local reg = nebula_registry[type_name]
   assert(reg, "nebula_derive: type '" .. type_name .. "' must be annotated first via nebula_annotate")
+
+  if reg.text_mode == "ascii_sdf" then
+    return nebula_derive_text_visual(type_name)
+  end
 
   local base_fields, state_fields = nebula_parse_shape(type_name)
   local all_props = collect_all_props(reg, state_fields)
@@ -901,6 +1026,8 @@ function nebula_derive(type_name)
     blur_h_source       = shader_result.blur_h_source,
     blur_v_source       = shader_result.blur_v_source,
     composite_source    = shader_result.composite_source,
+    textured            = shader_result.textured,
+    vertex_layout       = shader_result.vertex_layout,
   }
   table.insert(parts, nebula_gen_to_uniforms_typed(pipeline_spec))
   table.insert(parts, nebula_gen_pipeline_source(pipeline_spec))
