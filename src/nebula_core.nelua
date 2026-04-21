@@ -441,7 +441,7 @@ assert(shader_compose_mod == "nebula_shader_compose_v0.2_phase2.5.1",
 
 -- ★ Phase 2.3.2: 加载管线工厂模块
 local pipeline_factory_mod = require "derive.pipeline_factory"
-assert(pipeline_factory_mod == "nebula_pipeline_factory_v0.2_phase2.5.1",
+assert(pipeline_factory_mod == "nebula_pipeline_factory_v0.3_phase3.2.2",
   "nebula: failed to load derive/pipeline_factory.lua")
 
 -- ★ Phase 2.4: 加载交互原语工厂模块

@@ -56,6 +56,8 @@ end
 -- =============================================================================
 global WGPUTextureFormat = @uint32
 global WGPUTextureFormat_Undefined  <comptime> = (@WGPUTextureFormat)(0x00000000)
+global WGPUTextureFormat_R8Unorm    <comptime> = (@WGPUTextureFormat)(0x00000001)
+global WGPUTextureFormat_RGBA8Unorm <comptime> = (@WGPUTextureFormat)(0x00000012)
 global WGPUTextureFormat_BGRA8Unorm <comptime> = (@WGPUTextureFormat)(0x00000017)
 
 global WGPUPresentMode = @uint32
@@ -74,6 +76,14 @@ global WGPUBufferUsage = @uint32
 global WGPUBufferUsage_Uniform <comptime> = (@WGPUBufferUsage)(0x00000040)
 global WGPUBufferUsage_CopyDst <comptime> = (@WGPUBufferUsage)(0x00000008)
 global WGPUBufferUsage_Vertex  <comptime> = (@WGPUBufferUsage)(0x00000020)
+
+global WGPUVertexFormat = @uint32
+global WGPUVertexFormat_Float32x2 <comptime> = (@WGPUVertexFormat)(0x0000001D)
+
+global WGPUVertexStepMode = @uint32
+global WGPUVertexStepMode_Undefined <comptime> = (@WGPUVertexStepMode)(0x00000000)
+global WGPUVertexStepMode_Vertex    <comptime> = (@WGPUVertexStepMode)(0x00000001)
+global WGPUVertexStepMode_Instance  <comptime> = (@WGPUVertexStepMode)(0x00000002)
 
 global WGPUShaderStage = @uint32
 global WGPUShaderStage_Vertex   <comptime> = (@WGPUShaderStage)(0x00000001)
@@ -428,6 +438,7 @@ global function wgpuDeviceCreateCommandEncoder(device: WGPUDevice, desc: pointer
 global function wgpuCommandEncoderBeginRenderPass(encoder: WGPUCommandEncoder, desc: *WGPURenderPassDescriptor): WGPURenderPassEncoder <cimport, nodecl> end
 global function wgpuRenderPassEncoderSetPipeline(pass: WGPURenderPassEncoder, pipeline: WGPURenderPipeline): void <cimport, nodecl> end
 global function wgpuRenderPassEncoderSetBindGroup(pass: WGPURenderPassEncoder, groupIndex: uint32, group: WGPUBindGroup, dynamicOffsetCount: csize, dynamicOffsets: pointer): void <cimport, nodecl> end
+global function wgpuRenderPassEncoderSetVertexBuffer(pass: WGPURenderPassEncoder, slot: uint32, buffer: WGPUBuffer, offset: uint64, size: uint64): void <cimport, nodecl> end
 global function wgpuRenderPassEncoderDraw(pass: WGPURenderPassEncoder, vertexCount: uint32, instanceCount: uint32, firstVertex: uint32, firstInstance: uint32): void <cimport, nodecl> end
 global function wgpuRenderPassEncoderEnd(pass: WGPURenderPassEncoder): void <cimport, nodecl> end
 global function wgpuRenderPassEncoderRelease(pass: WGPURenderPassEncoder): void <cimport, nodecl> end
@@ -436,6 +447,7 @@ global function wgpuCommandEncoderRelease(encoder: WGPUCommandEncoder): void <ci
 global function wgpuQueueSubmit(queue: WGPUQueue, commandCount: csize, commands: *WGPUCommandBuffer): void <cimport, nodecl> end
 global function wgpuCommandBufferRelease(buf: WGPUCommandBuffer): void <cimport, nodecl> end
 global function wgpuBindGroupRelease(bg: WGPUBindGroup): void <cimport, nodecl> end
+global function wgpuBufferRelease(buffer: WGPUBuffer): void <cimport, nodecl> end
 global function wgpuInstanceRelease(instance: WGPUInstance): void <cimport, nodecl> end
 global function wgpuAdapterRelease(adapter: WGPUAdapter): void <cimport, nodecl> end
 global function wgpuDeviceRelease(device: WGPUDevice): void <cimport, nodecl> end
@@ -465,7 +477,8 @@ global WGPUTextureViewDimension_2D <comptime> = (@WGPUTextureViewDimension)(0x00
 
 -- ===== 纹理 Aspect =====
 global WGPUTextureAspect = @uint32
-global WGPUTextureAspect_All <comptime> = (@WGPUTextureAspect)(0x00000001)
+global WGPUTextureAspect_Undefined <comptime> = (@WGPUTextureAspect)(0x00000000)
+global WGPUTextureAspect_All       <comptime> = (@WGPUTextureAspect)(0x00000001)
 
 -- ===== 采样器绑定类型 =====
 global WGPUSamplerBindingType = @uint32
@@ -495,6 +508,33 @@ global WGPUExtent3D <cimport, nodecl> = @record{
   depthOrArrayLayers: uint32,
 }
 
+global WGPUOrigin3D <cimport, nodecl> = @record{
+  x: uint32,
+  y: uint32,
+  z: uint32,
+}
+
+global WGPUTexelCopyBufferLayout <cimport, nodecl> = @record{
+  offset:       uint64,
+  bytesPerRow:  uint32,
+  rowsPerImage: uint32,
+}
+
+global WGPUVertexAttribute <cimport, nodecl> = @record{
+  nextInChain:    pointer,
+  format:         WGPUVertexFormat,
+  offset:         uint64,
+  shaderLocation: uint32,
+}
+
+global WGPUVertexBufferLayout <cimport, nodecl> = @record{
+  nextInChain:   pointer,
+  stepMode:      WGPUVertexStepMode,
+  arrayStride:   uint64,
+  attributeCount: csize,
+  attributes:    *WGPUVertexAttribute,
+}
+
 -- ===== 纹理描述符 =====
 global WGPUTextureDescriptor <cimport, nodecl> = @record{
   nextInChain:     pointer,
@@ -507,6 +547,13 @@ global WGPUTextureDescriptor <cimport, nodecl> = @record{
   sampleCount:     uint32,
   viewFormatCount: csize,
   viewFormats:     pointer,
+}
+
+global WGPUTexelCopyTextureInfo <cimport, nodecl> = @record{
+  texture:  WGPUTexture,
+  mipLevel: uint32,
+  origin:   WGPUOrigin3D,
+  aspect:   WGPUTextureAspect,
 }
 
 -- ===== 采样器描述符 =====
@@ -525,6 +572,7 @@ global WGPUSamplerDescriptor <cimport, nodecl> = @record{
   maxAnisotropy: uint16,
 }
 
--- ===== Phase 2.5 额外函数绑定 =====
+-- ===== Phase 2.5 / 3.2.2 额外函数绑定 =====
 global function wgpuDeviceCreateTexture(device: WGPUDevice, desc: *WGPUTextureDescriptor): WGPUTexture <cimport, nodecl> end
 global function wgpuDeviceCreateSampler(device: WGPUDevice, desc: *WGPUSamplerDescriptor): WGPUSampler <cimport, nodecl> end
+global function wgpuQueueWriteTexture(queue: WGPUQueue, destination: *WGPUTexelCopyTextureInfo, data: pointer, dataSize: csize, dataLayout: *WGPUTexelCopyBufferLayout, writeSize: *WGPUExtent3D): void <cimport, nodecl> end

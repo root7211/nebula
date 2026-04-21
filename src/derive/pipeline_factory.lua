@@ -97,6 +97,97 @@ local function gen_pipeline_simple(base, uniforms_record, wgsl_source)
 end
 
 -- =============================================================================
+-- ★ Phase 3.2.2: 生成带 Position/UV 顶点布局的 textured <T>Pipeline
+--
+-- 用于后续文本渲染管线：
+--   · uniform buffer 继续承载布局/颜色/屏幕参数
+--   · bind group 额外绑定字体 atlas 纹理与 sampler
+--   · draw() 改为显式设置 vertex buffer
+-- =============================================================================
+local function gen_pipeline_textured_vertex(base, uniforms_record, wgsl_source)
+  local pipe = base .. "Pipeline"
+  local lines = {}
+
+  table.insert(lines, ("-- === Derived pipeline: %s (uniforms=%s, textured_vertex=true) ==="):format(pipe, uniforms_record))
+  table.insert(lines, ("global %s = @record{"):format(pipe))
+  table.insert(lines,  "  pipeline:      WGPURenderPipeline,")
+  table.insert(lines,  "  bind_layout:   WGPUBindGroupLayout,")
+  table.insert(lines,  "  uniform_buf:   WGPUBuffer,")
+  table.insert(lines,  "  bind_group:    WGPUBindGroup,")
+  table.insert(lines,  "  vertex_buf:    WGPUBuffer,")
+  table.insert(lines,  "  vertex_buf_size: uint64,")
+  table.insert(lines,  "  vertex_count:  uint32,")
+  table.insert(lines,  "}")
+
+  local wgsl_const = "NEBULA_WGSL_" .. base:upper()
+  table.insert(lines, ("local %s <comptime> = %s"):format(
+    wgsl_const, escape_to_long_bracket(wgsl_source)))
+
+  table.insert(lines, ("function %s:init(renderer: *NebulaRenderer): boolean"):format(pipe))
+  table.insert(lines,  "  local attrs: [2]WGPUVertexAttribute")
+  table.insert(lines,  "  local layout: WGPUVertexBufferLayout")
+  table.insert(lines,  "  nebula_init_pos_uv_vertex_layout(&layout, &attrs[0])")
+  table.insert(lines,  "  local ok = nebula_pipeline_textured_vertex_init(")
+  table.insert(lines,  "    &self.pipeline,")
+  table.insert(lines,  "    &self.bind_layout,")
+  table.insert(lines,  "    &self.uniform_buf,")
+  table.insert(lines,  "    renderer,")
+  table.insert(lines, ("    %s,"):format(wgsl_const))
+  table.insert(lines, ("    (@csize)(#%s),"):format(uniforms_record))
+  table.insert(lines,  "    renderer.format,")
+  table.insert(lines,  "    &layout,")
+  table.insert(lines, ("    \"%s\""):format("nebula-" .. base:lower() .. "-textured"))
+  table.insert(lines,  "  )")
+  table.insert(lines,  "  if ok then")
+  table.insert(lines,  "    self.bind_group = nilptr")
+  table.insert(lines,  "    self.vertex_buf = nilptr")
+  table.insert(lines,  "    self.vertex_buf_size = 0")
+  table.insert(lines,  "    self.vertex_count = 0")
+  table.insert(lines, ("    printf(\"wgpu: %s textured vertex pipeline created\\n\")"):format(base:lower()))
+  table.insert(lines,  "  end")
+  table.insert(lines,  "  return ok")
+  table.insert(lines,  "end")
+
+  table.insert(lines, ("function %s:update_uniforms(renderer: *NebulaRenderer, uniforms: *%s): void"):format(
+    pipe, uniforms_record))
+  table.insert(lines, ("  wgpuQueueWriteBuffer(renderer.queue, self.uniform_buf, 0, uniforms, #%s)"):format(
+    uniforms_record))
+  table.insert(lines,  "end")
+
+  table.insert(lines, ("function %s:update_texture_binding(renderer: *NebulaRenderer, tex_view: WGPUTextureView, sampler: WGPUSampler): boolean"):format(pipe))
+  table.insert(lines, ("  self.bind_group = nebula_create_textured_bind_group(renderer, self.bind_layout, self.uniform_buf, tex_view, sampler, (@csize)(#%s), \"%s\")"):format(
+    uniforms_record, "nebula-" .. base:lower() .. "-textured-bg"))
+  table.insert(lines,  "  return self.bind_group ~= nilptr")
+  table.insert(lines,  "end")
+
+  table.insert(lines, ("function %s:upload_vertices(renderer: *NebulaRenderer, data: pointer, size: csize, vertex_count: uint32): boolean"):format(pipe))
+  table.insert(lines,  "  if self.vertex_buf ~= nilptr and self.vertex_buf_size < (@uint64)(size) then")
+  table.insert(lines,  "    wgpuBufferRelease(self.vertex_buf)")
+  table.insert(lines,  "    self.vertex_buf = nilptr")
+  table.insert(lines,  "  end")
+  table.insert(lines,  "  if self.vertex_buf == nilptr then")
+  table.insert(lines, ("    if not nebula_create_vertex_buffer(&self.vertex_buf, renderer, data, size, \"%s\") then return false end"):format(
+    "nebula-" .. base:lower() .. "-vbuf"))
+  table.insert(lines,  "    self.vertex_buf_size = (@uint64)(size)")
+  table.insert(lines,  "  elseif data ~= nilptr and size > 0 then")
+  table.insert(lines,  "    wgpuQueueWriteBuffer(renderer.queue, self.vertex_buf, 0, data, size)")
+  table.insert(lines,  "  end")
+  table.insert(lines,  "  self.vertex_count = vertex_count")
+  table.insert(lines,  "  return true")
+  table.insert(lines,  "end")
+
+  table.insert(lines, ("function %s:draw(pass: WGPURenderPassEncoder): void"):format(pipe))
+  table.insert(lines,  "  if self.bind_group == nilptr or self.vertex_buf == nilptr or self.vertex_count == 0 then return end")
+  table.insert(lines,  "  wgpuRenderPassEncoderSetPipeline(pass, self.pipeline)")
+  table.insert(lines,  "  wgpuRenderPassEncoderSetBindGroup(pass, 0, self.bind_group, 0, nilptr)")
+  table.insert(lines,  "  wgpuRenderPassEncoderSetVertexBuffer(pass, 0, self.vertex_buf, 0, self.vertex_buf_size)")
+  table.insert(lines,  "  wgpuRenderPassEncoderDraw(pass, self.vertex_count, 1, 0, 0)")
+  table.insert(lines,  "end")
+
+  return table.concat(lines, "\n")
+end
+
+-- =============================================================================
 -- ★ Phase 2.5: 生成带阴影的多 Sub-pipeline <T>Pipeline
 --
 -- 架构：
@@ -409,6 +500,8 @@ function nebula_gen_pipeline_source(spec)
     return gen_pipeline_shadow(
       spec.base, spec.uniforms_record, spec.wgsl_source,
       spec.shadow_mask_source, spec.blur_h_source, spec.blur_v_source, spec.composite_source)
+  elseif spec.textured and spec.vertex_layout == "pos_uv" then
+    return gen_pipeline_textured_vertex(spec.base, spec.uniforms_record, spec.wgsl_source)
   else
     return gen_pipeline_simple(spec.base, spec.uniforms_record, spec.wgsl_source)
   end
@@ -464,4 +557,4 @@ function nebula_gen_to_uniforms_typed(spec)
 end
 
 -- 返回模块标识
-return "nebula_pipeline_factory_v0.2_phase2.5.1"
+return "nebula_pipeline_factory_v0.3_phase3.2.2"
