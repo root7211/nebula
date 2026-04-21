@@ -283,15 +283,15 @@ global function nebula_pipeline_base_init(
   local entry = WGPUBindGroupLayoutEntry{
     nextInChain = nilptr,
     binding     = 0,
-    visibility  = (@uint32)(WGPUShaderStage_Vertex) | (@uint32)(WGPUShaderStage_Fragment),
+    visibility  = (@uint64)(WGPUShaderStage_Vertex) | (@uint64)(WGPUShaderStage_Fragment),
     buffer      = {
       nextInChain      = nilptr,
       type             = (@uint32)(WGPUBufferBindingType_Uniform),
-      hasDynamicOffset = false,
+      hasDynamicOffset = 0,
       minBindingSize   = (@uint64)(uniform_size),
     },
     sampler        = {nextInChain = nilptr, type = 0},
-    texture        = {nextInChain = nilptr, sampleType = 0, viewDimension = 0, multisampled = false},
+    texture        = {nextInChain = nilptr, sampleType = 0, viewDimension = 0, multisampled = 0},
     storageTexture = {nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0},
   }
   local bgl_desc = WGPUBindGroupLayoutDescriptor{
@@ -431,3 +431,368 @@ end
 -- 均已迁移到 nebula_derive 生成的 <T>Uniforms / <T>Pipeline，因此此兼容层
 -- 已于清理阶段删除。参见 docs/PLAN_PHASE2_3.md 验收标准第 2 项。
 -- =============================================================================
+
+-- =============================================================================
+-- ★ Phase 2.5: 离屏渲染基础设施
+--
+-- 为多 Pass 渲染（Shadow / Blur）提供离屏纹理创建、采样器创建
+-- 和带纹理绑定的管线初始化函数。
+-- =============================================================================
+
+-- =============================================================================
+-- nebula_create_render_target
+--
+-- 分配一个指定尺寸的离屏纹理（BGRA8Unorm），同时创建其 TextureView。
+-- 用途标记为 RenderAttachment | TextureBinding，使其既可作为渲染目标，
+-- 又可在后续 Pass 中作为纹理采样源。
+--
+-- 参数：
+--   out_texture  — 输出：WGPUTexture 句柄
+--   out_view     — 输出：WGPUTextureView 句柄
+--   renderer     — 关联的 NebulaRenderer
+--   w, h         — 纹理尺寸
+--   label        — 调试标签
+--
+-- 返回：成功返回 true
+-- =============================================================================
+global function nebula_create_render_target(
+  out_texture: *WGPUTexture,
+  out_view:    *WGPUTextureView,
+  renderer:    *NebulaRenderer,
+  w: uint32, h: uint32,
+  label: cstring
+): boolean
+  local tex_desc = WGPUTextureDescriptor{
+    nextInChain     = nilptr,
+    label           = wgpu_str(label),
+    usage           = (@uint32)(WGPUTextureUsage_RenderAttachment) | (@uint32)(WGPUTextureUsage_TextureBinding),
+    dimension       = WGPUTextureDimension_2D,
+    size            = WGPUExtent3D{ width = w, height = h, depthOrArrayLayers = 1 },
+    format          = renderer.format,
+    mipLevelCount   = 1,
+    sampleCount     = 1,
+    viewFormatCount = 0,
+    viewFormats     = nilptr,
+  }
+  $out_texture = wgpuDeviceCreateTexture(renderer.device, &tex_desc)
+  if $out_texture == nilptr then
+    printf("wgpu: failed to create render target texture (%s)\n", label)
+    return false
+  end
+
+  local view_desc = WGPUTextureViewDescriptor{
+    nextInChain     = nilptr,
+    label           = wgpu_str(label),
+    format          = renderer.format,
+    dimension       = (@uint32)(WGPUTextureViewDimension_2D),
+    baseMipLevel    = 0,
+    mipLevelCount   = 1,
+    baseArrayLayer  = 0,
+    arrayLayerCount = 1,
+    aspect          = (@uint32)(WGPUTextureAspect_All),
+    usage           = 0,
+  }
+  $out_view = wgpuTextureCreateView($out_texture, &view_desc)
+  if $out_view == nilptr then
+    printf("wgpu: failed to create render target view (%s)\n", label)
+    return false
+  end
+
+  printf("wgpu: render target created (%s, %dx%d)\n", label, w, h)
+  return true
+end
+
+-- =============================================================================
+-- nebula_create_sampler
+--
+-- 创建一个线性过滤、边缘钳位的采样器，用于模糊 Pass 的纹理采样。
+--
+-- 参数：
+--   renderer — 关联的 NebulaRenderer
+--
+-- 返回：WGPUSampler 句柄（nilptr 表示失败）
+-- =============================================================================
+global function nebula_create_sampler(renderer: *NebulaRenderer): WGPUSampler
+  local desc = WGPUSamplerDescriptor{
+    nextInChain   = nilptr,
+    label         = wgpu_str("nebula-blur-sampler"),
+    addressModeU  = WGPUAddressMode_ClampToEdge,
+    addressModeV  = WGPUAddressMode_ClampToEdge,
+    addressModeW  = WGPUAddressMode_ClampToEdge,
+    magFilter     = WGPUFilterMode_Linear,
+    minFilter     = WGPUFilterMode_Linear,
+    mipmapFilter  = WGPUMipmapFilterMode_Nearest,
+    lodMinClamp   = 0.0,
+    lodMaxClamp   = 1.0,
+    compare       = 0,
+    maxAnisotropy = 1,
+  }
+  local sampler = wgpuDeviceCreateSampler(renderer.device, &desc)
+  if sampler == nilptr then
+    printf("wgpu: failed to create sampler\n")
+  end
+  return sampler
+end
+
+-- =============================================================================
+-- nebula_pipeline_textured_init
+--
+-- 与 nebula_pipeline_base_init 类似，但 BindGroupLayout 包含三个条目：
+--   binding 0: Uniform Buffer
+--   binding 1: Texture（2D, float, filterable）
+--   binding 2: Sampler（filtering）
+--
+-- 用于模糊 Pass 的管线初始化，这些 Pass 需要从上一个 Pass 的离屏纹理中采样。
+--
+-- 参数：
+--   out_pipeline    — 输出：WGPURenderPipeline
+--   out_bgl         — 输出：WGPUBindGroupLayout
+--   out_ubuf        — 输出：WGPUBuffer（blur uniform buffer）
+--   renderer        — NebulaRenderer
+--   wgsl_source     — WGSL 着色器源码
+--   uniform_size    — Blur uniform 字节大小
+--   target_format   — 渲染目标的纹理格式
+--   label           — 调试标签
+--
+-- 返回：成功返回 true
+-- =============================================================================
+global function nebula_pipeline_textured_init(
+  out_pipeline:   *WGPURenderPipeline,
+  out_bgl:        *WGPUBindGroupLayout,
+  out_ubuf:       *WGPUBuffer,
+  renderer:       *NebulaRenderer,
+  wgsl_source:    cstring,
+  uniform_size:   csize,
+  target_format:  WGPUTextureFormat,
+  label:          cstring
+): boolean
+  local device = renderer.device
+
+  -- 1. Uniform Buffer（用于传递模糊方向、半径等参数）
+  local buf_desc = WGPUBufferDescriptor{
+    nextInChain      = nilptr,
+    label            = wgpu_str(label),
+    usage            = (@uint32)(WGPUBufferUsage_Uniform) | (@uint32)(WGPUBufferUsage_CopyDst),
+    size             = (@uint64)(uniform_size),
+    mappedAtCreation = false,
+  }
+  $out_ubuf = wgpuDeviceCreateBuffer(device, &buf_desc)
+  if $out_ubuf == nilptr then
+    printf("wgpu: failed to create blur uniform buffer (%s)\n", label)
+    return false
+  end
+
+  -- 2. BindGroupLayout（3 entries: uniform + texture + sampler）
+  local entries: [3]WGPUBindGroupLayoutEntry
+  -- binding 0: uniform buffer
+  entries[0] = WGPUBindGroupLayoutEntry{
+    nextInChain = nilptr,
+    binding     = 0,
+    visibility  = (@uint64)(WGPUShaderStage_Fragment),
+    buffer      = {
+      nextInChain      = nilptr,
+      type             = (@uint32)(WGPUBufferBindingType_Uniform),
+      hasDynamicOffset = 0,
+      minBindingSize   = (@uint64)(uniform_size),
+    },
+    sampler        = {nextInChain = nilptr, type = 0},
+    texture        = {nextInChain = nilptr, sampleType = 0, viewDimension = 0, multisampled = 0},
+    storageTexture = {nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0},
+  }
+  -- binding 1: texture
+  entries[1] = WGPUBindGroupLayoutEntry{
+    nextInChain = nilptr,
+    binding     = 1,
+    visibility  = (@uint64)(WGPUShaderStage_Fragment),
+    buffer      = {nextInChain = nilptr, type = 0, hasDynamicOffset = 0, minBindingSize = 0},
+    sampler     = {nextInChain = nilptr, type = 0},
+    texture     = {
+      nextInChain    = nilptr,
+      sampleType     = (@uint32)(WGPUTextureSampleType_Float),
+      viewDimension  = (@uint32)(WGPUTextureViewDimension_2D),
+      multisampled   = 0,
+    },
+    storageTexture = {nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0},
+  }
+  -- binding 2: sampler
+  entries[2] = WGPUBindGroupLayoutEntry{
+    nextInChain = nilptr,
+    binding     = 2,
+    visibility  = (@uint64)(WGPUShaderStage_Fragment),
+    buffer      = {nextInChain = nilptr, type = 0, hasDynamicOffset = 0, minBindingSize = 0},
+    sampler     = {nextInChain = nilptr, type = (@uint32)(WGPUSamplerBindingType_Filtering)},
+    texture     = {nextInChain = nilptr, sampleType = 0, viewDimension = 0, multisampled = 0},
+    storageTexture = {nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0},
+  }
+
+  local bgl_desc = WGPUBindGroupLayoutDescriptor{
+    nextInChain = nilptr,
+    label       = wgpu_str(label),
+    entryCount  = 3,
+    entries     = &entries[0],
+  }
+  $out_bgl = wgpuDeviceCreateBindGroupLayout(device, &bgl_desc)
+  if $out_bgl == nilptr then
+    printf("wgpu: failed to create textured bind group layout (%s)\n", label)
+    return false
+  end
+
+  -- 3. Shader 模块
+  local wgsl_src = WGPUShaderSourceWGSL{
+    chain = WGPUChainedStruct{
+      next  = nilptr,
+      sType = WGPUSType_ShaderSourceWGSL,
+    },
+    code = wgpu_str(wgsl_source),
+  }
+  local shader_desc = WGPUShaderModuleDescriptor{
+    nextInChain = (@*WGPUChainedStruct)(&wgsl_src),
+    label       = wgpu_str(label),
+  }
+  local shader = wgpuDeviceCreateShaderModule(device, &shader_desc)
+  if shader == nilptr then
+    printf("wgpu: failed to create shader module (%s)\n", label)
+    return false
+  end
+
+  -- 4. PipelineLayout
+  local pl_desc = WGPUPipelineLayoutDescriptor{
+    nextInChain          = nilptr,
+    label                = wgpu_str(label),
+    bindGroupLayoutCount = 1,
+    bindGroupLayouts     = out_bgl,
+  }
+  local pipeline_layout = wgpuDeviceCreatePipelineLayout(device, &pl_desc)
+
+  -- 5. Alpha 混合状态（与 base_init 一致：标准 SrcAlpha over）
+  local blend_state = WGPUBlendState{
+    color = WGPUBlendComponent{
+      operation = WGPUBlendOperation_Add,
+      srcFactor = WGPUBlendFactor_SrcAlpha,
+      dstFactor = WGPUBlendFactor_OneMinusSrcAlpha,
+    },
+    alpha = WGPUBlendComponent{
+      operation = WGPUBlendOperation_Add,
+      srcFactor = WGPUBlendFactor_One,
+      dstFactor = WGPUBlendFactor_OneMinusSrcAlpha,
+    },
+  }
+  local color_target = WGPUColorTargetState{
+    nextInChain = nilptr,
+    format      = target_format,
+    blend       = &blend_state,
+    writeMask   = (@uint32)(WGPUColorWriteMask_All),
+  }
+  local frag_state = WGPUFragmentState{
+    nextInChain   = nilptr,
+    module        = shader,
+    entryPoint    = wgpu_str("fs_main"),
+    constantCount = 0,
+    constants     = nilptr,
+    targetCount   = 1,
+    targets       = &color_target,
+  }
+
+  -- 6. RenderPipeline
+  local rp_desc = WGPURenderPipelineDescriptor{
+    nextInChain = nilptr,
+    label       = wgpu_str(label),
+    layout      = pipeline_layout,
+    vertex      = {
+      nextInChain   = nilptr,
+      module        = shader,
+      entryPoint    = wgpu_str("vs_main"),
+      constantCount = 0,
+      constants     = nilptr,
+      bufferCount   = 0,
+      buffers       = nilptr,
+    },
+    primitive = {
+      nextInChain       = nilptr,
+      topology          = WGPUPrimitiveTopology_TriangleList,
+      stripIndexFormat  = 0,
+      frontFace         = 0,
+      cullMode          = 0,
+      unclippedDepth    = false,
+    },
+    depthStencil = nilptr,
+    multisample  = {
+      nextInChain             = nilptr,
+      count                   = 1,
+      mask                    = 0xFFFFFFFF,
+      alphaToCoverageEnabled  = false,
+    },
+    fragment = &frag_state,
+  }
+  $out_pipeline = wgpuDeviceCreateRenderPipeline(device, &rp_desc)
+  if $out_pipeline == nilptr then
+    printf("wgpu: failed to create textured render pipeline (%s)\n", label)
+    return false
+  end
+
+  return true
+end
+
+-- =============================================================================
+-- nebula_create_blur_bind_group
+--
+-- 为模糊 Pass 创建 BindGroup，绑定 uniform buffer + 纹理视图 + 采样器。
+--
+-- 参数：
+--   renderer     — NebulaRenderer
+--   bgl          — 由 nebula_pipeline_textured_init 创建的 BindGroupLayout
+--   ubuf         — Blur uniform buffer
+--   tex_view     — 上一个 Pass 的输出纹理视图
+--   sampler      — 线性采样器
+--   uniform_size — Blur uniform 字节大小
+--   label        — 调试标签
+--
+-- 返回：WGPUBindGroup 句柄（nilptr 表示失败）
+-- =============================================================================
+global function nebula_create_blur_bind_group(
+  renderer:     *NebulaRenderer,
+  bgl:          WGPUBindGroupLayout,
+  ubuf:         WGPUBuffer,
+  tex_view:     WGPUTextureView,
+  sampler:      WGPUSampler,
+  uniform_size: csize,
+  label:        cstring
+): WGPUBindGroup
+  local entries: [3]WGPUBindGroupEntry
+  entries[0] = WGPUBindGroupEntry{
+    nextInChain = nilptr,
+    binding     = 0,
+    buffer      = ubuf,
+    offset      = 0,
+    size        = (@uint64)(uniform_size),
+    sampler     = nilptr,
+    textureView = nilptr,
+  }
+  entries[1] = WGPUBindGroupEntry{
+    nextInChain = nilptr,
+    binding     = 1,
+    buffer      = nilptr,
+    offset      = 0,
+    size        = 0,
+    sampler     = nilptr,
+    textureView = tex_view,
+  }
+  entries[2] = WGPUBindGroupEntry{
+    nextInChain = nilptr,
+    binding     = 2,
+    buffer      = nilptr,
+    offset      = 0,
+    size        = 0,
+    sampler     = sampler,
+    textureView = nilptr,
+  }
+
+  local bg_desc = WGPUBindGroupDescriptor{
+    nextInChain = nilptr,
+    label       = wgpu_str(label),
+    layout      = bgl,
+    entryCount  = 3,
+    entries     = &entries[0],
+  }
+  return wgpuDeviceCreateBindGroup(renderer.device, &bg_desc)
+end

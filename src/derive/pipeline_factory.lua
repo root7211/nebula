@@ -1,6 +1,6 @@
 -- =============================================================================
 -- derive/pipeline_factory.lua
--- Nebula GUI Compiler — Phase 2.3.2
+-- Nebula GUI Compiler — Phase 2.5
 --
 -- 管线代码生成器（Pipeline Factory）
 --
@@ -10,33 +10,27 @@
 --   · function <T>Pipeline:update_uniforms(renderer, uniforms)
 --   · function <T>Pipeline:draw(pass)
 --
--- 同时辅助生成强类型 to_uniforms 方法的源码，返回紧凑布局 <T>Uniforms
--- （无 force_viewport_align，遵循 std140 原生对齐）。
---
--- 所有生成的 <T>Pipeline:init 都委托调用 nebula_pipeline_base_init（由
--- renderer.nelua 提供），从而共享统一的 WGPU 样板代码。
+-- Phase 2.5 扩展：
+--   当 has_shadow=true 时，<T>Pipeline 额外包含：
+--     · shadow_mask_pipeline / blur_h_pipeline / blur_v_pipeline（子管线）
+--     · 两张离屏纹理（shadow_tex_a/b）及其视图
+--     · 采样器和模糊 BindGroup
+--     · init() 中初始化全部子管线和离屏资源
+--     · draw_shadow(encoder, main_view) 编排多 Pass 渲染
 --
 -- 公开 API：
 --   nebula_gen_pipeline_source(spec)       -> string  (Nelua 源码)
 --   nebula_gen_to_uniforms_typed(spec)     -> string  (仅 to_uniforms 方法)
 --
--- spec = {
---   base            : string  — 派生基名（如 "Button"），将生成 <base>Pipeline
---   visual_type     : string  — 原始 Visual 记录名（如 "ButtonVisual"）
---   uniforms_record : string  — 派生 uniforms 记录名（如 "ButtonUniforms"）
---   wgsl_source     : string  — 完整 WGSL 着色器源码
---   uniform_size    : number  — uniforms 字节大小（紧凑模式）
---   layout_fields   : table   — nebula_gen_uniform_layout 返回的 fields 数组
---   base_fields     : table   — Visual 中的非状态字段（如 pos / size / radius）
---   all_props       : table   — 动画属性列表（如 bg_color / border_color / ...）
--- }
+-- spec 新增字段（Phase 2.5）：
+--   has_shadow           : boolean
+--   shadow_mask_source   : string  — 阴影遮罩 WGSL
+--   blur_h_source        : string  — 水平模糊 WGSL
+--   blur_v_source        : string  — 垂直模糊 WGSL
 -- =============================================================================
 
 -- ===== 小工具：转义 WGSL 源码到 Nelua 字符串字面量 =====
--- Nelua 支持 Lua 风格的长括号字符串 [[...]]，但如果 WGSL 内部出现 ]] 会破坏
--- 定界符。最安全的做法是使用 [=[ ... ]=] 长括号（源码不可能包含 ]=]）。
 local function escape_to_long_bracket(src)
-  -- 若源码恰好包含 ]=] 则升到 [==[...]==]；实际 WGSL 永远不会包含，但保持健壮。
   local level = 1
   while src:find("]" .. string.rep("=", level) .. "]", 1, true) do
     level = level + 1
@@ -46,12 +40,14 @@ local function escape_to_long_bracket(src)
   return open .. src .. close
 end
 
--- ===== 生成 <T>Pipeline 结构体 + 方法 =====
-local function gen_pipeline_record(base, uniforms_record, wgsl_source)
+-- =============================================================================
+-- 生成无阴影的简单 <T>Pipeline（与 Phase 2.3 一致）
+-- =============================================================================
+local function gen_pipeline_simple(base, uniforms_record, wgsl_source)
   local pipe = base .. "Pipeline"
   local lines = {}
 
-  table.insert(lines, ("-- === Derived pipeline: %s (uniforms=%s) ==="):format(pipe, uniforms_record))
+  table.insert(lines, ("-- === Derived pipeline: %s (uniforms=%s, shadow=false) ==="):format(pipe, uniforms_record))
 
   -- record 定义
   table.insert(lines, ("global %s = @record{"):format(pipe))
@@ -61,14 +57,14 @@ local function gen_pipeline_record(base, uniforms_record, wgsl_source)
   table.insert(lines,  "  bind_group:  WGPUBindGroup,")
   table.insert(lines,  "}")
 
-  -- WGSL 源码常量（comptime 字符串）
+  -- WGSL 源码常量
   local wgsl_const = "NEBULA_WGSL_" .. base:upper()
   table.insert(lines, ("local %s <comptime> = %s"):format(
     wgsl_const, escape_to_long_bracket(wgsl_source)))
 
-  -- init：委托 nebula_pipeline_base_init
+  -- init
   table.insert(lines, ("function %s:init(renderer: *NebulaRenderer): boolean"):format(pipe))
-  table.insert(lines, ("  local ok = nebula_pipeline_base_init("))
+  table.insert(lines,  "  local ok = nebula_pipeline_base_init(")
   table.insert(lines,  "    &self.pipeline,")
   table.insert(lines,  "    &self.bind_layout,")
   table.insert(lines,  "    &self.uniform_buf,")
@@ -82,7 +78,7 @@ local function gen_pipeline_record(base, uniforms_record, wgsl_source)
   table.insert(lines,  "  return ok")
   table.insert(lines,  "end")
 
-  -- update_uniforms：强类型 <T>Uniforms 指针
+  -- update_uniforms
   table.insert(lines, ("function %s:update_uniforms(renderer: *NebulaRenderer, uniforms: *%s): void"):format(
     pipe, uniforms_record))
   table.insert(lines, ("  wgpuQueueWriteBuffer(renderer.queue, self.uniform_buf, 0, uniforms, #%s)"):format(
@@ -99,28 +95,296 @@ local function gen_pipeline_record(base, uniforms_record, wgsl_source)
   return table.concat(lines, "\n")
 end
 
--- ===== 主入口：生成完整的 <T>Pipeline 源码 =====
+-- =============================================================================
+-- ★ Phase 2.5: 生成带阴影的多 Sub-pipeline <T>Pipeline
+--
+-- 架构：
+--   Pass 1 (shadow_mask): 渲染偏移后的组件 SDF 遮罩到 tex_a
+--   Pass 2 (blur_h):      从 tex_a 采样，水平模糊输出到 tex_b
+--   Pass 3 (blur_v):      从 tex_b 采样，垂直模糊输出到 tex_a
+--   Pass 4 (main):        在 surface 上先合成 tex_a（模糊阴影），再绘制主组件
+--
+-- BlurUniforms 结构体（32 字节，std140 对齐）：
+--   direction:  vec2<f32>  (offset 0)
+--   texel_size: vec2<f32>  (offset 8)
+--   blur_radius: f32       (offset 16)
+--   _pad0: f32             (offset 20)
+--   _pad1: f32             (offset 24)
+--   _pad2: f32             (offset 28)
+-- =============================================================================
+local function gen_pipeline_shadow(base, uniforms_record, wgsl_source,
+                                    shadow_mask_source, blur_h_source, blur_v_source)
+  local pipe = base .. "Pipeline"
+  local L = {}  -- lines accumulator
+  local function emit(s) table.insert(L, s) end
+
+  emit(("-- === Derived pipeline: %s (uniforms=%s, shadow=true, multi-pass) ==="):format(pipe, uniforms_record))
+
+  -- BlurUniforms record（编译期注入，所有阴影组件共享）
+  emit("global NebulaBlurUniforms = @record{")
+  emit("  direction:   Vec2,")
+  emit("  texel_size:  Vec2,")
+  emit("  blur_radius: float32,")
+  emit("  _pad0: float32,")
+  emit("  _pad1: float32,")
+  emit("  _pad2: float32,")
+  emit("}")
+
+  -- record 定义（扩展版）
+  emit(("global %s = @record{"):format(pipe))
+  emit("  -- 主管线（Phase 2.3 兼容）")
+  emit("  pipeline:    WGPURenderPipeline,")
+  emit("  bind_layout: WGPUBindGroupLayout,")
+  emit("  uniform_buf: WGPUBuffer,")
+  emit("  bind_group:  WGPUBindGroup,")
+  emit("  -- Phase 2.5: 阴影子管线")
+  emit("  shadow_mask_pipeline: WGPURenderPipeline,")
+  emit("  shadow_mask_bgl:      WGPUBindGroupLayout,")
+  emit("  shadow_mask_ubuf:     WGPUBuffer,")
+  emit("  shadow_mask_bg:       WGPUBindGroup,")
+  emit("  blur_h_pipeline:      WGPURenderPipeline,")
+  emit("  blur_h_bgl:           WGPUBindGroupLayout,")
+  emit("  blur_h_ubuf:          WGPUBuffer,")
+  emit("  blur_v_pipeline:      WGPURenderPipeline,")
+  emit("  blur_v_bgl:           WGPUBindGroupLayout,")
+  emit("  blur_v_ubuf:          WGPUBuffer,")
+  emit("  -- 离屏纹理 ping-pong")
+  emit("  tex_a:      WGPUTexture,")
+  emit("  tex_a_view: WGPUTextureView,")
+  emit("  tex_b:      WGPUTexture,")
+  emit("  tex_b_view: WGPUTextureView,")
+  emit("  -- 采样器")
+  emit("  sampler:    WGPUSampler,")
+  emit("  -- 模糊 BindGroup（每帧重建或缓存）")
+  emit("  blur_h_bg:  WGPUBindGroup,")
+  emit("  blur_v_bg:  WGPUBindGroup,")
+  emit("  -- 尺寸缓存")
+  emit("  rt_width:   uint32,")
+  emit("  rt_height:  uint32,")
+  emit("}")
+
+  -- WGSL 源码常量
+  local wgsl_main  = "NEBULA_WGSL_" .. base:upper()
+  local wgsl_mask  = "NEBULA_WGSL_" .. base:upper() .. "_SHADOW_MASK"
+  local wgsl_blur  = "NEBULA_WGSL_" .. base:upper() .. "_BLUR"
+  emit(("local %s <comptime> = %s"):format(wgsl_main, escape_to_long_bracket(wgsl_source)))
+  emit(("local %s <comptime> = %s"):format(wgsl_mask, escape_to_long_bracket(shadow_mask_source)))
+  emit(("local %s <comptime> = %s"):format(wgsl_blur, escape_to_long_bracket(blur_h_source)))
+
+  -- ===== init =====
+  emit(("function %s:init(renderer: *NebulaRenderer, win_w: uint32, win_h: uint32): boolean"):format(pipe))
+  emit("  self.rt_width  = win_w")
+  emit("  self.rt_height = win_h")
+  emit("")
+  -- 主管线
+  emit("  -- 1. 主管线（与无阴影版本一致）")
+  emit("  local ok = nebula_pipeline_base_init(")
+  emit("    &self.pipeline, &self.bind_layout, &self.uniform_buf, &self.bind_group,")
+  emit(("    renderer, %s, (@csize)(#%s), \"%s\""):format(wgsl_main, uniforms_record, "nebula-" .. base:lower()))
+  emit("  )")
+  emit("  if not ok then return false end")
+  emit(("  printf(\"wgpu: %s main pipeline created\\n\")"):format(base:lower()))
+  emit("")
+  -- 阴影遮罩管线（使用 base_init，因为它只需要 uniform buffer）
+  emit("  -- 2. 阴影遮罩管线")
+  emit("  ok = nebula_pipeline_base_init(")
+  emit("    &self.shadow_mask_pipeline, &self.shadow_mask_bgl,")
+  emit("    &self.shadow_mask_ubuf, &self.shadow_mask_bg,")
+  emit(("    renderer, %s, (@csize)(#%s), \"%s\""):format(wgsl_mask, uniforms_record, "nebula-" .. base:lower() .. "-shadow-mask"))
+  emit("  )")
+  emit("  if not ok then return false end")
+  emit(("  printf(\"wgpu: %s shadow mask pipeline created\\n\")"):format(base:lower()))
+  emit("")
+  -- 模糊管线（使用 textured_init，需要纹理+采样器绑定）
+  emit("  -- 3. 水平模糊管线")
+  emit("  ok = nebula_pipeline_textured_init(")
+  emit("    &self.blur_h_pipeline, &self.blur_h_bgl, &self.blur_h_ubuf,")
+  emit(("    renderer, %s, (@csize)(#NebulaBlurUniforms),"):format(wgsl_blur))
+  emit("    renderer.format, \"" .. "nebula-" .. base:lower() .. "-blur-h\"")
+  emit("  )")
+  emit("  if not ok then return false end")
+  emit(("  printf(\"wgpu: %s blur-h pipeline created\\n\")"):format(base:lower()))
+  emit("")
+  emit("  -- 4. 垂直模糊管线")
+  emit("  ok = nebula_pipeline_textured_init(")
+  emit("    &self.blur_v_pipeline, &self.blur_v_bgl, &self.blur_v_ubuf,")
+  emit(("    renderer, %s, (@csize)(#NebulaBlurUniforms),"):format(wgsl_blur))
+  emit("    renderer.format, \"" .. "nebula-" .. base:lower() .. "-blur-v\"")
+  emit("  )")
+  emit("  if not ok then return false end")
+  emit(("  printf(\"wgpu: %s blur-v pipeline created\\n\")"):format(base:lower()))
+  emit("")
+  -- 离屏纹理
+  emit("  -- 5. 离屏纹理 ping-pong")
+  emit("  if not nebula_create_render_target(&self.tex_a, &self.tex_a_view, renderer, win_w, win_h, \"shadow-tex-a\") then return false end")
+  emit("  if not nebula_create_render_target(&self.tex_b, &self.tex_b_view, renderer, win_w, win_h, \"shadow-tex-b\") then return false end")
+  emit("")
+  -- 采样器
+  emit("  -- 6. 采样器")
+  emit("  self.sampler = nebula_create_sampler(renderer)")
+  emit("  if self.sampler == nilptr then return false end")
+  emit("")
+  -- 模糊 BindGroup
+  emit("  -- 7. 模糊 BindGroup（blur_h 从 tex_a 读，blur_v 从 tex_b 读）")
+  emit("  self.blur_h_bg = nebula_create_blur_bind_group(renderer, self.blur_h_bgl, self.blur_h_ubuf, self.tex_a_view, self.sampler, (@csize)(#NebulaBlurUniforms), \"blur-h-bg\")")
+  emit("  if self.blur_h_bg == nilptr then return false end")
+  emit("  self.blur_v_bg = nebula_create_blur_bind_group(renderer, self.blur_v_bgl, self.blur_v_ubuf, self.tex_b_view, self.sampler, (@csize)(#NebulaBlurUniforms), \"blur-v-bg\")")
+  emit("  if self.blur_v_bg == nilptr then return false end")
+  emit("")
+  emit(("  printf(\"wgpu: %s shadow pipeline fully initialized (%%dx%%d)\\n\", win_w, win_h)"):format(base:lower()))
+  emit("  return true")
+  emit("end")
+
+  -- ===== update_uniforms（主 + 阴影遮罩共享同一份 uniforms） =====
+  emit(("function %s:update_uniforms(renderer: *NebulaRenderer, uniforms: *%s): void"):format(pipe, uniforms_record))
+  emit(("  wgpuQueueWriteBuffer(renderer.queue, self.uniform_buf, 0, uniforms, #%s)"):format(uniforms_record))
+  emit(("  wgpuQueueWriteBuffer(renderer.queue, self.shadow_mask_ubuf, 0, uniforms, #%s)"):format(uniforms_record))
+  emit("end")
+
+  -- ===== draw（单 Pass 主管线，向后兼容） =====
+  emit(("function %s:draw(pass: WGPURenderPassEncoder): void"):format(pipe))
+  emit("  wgpuRenderPassEncoderSetPipeline(pass, self.pipeline)")
+  emit("  wgpuRenderPassEncoderSetBindGroup(pass, 0, self.bind_group, 0, nilptr)")
+  emit("  wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0)")
+  emit("end")
+
+  -- ===== draw_shadow（多 Pass 阴影渲染编排） =====
+  -- 此方法接收 encoder 和主 surface view，自行创建和管理多个 render pass
+  emit(("function %s:draw_shadow(encoder: WGPUCommandEncoder, surface_view: WGPUTextureView, renderer: *NebulaRenderer, blur_radius: float32): void"):format(pipe))
+  emit("  local tw = (@float32)(self.rt_width)")
+  emit("  local th = (@float32)(self.rt_height)")
+  emit("")
+  emit("  -- Pass 1: 阴影遮罩 → tex_a")
+  emit("  do")
+  emit("    local att = WGPURenderPassColorAttachment{")
+  emit("      nextInChain = nilptr,")
+  emit("      view        = self.tex_a_view,")
+  emit("      depthSlice  = 0xFFFFFFFF,")
+  emit("      resolveTarget = nilptr,")
+  emit("      loadOp  = WGPULoadOp_Clear,")
+  emit("      storeOp = WGPUStoreOp_Store,")
+  emit("      clearValue = WGPUColor{ r=0.0, g=0.0, b=0.0, a=0.0 },")
+  emit("    }")
+  emit("    local desc = WGPURenderPassDescriptor{")
+  emit("      nextInChain            = nilptr,")
+  emit("      label                  = wgpu_str_null(),")
+  emit("      colorAttachmentCount   = 1,")
+  emit("      colorAttachments       = &att,")
+  emit("      depthStencilAttachment = nilptr,")
+  emit("      occlusionQuerySet      = nilptr,")
+  emit("      timestampWrites        = nilptr,")
+  emit("    }")
+  emit("    local pass = wgpuCommandEncoderBeginRenderPass(encoder, &desc)")
+  emit("    wgpuRenderPassEncoderSetPipeline(pass, self.shadow_mask_pipeline)")
+  emit("    wgpuRenderPassEncoderSetBindGroup(pass, 0, self.shadow_mask_bg, 0, nilptr)")
+  emit("    wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0)")
+  emit("    wgpuRenderPassEncoderEnd(pass)")
+  emit("    wgpuRenderPassEncoderRelease(pass)")
+  emit("  end")
+  emit("")
+  emit("  -- Pass 2: 水平模糊 tex_a → tex_b")
+  emit("  do")
+  emit("    local blur_u = NebulaBlurUniforms{")
+  emit("      direction   = Vec2{ x = 1.0, y = 0.0 },")
+  emit("      texel_size  = Vec2{ x = 1.0 / tw, y = 1.0 / th },")
+  emit("      blur_radius = blur_radius,")
+  emit("      _pad0 = 0.0, _pad1 = 0.0, _pad2 = 0.0,")
+  emit("    }")
+  emit("    wgpuQueueWriteBuffer(renderer.queue, self.blur_h_ubuf, 0, &blur_u, #NebulaBlurUniforms)")
+  emit("    local att = WGPURenderPassColorAttachment{")
+  emit("      nextInChain = nilptr,")
+  emit("      view        = self.tex_b_view,")
+  emit("      depthSlice  = 0xFFFFFFFF,")
+  emit("      resolveTarget = nilptr,")
+  emit("      loadOp  = WGPULoadOp_Clear,")
+  emit("      storeOp = WGPUStoreOp_Store,")
+  emit("      clearValue = WGPUColor{ r=0.0, g=0.0, b=0.0, a=0.0 },")
+  emit("    }")
+  emit("    local desc = WGPURenderPassDescriptor{")
+  emit("      nextInChain            = nilptr,")
+  emit("      label                  = wgpu_str_null(),")
+  emit("      colorAttachmentCount   = 1,")
+  emit("      colorAttachments       = &att,")
+  emit("      depthStencilAttachment = nilptr,")
+  emit("      occlusionQuerySet      = nilptr,")
+  emit("      timestampWrites        = nilptr,")
+  emit("    }")
+  emit("    local pass = wgpuCommandEncoderBeginRenderPass(encoder, &desc)")
+  emit("    wgpuRenderPassEncoderSetPipeline(pass, self.blur_h_pipeline)")
+  emit("    wgpuRenderPassEncoderSetBindGroup(pass, 0, self.blur_h_bg, 0, nilptr)")
+  emit("    wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0)")
+  emit("    wgpuRenderPassEncoderEnd(pass)")
+  emit("    wgpuRenderPassEncoderRelease(pass)")
+  emit("  end")
+  emit("")
+  emit("  -- Pass 3: 垂直模糊 tex_b → tex_a")
+  emit("  do")
+  emit("    local blur_u = NebulaBlurUniforms{")
+  emit("      direction   = Vec2{ x = 0.0, y = 1.0 },")
+  emit("      texel_size  = Vec2{ x = 1.0 / tw, y = 1.0 / th },")
+  emit("      blur_radius = blur_radius,")
+  emit("      _pad0 = 0.0, _pad1 = 0.0, _pad2 = 0.0,")
+  emit("    }")
+  emit("    wgpuQueueWriteBuffer(renderer.queue, self.blur_v_ubuf, 0, &blur_u, #NebulaBlurUniforms)")
+  emit("    local att = WGPURenderPassColorAttachment{")
+  emit("      nextInChain = nilptr,")
+  emit("      view        = self.tex_a_view,")
+  emit("      depthSlice  = 0xFFFFFFFF,")
+  emit("      resolveTarget = nilptr,")
+  emit("      loadOp  = WGPULoadOp_Clear,")
+  emit("      storeOp = WGPUStoreOp_Store,")
+  emit("      clearValue = WGPUColor{ r=0.0, g=0.0, b=0.0, a=0.0 },")
+  emit("    }")
+  emit("    local desc = WGPURenderPassDescriptor{")
+  emit("      nextInChain            = nilptr,")
+  emit("      label                  = wgpu_str_null(),")
+  emit("      colorAttachmentCount   = 1,")
+  emit("      colorAttachments       = &att,")
+  emit("      depthStencilAttachment = nilptr,")
+  emit("      occlusionQuerySet      = nilptr,")
+  emit("      timestampWrites        = nilptr,")
+  emit("    }")
+  emit("    local pass = wgpuCommandEncoderBeginRenderPass(encoder, &desc)")
+  emit("    wgpuRenderPassEncoderSetPipeline(pass, self.blur_v_pipeline)")
+  emit("    wgpuRenderPassEncoderSetBindGroup(pass, 0, self.blur_v_bg, 0, nilptr)")
+  emit("    wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0)")
+  emit("    wgpuRenderPassEncoderEnd(pass)")
+  emit("    wgpuRenderPassEncoderRelease(pass)")
+  emit("  end")
+  emit("")
+  emit("  -- Pass 4: 主 surface pass（阴影已在 tex_a 中，由调用者在此 pass 中合成）")
+  emit("  -- 注意：此方法不创建主 pass，调用者需自行开启 surface render pass，")
+  emit("  -- 然后先绘制 tex_a（模糊阴影），再调用 self:draw(pass) 绘制主组件。")
+  emit("  -- 这样设计是为了让调用者可以在同一个 surface pass 中绘制多个组件。")
+  emit("end")
+
+  return table.concat(L, "\n")
+end
+
+
+-- =============================================================================
+-- 主入口：生成完整的 <T>Pipeline 源码
+-- =============================================================================
 function nebula_gen_pipeline_source(spec)
   assert(spec.base,            "nebula_gen_pipeline_source: spec.base required")
   assert(spec.uniforms_record, "nebula_gen_pipeline_source: spec.uniforms_record required")
   assert(spec.wgsl_source,     "nebula_gen_pipeline_source: spec.wgsl_source required")
 
-  return gen_pipeline_record(spec.base, spec.uniforms_record, spec.wgsl_source)
+  if spec.has_shadow then
+    assert(spec.shadow_mask_source, "nebula_gen_pipeline_source: shadow_mask_source required when has_shadow")
+    assert(spec.blur_h_source,      "nebula_gen_pipeline_source: blur_h_source required when has_shadow")
+    assert(spec.blur_v_source,      "nebula_gen_pipeline_source: blur_v_source required when has_shadow")
+    return gen_pipeline_shadow(
+      spec.base, spec.uniforms_record, spec.wgsl_source,
+      spec.shadow_mask_source, spec.blur_h_source, spec.blur_v_source)
+  else
+    return gen_pipeline_simple(spec.base, spec.uniforms_record, spec.wgsl_source)
+  end
 end
 
+
 -- =============================================================================
--- ★ 2.3.2 辅助：生成强类型的 <T>Context:to_uniforms 方法
---
--- 与 nebula_core 中硬编码的 NebulaRectUniforms 版本不同，这里严格根据
--- layout_fields 逐字段 emit，保证与紧凑布局 <T>Uniforms 一一对应，既不
--- 写死字段名，也不依赖 _pad0 / _pad6 等命名约定。
---
--- 规则：
---   · 所有 is_pad=true 的字段 —— 全部填 0.0（保持 C ABI 可移植）
---   · "viewport"        —— 由 to_uniforms(vw, vh) 参数构造 Vec2
---   · "radius"          —— 优先 self.visual.radius；Visual 无 radius 时填 0.0
---   · 其它 base 字段     —— 直接从 self.visual.<name> 读取
---   · 动画属性           —— 读取 self.current_<name>（由 Context 插值好）
+-- 生成强类型的 <T>Context:to_uniforms 方法
 -- =============================================================================
 function nebula_gen_to_uniforms_typed(spec)
   local ctx             = spec.base .. "Context"
@@ -142,21 +406,16 @@ function nebula_gen_to_uniforms_typed(spec)
 
   for _, f in ipairs(layout_fields) do
     if f.is_pad then
-      -- padding 字段：保持紧凑布局的 ABI 一致性，全部零值
       table.insert(lines, ("    %s = 0.0,"):format(f.name))
     elseif f.name == "viewport" then
       table.insert(lines,  "    viewport = Vec2{ x = vw, y = vh },")
     elseif prop_set[f.name] then
-      -- 动画属性：使用已在 update() 中插值好的 current_<name>
       table.insert(lines, ("    %s = self.current_%s,"):format(f.name, f.name))
     elseif base_set[f.name] then
-      -- base 字段：直接取 self.visual
       table.insert(lines, ("    %s = self.visual.%s,"):format(f.name, f.name))
     elseif f.name == "radius" then
-      -- Visual 未声明 radius 时用 0.0 兜底（与旧 to_uniforms 行为一致）
       table.insert(lines,  "    radius = 0.0,")
     else
-      -- 未知字段，零值兜底（不应到达此分支）
       if f.type == "Color" then
         table.insert(lines, ("    %s = Color{r=0.0,g=0.0,b=0.0,a=0.0},"):format(f.name))
       elseif f.type == "Vec2" then
@@ -173,4 +432,4 @@ function nebula_gen_to_uniforms_typed(spec)
 end
 
 -- 返回模块标识
-return "nebula_pipeline_factory_v0.1"
+return "nebula_pipeline_factory_v0.2_phase2.5"

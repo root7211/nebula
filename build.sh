@@ -23,7 +23,7 @@ fi
 TARGET="${1:-button_demo}"
 
 case "$TARGET" in
-  button_demo|login_demo|simple_rect_demo)
+  button_demo|login_demo|simple_rect_demo|shadow_demo)
     NEEDS_GPU=1
     ;;
   uniform_layout_test)
@@ -31,7 +31,7 @@ case "$TARGET" in
     ;;
   *)
     echo "[nebula] Error: unknown target '$TARGET'"
-    echo "         Available targets: button_demo, login_demo, simple_rect_demo, uniform_layout_test"
+    echo "         Available targets: button_demo, login_demo, simple_rect_demo, shadow_demo, uniform_layout_test"
     exit 1
     ;;
 esac

@@ -1,24 +1,25 @@
-# Nebula GUI Compiler — Phase 2.4
+# Nebula GUI Compiler — Phase 2.5
 
-> "形即（Shape-Is）"范式的编译期代码生成阶段：开发者只写**形状声明 + 注解**，框架在编译期自动派生 `State` 枚举、`StateMachine`、`Context`、`hit_test`、`process_input` 全部样板代码，并按字段自动组合 WGSL 着色器。运行时仍然只是数据插值与一次 GPU 提交。
+> "形即（Shape-Is）"范式的编译期代码生成阶段：开发者只写**形状声明 + 注解**，框架在编译期自动派生 `State` 枚举、`StateMachine`、`Context`、`hit_test`、`process_input` 全部样板代码，并按字段自动组合 WGSL 着色器。声明 `shadow_*` 字段即可触发多 Pass 阴影管线的自动生成。运行时仍然只是数据插值与一次 GPU 提交。
 
 ---
 
 ## 各阶段演进
 
-| 项目 | Phase 0 | Phase 1 | Phase 2.1 | Phase 2.2 | Phase 2.3 | Phase 2.4 |
-|---|---|---|---|---|---|---|
-| 状态枚举 `<T>State` | 手写 | **`nebula_derive` 自动生成** | 同左 | 同左 | 同左 | 同左 |
-| 状态机 `<T>StateMachine` | 手写 | **`nebula_derive` 自动生成** | 同左 | 同左 | 同左 | 同左 |
-| 上下文 `<T>Context` | 手写 | **`nebula_derive` 自动生成** | 同左 | 同左 | 同左 | 同左 |
-| 属性插值 | 手写调用链 | **按字段类型自动派生** | 同左 | 同左 | 同左 | 同左 |
-| Uniform std140 padding | 手写 `_pad` | 手写 `_pad` | **`nebula_gen_uniform_layout` 自动生成** | 同左 | 同左 | 同左 |
-| 着色器 WGSL | 硬编码字符串 | 硬编码字符串 | 硬编码（struct 部分自动） | **`nebula_gen_wgsl_shader` 按字段自动组合** | 同左 | 同左 |
-| 渲染管线 `<T>Pipeline` | 共享单一硬编码 | 共享单一硬编码 | 共享单一硬编码 | 共享单一硬编码 | **`nebula_derive` 专属自动派生** | 同左 |
-| 碰撞检测 `hit_test` | 手写 | 手写 | 手写 | 手写 | 手写 | **`nebula_derive` 内联 AABB 自动派生** |
-| 交互逻辑 `process_input` | 手写 | 手写 | 手写 | 手写 | 手写 | **`interaction_factory` 按 primitives 自动派生** |
-| 焦点管理 | 手写 `focused_id` 逻辑 | 手写 | 手写 | 手写 | 手写 | **`focusable` 原语 + 运行时 `component_id` 自动管理** |
-| 输入收集 | 手写 `glfwGetCursorPos` | 手写 | 手写 | 手写 | 手写 | **`nebula_collect_input()` 统一封装** |
+| 项目 | Phase 0 | Phase 1 | Phase 2.1 | Phase 2.2 | Phase 2.3 | Phase 2.4 | Phase 2.5 |
+|---|---|---|---|---|---|---|---|
+| 状态枚举 `<T>State` | 手写 | **`nebula_derive` 自动生成** | 同左 | 同左 | 同左 | 同左 | 同左 |
+| 状态机 `<T>StateMachine` | 手写 | **`nebula_derive` 自动生成** | 同左 | 同左 | 同左 | 同左 | 同左 |
+| 上下文 `<T>Context` | 手写 | **`nebula_derive` 自动生成** | 同左 | 同左 | 同左 | 同左 | 同左 |
+| 属性插值 | 手写调用链 | **按字段类型自动派生** | 同左 | 同左 | 同左 | 同左 | 同左 |
+| Uniform std140 padding | 手写 `_pad` | 手写 `_pad` | **`nebula_gen_uniform_layout` 自动生成** | 同左 | 同左 | 同左 | 同左 |
+| 着色器 WGSL | 硬编码字符串 | 硬编码字符串 | 硬编码（struct 部分自动） | **`nebula_gen_wgsl_shader` 按字段自动组合** | 同左 | 同左 | **多 Pass 着色器集合自动生成** |
+| 渲染管线 `<T>Pipeline` | 共享单一硬编码 | 共享单一硬编码 | 共享单一硬编码 | 共享单一硬编码 | **`nebula_derive` 专属自动派生** | 同左 | **多 Sub-pipeline 阴影管线自动派生** |
+| 碰撞检测 `hit_test` | 手写 | 手写 | 手写 | 手写 | 手写 | **`nebula_derive` 内联 AABB 自动派生** | 同左 |
+| 交互逻辑 `process_input` | 手写 | 手写 | 手写 | 手写 | 手写 | **`interaction_factory` 按 primitives 自动派生** | 同左 |
+| 焦点管理 | 手写 `focused_id` 逻辑 | 手写 | 手写 | 手写 | 手写 | **`focusable` 原语 + 运行时 `component_id` 自动管理** | 同左 |
+| 输入收集 | 手写 `glfwGetCursorPos` | 手写 | 手写 | 手写 | 手写 | **`nebula_collect_input()` 统一封装** | 同左 |
+| 阴影 / 模糊 | 不支持 | 不支持 | 不支持 | 不支持 | 不支持 | 不支持 | **声明 `shadow_*` 字段 → 4-Pass 管线自动生成** |
 
 ---
 
@@ -28,18 +29,19 @@
 nebula/
 ├── src/
 │   ├── nebula_core.nelua      # 编译期推导引擎 + nebula_derive + NebulaInputState
-│   ├── app.nelua              # ★ Phase 2.4: 统一输入收集层（nebula_collect_input）
+│   ├── app.nelua              # Phase 2.4: 统一输入收集层（nebula_collect_input）
 │   ├── derive/
-│   │   ├── shader_compose.lua     # Phase 2.2: WGSL 片段表 + 着色器组合器
-│   │   ├── pipeline_factory.lua   # Phase 2.3: 渲染管线工厂
-│   │   └── interaction_factory.lua # ★ Phase 2.4: 交互原语代码生成器
+│   │   ├── shader_compose.lua     # Phase 2.5: WGSL 片段表 + 着色器组合器（含阴影/模糊）
+│   │   ├── pipeline_factory.lua   # Phase 2.5: 渲染管线工厂（含多 Sub-pipeline）
+│   │   └── interaction_factory.lua # Phase 2.4: 交互原语代码生成器
 │   ├── wgpu_bindings.nelua    # wgpu-native v29.0.0.0 的 Nelua FFI 绑定
 │   ├── glfw_bindings.nelua    # GLFW 3 的 Nelua FFI 绑定
 │   ├── primitives.nelua       # 交互原语层（HoverableState、ClickableState）
-│   └── renderer.nelua         # WebGPU 渲染层
+│   └── renderer.nelua         # WebGPU 渲染层（含离屏纹理 + textured pipeline 基础设施）
 ├── examples/
-│   ├── button_demo.nelua      # ★ Phase 2.4: 单组件 Demo（hoverable + clickable）
-│   ├── login_demo.nelua       # ★ Phase 2.4: 多组件 Demo（focusable 焦点自动管理）
+│   ├── shadow_demo.nelua      # ★ Phase 2.5: 阴影 Demo（4-Pass 多管线渲染）
+│   ├── button_demo.nelua      # Phase 2.4: 单组件 Demo（hoverable + clickable）
+│   ├── login_demo.nelua       # Phase 2.4: 多组件 Demo（focusable 焦点自动管理）
 │   ├── simple_rect_demo.nelua # Phase 2.4: 边界验证 Demo（hoverable only）
 │   └── uniform_layout_test.nelua  # Phase 2.1 布局验证
 ├── docs/
@@ -47,19 +49,91 @@ nebula/
 │   ├── PLAN_PHASE2.md         # Phase 2 总体开发计划
 │   ├── PLAN_PHASE2_2.md       # Phase 2.2 开发计划
 │   ├── PLAN_PHASE2_3.md       # Phase 2.3 开发计划
-│   └── PLAN_PHASE2_4.md       # ★ Phase 2.4 开发计划
+│   ├── PLAN_PHASE2_4.md       # Phase 2.4 开发计划
+│   └── PLAN_PHASE2_5.md       # ★ Phase 2.5 开发计划
 ├── tools/
 │   ├── headless_test.c        # 离屏渲染验证工具
 │   ├── fixture_shader.h       # 自动生成的着色器 C 头文件
 │   ├── export_shader_fixture.nelua  # 着色器 Fixture 导出工具
-│   └── verify_p2_4.lua        # ★ Phase 2.4: interaction_factory 验证脚本
+│   └── verify_p2_4.lua        # Phase 2.4: interaction_factory 验证脚本
 ├── build.sh                   # 一键构建脚本
 └── README.md
 ```
 
 ---
 
-## ★ Phase 2.4 核心：交互原语自动派生
+## ★ Phase 2.5 核心：多 Pass 渲染（Shadow / Blur）
+
+Phase 2.5 打破了单 Pass 渲染的限制。开发者只需在 Visual 中声明 `shadow_color`、`shadow_offset`、`shadow_blur` 三个字段，`nebula_derive` 即可自动检测并生成完整的 4-Pass 阴影管线。
+
+### 架构
+
+```text
+Pass 1 (shadow_mask):  渲染偏移后的组件 SDF 遮罩 → 离屏纹理 A
+Pass 2 (blur_h):       从纹理 A 采样，水平高斯模糊 → 离屏纹理 B
+Pass 3 (blur_v):       从纹理 B 采样，垂直高斯模糊 → 离屏纹理 A
+Pass 4 (main):         Surface Pass：合成模糊阴影 + 绘制主组件
+```
+
+### 自动生成的内容
+
+| 组件 | 无阴影（Phase 2.3 兼容） | 有阴影（Phase 2.5） |
+|---|---|---|
+| `<T>Pipeline` record | 4 字段（pipeline, bgl, ubuf, bg） | 扩展至 20+ 字段（含子管线、离屏纹理、采样器） |
+| `<T>Pipeline:init()` | 委托 `nebula_pipeline_base_init` | 初始化 4 条子管线 + 2 张离屏纹理 + 采样器 + BindGroup |
+| `<T>Pipeline:draw()` | 单 Pass 全屏三角形 | 向后兼容，仅绘制主组件 |
+| `<T>Pipeline:draw_shadow()` | 不存在 | 编排 3 个离屏 Pass（mask → blur_h → blur_v） |
+| WGSL 着色器 | 1 个主着色器 | 3 个着色器（shadow_mask + blur + main） |
+
+### 使用示例
+
+```nelua
+global ShadowButtonVisual = @record{
+  pos: Vec2, size: Vec2, radius: float32,
+  -- ★ 声明这三个字段即可触发阴影管线
+  shadow_offset: Vec2,
+  shadow_blur:   float32,
+  -- 每状态阴影颜色（可动画）
+  default_shadow_color: Color,
+  hovered_shadow_color: Color,
+  pressed_shadow_color: Color,
+  -- 其余字段...
+  default_bg_color: Color, hovered_bg_color: Color, pressed_bg_color: Color,
+  default_border_color: Color, hovered_border_color: Color, pressed_border_color: Color,
+  default_border_width: float32, hovered_border_width: float32, pressed_border_width: float32,
+}
+
+##[[
+nebula_annotate("ShadowButtonVisual", {
+  states     = {"default", "hovered", "pressed"},
+  primitives = {"hoverable", "clickable"},
+  transitions = { ... },
+})
+]]
+## nebula_derive("ShadowButtonVisual")
+
+-- 运行时：阴影管线需要窗口尺寸
+local pipeline: ShadowButtonPipeline
+pipeline:init(&renderer, WIN_W, WIN_H)
+
+-- 主循环中编排多 Pass
+pipeline:draw_shadow(encoder, surface_view, &renderer, button_vis.shadow_blur)
+-- 然后在 surface pass 中调用 pipeline:draw(pass) 绘制主组件
+```
+
+### 编译期日志
+
+```text
+[derive] ShadowButtonVisual: emit State + StateMachine + Context + Uniforms + Shader + Pipeline + Interaction (4 props, 4 transitions, 128B uniforms, features=[radius, fill, border, shadow], primitives=[hoverable, clickable], passes=[shadow_mask, blur_h, blur_v, main])
+```
+
+### 零开销保证
+
+未声明 `shadow_*` 字段的组件仍然走高效的单 Pass 路径，不会引入任何额外的纹理分配或 Pass 开销。阴影特性的检测完全在编译期完成。
+
+---
+
+## Phase 2.4 核心：交互原语自动派生
 
 Phase 2.4 完成了交互逻辑的最后一块手写代码的消除。开发者在 `nebula_annotate` 中声明 `primitives`，`nebula_derive` 自动生成碰撞检测与状态转换逻辑。
 
@@ -70,51 +144,6 @@ Phase 2.4 完成了交互逻辑的最后一块手写代码的消除。开发者�
 | `"hoverable"` | `hit_test` AABB 内联碰撞检测；`hover.is_hovered / just_entered / just_left` 字段更新；`Hovered` 状态转换 |
 | `"clickable"` | `click.is_pressed / just_clicked` 字段更新；`Pressed` 状态转换（需同时声明 `"hoverable"`） |
 | `"focusable"` | 基于运行时 `component_id` 的焦点管理；`Focused` 状态转换（需同时声明 `"clickable"`） |
-
-### 使用示例
-
-```nelua
--- 1. 声明 Visual 形状（开发者只需写这些）
-global InputVisual = @record{
-  pos: Vec2, size: Vec2, radius: float32,
-  default_bg_color:     Color, hovered_bg_color:     Color, focused_bg_color:     Color,
-  default_border_color: Color, hovered_border_color: Color, focused_border_color: Color,
-  default_border_width: float32, hovered_border_width: float32, focused_border_width: float32,
-}
-
-##[[
-nebula_annotate("InputVisual", {
-  states     = {"default", "hovered", "focused"},
-  primitives = {"hoverable", "clickable", "focusable"},
-  transitions = { ... },
-})
-]]
-## nebula_derive("InputVisual")
-
--- 2. 运行时：为同类型多实例分配不同 component_id
-local email_input: InputContext
-email_input:init(InputVisual{ ... })
-email_input.component_id = 1   -- 区分焦点实例
-
-local password_input: InputContext
-password_input:init(InputVisual{ ... })
-password_input.component_id = 2
-
--- 3. 主循环：一行收集输入，一行更新（交互逻辑全部自动处理）
-local input: NebulaInputState
-while glfwWindowShouldClose(window) == 0 do
-  glfwPollEvents()
-  nebula_collect_input(window, &input, dt)
-  email_input:update(&input, dt)     -- 内部自动调用 process_input
-  password_input:update(&input, dt)
-end
-```
-
-### 编译期日志
-
-```text
-[derive] InputVisual: emit State + StateMachine + Context + Uniforms + Shader + Pipeline + Interaction (3 props, 5 transitions, 80B uniforms, features=[radius, fill, border], primitives=[hoverable, clickable, focusable])
-```
 
 ---
 
@@ -138,6 +167,7 @@ end
 | 无 `radius` | 注入 `sdf_rect` 简单矩形距离函数 |
 | `bg_color: Color` | 注入填充颜色计算 |
 | `border_color` + `border_width` | 注入边框 alpha 计算与颜色叠加 |
+| `shadow_color` + `shadow_offset` + `shadow_blur` | ★ 注入阴影遮罩 + 高斯模糊着色器集合 |
 
 ---
 
@@ -180,6 +210,8 @@ nebula_annotate("ButtonVisual", {
 | 代码生成 | Lua 拼接 Nelua 源码 → `aster.parse` → 逐条 `inject_statement` | 注入产物等价于手写代码 |
 | Uniform 布局 | `nebula_gen_uniform_layout` 按 std140 规则自动对齐 | 编译期确定 |
 | 着色器组合 | `nebula_compose_shader` 按字段选择 WGSL 片段 | 编译期字符串拼接 |
+| 多 Pass 着色器 | `shader_compose` 生成 shadow_mask + blur + main 三套 WGSL | 编译期确定 |
+| 管线工厂 | `pipeline_factory` 生成单管线或多 Sub-pipeline | 编译期确定 |
 | 碰撞检测 | `interaction_factory` 内联 AABB，无函数调用层 | 编译期展开 |
 | 交互原语 | `primitives` 列表 → `hit_test / process_input` 自动生成 | 编译期确定 |
 | 焦点管理 | 运行时 `component_id` 字段区分同类型多实例 | 无虚分发 |
@@ -210,6 +242,7 @@ rm wgpu-linux-x86_64-release.zip
 
 ```bash
 chmod +x build.sh
+./build.sh shadow_demo       # ★ Phase 2.5 阴影 Demo（4-Pass 多管线渲染）
 ./build.sh button_demo       # Phase 2.4 单组件 Demo（hoverable + clickable）
 ./build.sh login_demo        # Phase 2.4 多组件 Demo（focusable 焦点自动管理）
 ./build.sh simple_rect_demo  # Phase 2.4 边界验证 Demo（hoverable only）
@@ -218,10 +251,10 @@ chmod +x build.sh
 ### 运行
 
 ```bash
-LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/button_demo
+LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/shadow_demo
 # 或在无显示环境下使用 Xvfb
 Xvfb :99 -screen 0 1024x768x24 &
-DISPLAY=:99 LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/button_demo
+DISPLAY=:99 LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/shadow_demo
 ```
 
 ---
@@ -232,7 +265,7 @@ DISPLAY=:99 LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/button_demo
 - [x] **Phase 2.2** — WGSL 着色器按字段组合（`nebula_gen_wgsl_shader`）
 - [x] **Phase 2.3** — 渲染管线工厂自动派生（`<T>Pipeline` 与强类型 `to_uniforms`）
 - [x] **Phase 2.4** — 交互原语自动派生（`hit_test` + `process_input` + `focusable` 焦点管理）
-- [ ] **Phase 2.5** — 多 Pass 渲染（Shadow / Blur）
+- [x] **Phase 2.5** — 多 Pass 渲染（Shadow / Blur：4-Pass 阴影管线自动派生）
 
 ## Phase 3+ 展望
 

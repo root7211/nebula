@@ -247,18 +247,19 @@ global WGPUBufferDescriptor <cimport, nodecl> = @record{
 }
 
 global WGPUBindGroupLayoutEntry <cimport, nodecl> = @record{
-  nextInChain:    pointer,
-  binding:        uint32,
-  visibility:     uint32,
-  buffer:         record{
+  nextInChain:      pointer,
+  binding:          uint32,
+  visibility:       uint64,   -- WGPUShaderStage = WGPUFlags = uint64_t
+  bindingArraySize: uint32,
+  buffer:           record{
     nextInChain:      pointer,
     type:             uint32,
-    hasDynamicOffset: boolean,
+    hasDynamicOffset: uint32,  -- WGPUBool = uint32_t
     minBindingSize:   uint64,
   },
-  sampler:        record{ nextInChain: pointer, type: uint32 },
-  texture:        record{ nextInChain: pointer, sampleType: uint32, viewDimension: uint32, multisampled: boolean },
-  storageTexture: record{ nextInChain: pointer, access: uint32, format: WGPUTextureFormat, viewDimension: uint32 },
+  sampler:          record{ nextInChain: pointer, type: uint32 },
+  texture:          record{ nextInChain: pointer, sampleType: uint32, viewDimension: uint32, multisampled: uint32 },
+  storageTexture:   record{ nextInChain: pointer, access: uint32, format: WGPUTextureFormat, viewDimension: uint32 },
 }
 
 global WGPUBindGroupLayoutDescriptor <cimport, nodecl> = @record{
@@ -439,3 +440,91 @@ global function wgpuInstanceRelease(instance: WGPUInstance): void <cimport, node
 global function wgpuAdapterRelease(adapter: WGPUAdapter): void <cimport, nodecl> end
 global function wgpuDeviceRelease(device: WGPUDevice): void <cimport, nodecl> end
 global function wgpuSurfaceRelease(surface: WGPUSurface): void <cimport, nodecl> end
+
+-- =============================================================================
+-- ★ Phase 2.5: 多 Pass 渲染所需的额外绑定
+-- =============================================================================
+
+-- ===== 额外的 Opaque Handle =====
+global WGPUSampler <cimport, nodecl> = @pointer
+
+-- ===== 纹理用途枚举（TextureUsage 位掩码） =====
+global WGPUTextureUsage = @uint32
+global WGPUTextureUsage_CopySrc          <comptime> = (@WGPUTextureUsage)(0x00000001)
+global WGPUTextureUsage_CopyDst          <comptime> = (@WGPUTextureUsage)(0x00000002)
+global WGPUTextureUsage_TextureBinding   <comptime> = (@WGPUTextureUsage)(0x00000004)
+global WGPUTextureUsage_RenderAttachment <comptime> = (@WGPUTextureUsage)(0x00000010)
+
+-- ===== 纹理维度 =====
+global WGPUTextureDimension = @uint32
+global WGPUTextureDimension_2D <comptime> = (@WGPUTextureDimension)(0x00000002)
+
+-- ===== 纹理视图维度 =====
+global WGPUTextureViewDimension = @uint32
+global WGPUTextureViewDimension_2D <comptime> = (@WGPUTextureViewDimension)(0x00000005)
+
+-- ===== 纹理 Aspect =====
+global WGPUTextureAspect = @uint32
+global WGPUTextureAspect_All <comptime> = (@WGPUTextureAspect)(0x00000001)
+
+-- ===== 采样器绑定类型 =====
+global WGPUSamplerBindingType = @uint32
+global WGPUSamplerBindingType_Filtering <comptime> = (@WGPUSamplerBindingType)(0x00000002)
+
+-- ===== 纹理采样类型 =====
+global WGPUTextureSampleType = @uint32
+global WGPUTextureSampleType_Float <comptime> = (@WGPUTextureSampleType)(0x00000002)
+
+-- ===== 地址模式 =====
+global WGPUAddressMode = @uint32
+global WGPUAddressMode_ClampToEdge <comptime> = (@WGPUAddressMode)(0x00000002)
+
+-- ===== 过滤模式 =====
+global WGPUFilterMode = @uint32
+global WGPUFilterMode_Nearest <comptime> = (@WGPUFilterMode)(0x00000001)
+global WGPUFilterMode_Linear  <comptime> = (@WGPUFilterMode)(0x00000002)
+
+-- ===== Mipmap 过滤模式 =====
+global WGPUMipmapFilterMode = @uint32
+global WGPUMipmapFilterMode_Nearest <comptime> = (@WGPUMipmapFilterMode)(0x00000001)
+
+-- ===== 3D 尺寸 =====
+global WGPUExtent3D <cimport, nodecl> = @record{
+  width:              uint32,
+  height:             uint32,
+  depthOrArrayLayers: uint32,
+}
+
+-- ===== 纹理描述符 =====
+global WGPUTextureDescriptor <cimport, nodecl> = @record{
+  nextInChain:     pointer,
+  label:           WGPUStringView,
+  usage:           uint32,
+  dimension:       WGPUTextureDimension,
+  size:            WGPUExtent3D,
+  format:          WGPUTextureFormat,
+  mipLevelCount:   uint32,
+  sampleCount:     uint32,
+  viewFormatCount: csize,
+  viewFormats:     pointer,
+}
+
+-- ===== 采样器描述符 =====
+global WGPUSamplerDescriptor <cimport, nodecl> = @record{
+  nextInChain:   pointer,
+  label:         WGPUStringView,
+  addressModeU:  WGPUAddressMode,
+  addressModeV:  WGPUAddressMode,
+  addressModeW:  WGPUAddressMode,
+  magFilter:     WGPUFilterMode,
+  minFilter:     WGPUFilterMode,
+  mipmapFilter:  WGPUMipmapFilterMode,
+  lodMinClamp:   float32,
+  lodMaxClamp:   float32,
+  compare:       uint32,
+  maxAnisotropy: uint16,
+}
+
+-- ===== Phase 2.5 额外函数绑定 =====
+global function wgpuDeviceCreateTexture(device: WGPUDevice, desc: *WGPUTextureDescriptor): WGPUTexture <cimport, nodecl> end
+global function wgpuDeviceCreateSampler(device: WGPUDevice, desc: *WGPUSamplerDescriptor): WGPUSampler <cimport, nodecl> end
