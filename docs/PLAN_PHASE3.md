@@ -77,9 +77,11 @@ Nebula 的核心设计哲学是**“零运行时开销”**与**“编译期元�
     - 集成基础字距调整（Kerning）支持。
     - 开发 `examples/text_demo.nelua`：展示多字号、多颜色的清晰文本渲染。
 
-5.  **Phase 3.2.5: 演示与回归测试 (待完善)**
-    - 验证文本在缩放和动画过程中的边缘清晰度。
-    - 完善 `text_demo`，使其作为一个独立的、可运行的文本显示示例。
+5.  **Phase 3.2.5: 演示完善与全面回归测试 (已完成)**
+    - 升级 `text_demo` 为包含 7 个文本组件的综合展示：48px 标题、28px 副标题、20px 多行正文、16px ASCII 全范围符号、14px 小字号极限、24px 动态帧计数器、64px 大字号验证。
+    - 编写 `smoke_phase3_2_4.lua`：31 项 Lua 断言覆盖 SDF 着色器生成、管线工厂纹理路径、discard 逻辑和特性标志。
+    - 编写 `run_all_tests.sh`：自动化回归测试运行器，包含 4 项 Lua 冒烟测试 + 7 项编译回归测试（共 11 项）。
+    - 验证所有历史 demo（button_demo、login_demo、shadow_demo、layout_demo 等）无回归。
 
 ### Phase 3.3 — 运行时动态列表与实例渲染 (预计 2-3 周)
 
@@ -89,7 +91,16 @@ Nebula 的核心设计哲学是**“零运行时开销”**与**“编译期元�
 
 ## 3. 下一步行动
 
-Phase 3.2 的所有子阶段（3.2.1 至 3.2.4）均已完成，文本渲染的基础设施已搭建完毕。下一步我们将重点关注 **Phase 3.2.5** 的完善工作，确保 `text_demo` 能够充分展示文本渲染能力，并进行全面的回归测试。在此之后，我们将启动 **Phase 3.3**，开始引入运行时动态列表与实例渲染能力，以支持更复杂的 UI 场景。
+Phase 3.2 的所有子阶段（3.2.1 至 3.2.5）均已完成，文本渲染子系统已通过全面的回归测试验证。下一步我们将启动 **Phase 3.3**，开始引入运行时动态列表与实例渲染能力，以支持大规模组件的高效渲染。
+
+### Phase 3.2.5 测试覆盖摘要
+
+| 测试类型 | 数量 | 覆盖范围 |
+|---|---|---|
+| Lua 冒烟断言 | 31 项 | SDF 着色器结构、管线工厂纹理路径、discard 逻辑、特性标志 |
+| Lua 冒烟脚本 | 4 个 | smoke_phase3_2_2/3/4 + verify_p2_4 |
+| 编译回归测试 | 7 个 | text_demo, button_demo, login_demo, simple_rect_demo, shadow_demo, layout_demo, uniform_layout_test |
+| text_demo 组件 | 7 个 | 6 种字号 (14-64px)、5 种颜色、多行换行、动态更新、ASCII 全范围 |
 
 ### 参考文献
 - [1] Tomasz Czajęcki. "How to Write a Flexbox Layout Engine."

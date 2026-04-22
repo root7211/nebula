@@ -1,4 +1,17 @@
+-- =============================================================================
+-- text_demo.nelua
+-- Nebula GUI Compiler — Phase 3.2.5 Text Rendering Showcase
+--
+-- Phase 3.2.5 升级：
+--   · 多字号展示：48px 标题 + 28px 副标题 + 20px 正文 + 16px 小字
+--   · 多颜色展示：白色、蓝色、绿色、橙色、灰色
+--   · 多行文本：正文区域展示自动换行（\n）
+--   · 动态文本更新：帧计数器每秒更新一次
+--   · 特殊字符覆盖：标点、数字、符号等 ASCII 全范围验证
+-- =============================================================================
+
 ## cinclude "<stdio.h>"
+## cinclude "<string.h>"
 
 require "nebula_core"
 require "glfw_bindings"
@@ -7,10 +20,14 @@ require "renderer"
 require "text_runtime"
 
 global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+global function snprintf(buf: cstring, size: csize, fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
 
 local WIN_W <comptime> = 960
-local WIN_H <comptime> = 540
+local WIN_H <comptime> = 640
 
+-- =============================================================================
+-- TextVisual 定义（Phase 3.2.4 派生）
+-- =============================================================================
 global TextVisual = @record{
   pos: Vec2,
   size: Vec2,
@@ -23,11 +40,14 @@ nebula_annotate("TextVisual", {
   primitives = {},
   transitions = {},
   text_mode = "ascii_sdf",
-  max_chars = 128,
+  max_chars = 256,
 })
 ]]
 ## nebula_derive("TextVisual")
 
+-- =============================================================================
+-- 主程序
+-- =============================================================================
 local function main(): int32
   if glfwInit() == 0 then
     printf("glfw: init failed\n")
@@ -37,7 +57,7 @@ local function main(): int32
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
 
   local window = glfwCreateWindow(WIN_W, WIN_H,
-    "Nebula Phase 3.2.4 — Text Demo", nilptr, nilptr)
+    "Nebula Phase 3.2.5 — Text Rendering Showcase", nilptr, nilptr)
   if window == nilptr then
     printf("glfw: window creation failed\n")
     return 1
@@ -48,12 +68,14 @@ local function main(): int32
     return 1
   end
 
+  -- 加载字体图集
   local font: NebulaAsciiFontAtlas
   if not nebula_text_load_ascii_font(&font, &renderer) then
     printf("text: failed to load ascii atlas\n")
     return 1
   end
 
+  -- 共享管线（所有文本组件共用同一个 TextPipeline）
   local pipe: TextPipeline
   if not pipe:init(&renderer) then
     return 1
@@ -63,35 +85,136 @@ local function main(): int32
     return 1
   end
 
+  -- =========================================================================
+  -- 1. 标题（48px，白色）
+  -- =========================================================================
   local title: TextContext
   title:init(TextVisual{
-    pos = Vec2{ x = 72.0, y = 96.0 },
+    pos = Vec2{ x = 48.0, y = 32.0 },
     size = Vec2{ x = 0.0, y = 0.0 },
     pixel_height = 48.0,
     default_text_color = Color{ r = 0.96, g = 0.97, b = 1.00, a = 1.0 },
   })
-  if not title:set_text(&renderer, "Nebula Phase 3.2.4") then
-    printf("text: failed to upload title vertices\n")
+  if not title:set_text(&renderer, "Nebula Text Showcase") then
+    printf("text: failed to set title\n")
     return 1
   end
 
+  -- =========================================================================
+  -- 2. 副标题（28px，蓝色）
+  -- =========================================================================
   local subtitle: TextContext
   subtitle:init(TextVisual{
-    pos = Vec2{ x = 72.0, y = 172.0 },
+    pos = Vec2{ x = 48.0, y = 96.0 },
     size = Vec2{ x = 0.0, y = 0.0 },
     pixel_height = 28.0,
-    default_text_color = Color{ r = 0.72, g = 0.80, b = 0.96, a = 1.0 },
+    default_text_color = Color{ r = 0.45, g = 0.68, b = 1.00, a = 1.0 },
   })
-  if not subtitle:set_text(&renderer, "ASCII SDF text via generated TextVisual pipeline") then
-    printf("text: failed to upload subtitle vertices\n")
+  if not subtitle:set_text(&renderer, "Phase 3.2.5 — Multi-size, Multi-color, Dynamic Update") then
+    printf("text: failed to set subtitle\n")
     return 1
   end
 
-  printf("=== Phase 3.2.4 Text Demo ===\n")
+  -- =========================================================================
+  -- 3. 正文多行（20px，绿色）
+  -- =========================================================================
+  local body: TextContext
+  body:init(TextVisual{
+    pos = Vec2{ x = 48.0, y = 148.0 },
+    size = Vec2{ x = 0.0, y = 0.0 },
+    pixel_height = 20.0,
+    default_text_color = Color{ r = 0.55, g = 0.90, b = 0.55, a = 1.0 },
+  })
+  if not body:set_text(&renderer, "This is a multi-line text block rendered with SDF.\nEach line wraps at explicit newline characters.\nThe rendering uses fwidth() for smooth anti-aliasing.\nLine height is computed from ascent + descent + gap.") then
+    printf("text: failed to set body\n")
+    return 1
+  end
 
+  -- =========================================================================
+  -- 4. ASCII 符号覆盖测试（16px，橙色）
+  -- =========================================================================
+  local symbols: TextContext
+  symbols:init(TextVisual{
+    pos = Vec2{ x = 48.0, y = 280.0 },
+    size = Vec2{ x = 0.0, y = 0.0 },
+    pixel_height = 16.0,
+    default_text_color = Color{ r = 1.00, g = 0.70, b = 0.30, a = 1.0 },
+  })
+  if not symbols:set_text(&renderer, "ASCII coverage: !@#$%^&*()_+-=[]{}|;':\",./<>?\n0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ\nabcdefghijklmnopqrstuvwxyz ~`") then
+    printf("text: failed to set symbols\n")
+    return 1
+  end
+
+  -- =========================================================================
+  -- 5. 小字号极限测试（14px，灰色）
+  -- =========================================================================
+  local small: TextContext
+  small:init(TextVisual{
+    pos = Vec2{ x = 48.0, y = 370.0 },
+    size = Vec2{ x = 0.0, y = 0.0 },
+    pixel_height = 14.0,
+    default_text_color = Color{ r = 0.60, g = 0.60, b = 0.65, a = 1.0 },
+  })
+  if not small:set_text(&renderer, "Small text (14px): SDF rendering maintains clarity even at reduced sizes.") then
+    printf("text: failed to set small\n")
+    return 1
+  end
+
+  -- =========================================================================
+  -- 6. 动态帧计数器（24px，白色，每秒更新）
+  -- =========================================================================
+  local counter: TextContext
+  counter:init(TextVisual{
+    pos = Vec2{ x = 48.0, y = 420.0 },
+    size = Vec2{ x = 0.0, y = 0.0 },
+    pixel_height = 24.0,
+    default_text_color = Color{ r = 0.96, g = 0.96, b = 0.98, a = 1.0 },
+  })
+  if not counter:set_text(&renderer, "Frame: 0 | Time: 0.0s") then
+    printf("text: failed to set counter\n")
+    return 1
+  end
+
+  -- =========================================================================
+  -- 7. 大字号验证（64px，淡紫色）
+  -- =========================================================================
+  local large: TextContext
+  large:init(TextVisual{
+    pos = Vec2{ x = 48.0, y = 480.0 },
+    size = Vec2{ x = 0.0, y = 0.0 },
+    pixel_height = 64.0,
+    default_text_color = Color{ r = 0.78, g = 0.60, b = 1.00, a = 1.0 },
+  })
+  if not large:set_text(&renderer, "64px Large") then
+    printf("text: failed to set large\n")
+    return 1
+  end
+
+  printf("=== Phase 3.2.5 Text Rendering Showcase ===\n")
+  printf("  7 text contexts: title(48), subtitle(28), body(20x4lines),\n")
+  printf("  symbols(16), small(14), counter(24,dynamic), large(64)\n")
+
+  -- 帧计数器状态
+  local frame_count: uint64 = 0
+  local last_update_time = glfwGetTime()
+  local counter_buf: [128]cchar
+
+  -- =========================================================================
+  -- 主循环
+  -- =========================================================================
   while glfwWindowShouldClose(window) == 0 do
     glfwPollEvents()
+    frame_count = frame_count + 1
 
+    -- 每秒更新一次动态文本
+    local now = glfwGetTime()
+    if now - last_update_time >= 1.0 then
+      last_update_time = now
+      snprintf(&counter_buf[0], 128, "Frame: %lu | Time: %.1fs", frame_count, now)
+      counter:set_text(&renderer, &counter_buf[0])
+    end
+
+    -- 获取 surface texture
     local surface_tex: WGPUSurfaceTexture
     wgpuSurfaceGetCurrentTexture(renderer.surface, &surface_tex)
     local status = surface_tex.status
@@ -122,7 +245,7 @@ local function main(): int32
       resolveTarget = nilptr,
       loadOp = WGPULoadOp_Clear,
       storeOp = WGPUStoreOp_Store,
-      clearValue = WGPUColor{ r = 0.07, g = 0.08, b = 0.10, a = 1.0 },
+      clearValue = WGPUColor{ r = 0.06, g = 0.06, b = 0.08, a = 1.0 },
     }
     local rp_desc = WGPURenderPassDescriptor{
       nextInChain = nilptr,
@@ -135,13 +258,36 @@ local function main(): int32
     }
     local pass = wgpuCommandEncoderBeginRenderPass(encoder, &rp_desc)
 
-    local u_title = title:to_uniforms(WIN_W, WIN_H)
-    pipe:update_uniforms(&renderer, &u_title)
+    -- 逐个渲染文本组件（共享管线，切换 uniform + 顶点缓冲区）
+    local u: TextUniforms
+
+    u = title:to_uniforms(WIN_W, WIN_H)
+    pipe:update_uniforms(&renderer, &u)
     pipe:draw_buffer(pass, title.mesh.vertex_buffer, title.mesh.vertex_buffer_size, title.mesh.vertex_count)
 
-    local u_subtitle = subtitle:to_uniforms(WIN_W, WIN_H)
-    pipe:update_uniforms(&renderer, &u_subtitle)
+    u = subtitle:to_uniforms(WIN_W, WIN_H)
+    pipe:update_uniforms(&renderer, &u)
     pipe:draw_buffer(pass, subtitle.mesh.vertex_buffer, subtitle.mesh.vertex_buffer_size, subtitle.mesh.vertex_count)
+
+    u = body:to_uniforms(WIN_W, WIN_H)
+    pipe:update_uniforms(&renderer, &u)
+    pipe:draw_buffer(pass, body.mesh.vertex_buffer, body.mesh.vertex_buffer_size, body.mesh.vertex_count)
+
+    u = symbols:to_uniforms(WIN_W, WIN_H)
+    pipe:update_uniforms(&renderer, &u)
+    pipe:draw_buffer(pass, symbols.mesh.vertex_buffer, symbols.mesh.vertex_buffer_size, symbols.mesh.vertex_count)
+
+    u = small:to_uniforms(WIN_W, WIN_H)
+    pipe:update_uniforms(&renderer, &u)
+    pipe:draw_buffer(pass, small.mesh.vertex_buffer, small.mesh.vertex_buffer_size, small.mesh.vertex_count)
+
+    u = counter:to_uniforms(WIN_W, WIN_H)
+    pipe:update_uniforms(&renderer, &u)
+    pipe:draw_buffer(pass, counter.mesh.vertex_buffer, counter.mesh.vertex_buffer_size, counter.mesh.vertex_count)
+
+    u = large:to_uniforms(WIN_W, WIN_H)
+    pipe:update_uniforms(&renderer, &u)
+    pipe:draw_buffer(pass, large.mesh.vertex_buffer, large.mesh.vertex_buffer_size, large.mesh.vertex_count)
 
     wgpuRenderPassEncoderEnd(pass)
     wgpuRenderPassEncoderRelease(pass)
@@ -154,9 +300,11 @@ local function main(): int32
     wgpuSurfacePresent(renderer.surface)
   end
 
+  -- 清理
   glfwDestroyWindow(window)
   glfwTerminate()
+  printf("nebula: clean exit (rendered %lu frames)\n", frame_count)
   return 0
 end
 
-return main()
+main()

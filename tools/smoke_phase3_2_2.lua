@@ -1,7 +1,7 @@
 package.path = "/home/ubuntu/nebula/src/?.lua;/home/ubuntu/nebula/src/?/init.lua;" .. package.path
 
 local mod = require "derive.pipeline_factory"
-assert(mod == "nebula_pipeline_factory_v0.3_phase3.2.2", "unexpected pipeline_factory version")
+assert(mod == "nebula_pipeline_factory_v0.4_phase3.2.4", "unexpected pipeline_factory version (expected v0.4_phase3.2.4, got " .. tostring(mod) .. ")")
 
 local src = nebula_gen_pipeline_source {
   base = "TextVisual",
