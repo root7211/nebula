@@ -83,9 +83,40 @@ Nebula 的核心设计哲学是**“零运行时开销”**与**“编译期元�
     - 编写 `run_all_tests.sh`：自动化回归测试运行器，包含 4 项 Lua 冒烟测试 + 7 项编译回归测试（共 11 项）。
     - 验证所有历史 demo（button_demo、login_demo、shadow_demo、layout_demo 等）无回归。
 
-### Phase 3.3 — 运行时动态列表与实例渲染 (预计 2-3 周)
+### Phase 3.3 — 运行时动态列表与实例渲染
 
-**目标**：重构底层渲染基础设施，支持大规模相同类型组件的实例渲染（Instancing），并实现基于对象池的动态列表。
+**目标**：重构底层渲染基础设施，支持大规模相同类型组件的实例渲染（Instancing），并实现基于 Frame Arena 的动态列表。
+
+**子阶段计划：**
+
+1.  **Phase 3.3.1: Frame Arena 分配器 (进行中)**
+    - 新增 `src/nebula_arena.nelua`：实现线性 Frame Arena 分配器。
+    - 提供 `nebula_arena_init`、`nebula_arena_reset`、`nebula_arena_alloc`、`nebula_arena_alloc_array` 等接口。
+    - 每帧开始时调用 `reset` 将游标归零，帧内所有动态数据从此处线性分配，无 GC、无碎片，O(1) 分配复杂度。
+    - 编写 `tests/smoke_arena.lua`：覆盖分配、对齐、溢出检测、reset 语义等核心断言。
+
+2.  **Phase 3.3.2: Storage Buffer 基础设施**
+    - 在 `renderer.nelua` 中新增 `nebula_create_storage_buffer`：创建 `WGPUBufferUsage_Storage | CopyDst` 类型的 Buffer。
+    - 将 Phase 3.2.2 中内联使用的顶点缓冲区创建逻辑提升为公共 API `nebula_create_vertex_buffer`。
+    - 两个函数均为纯扩展，不修改任何现有接口。
+
+3.  **Phase 3.3.3: Instanced 着色器组合器**
+    - 在 `shader_compose.lua` 中新增 `nebula_compose_instanced_shader(opts)` 函数。
+    - 生成基于 `@builtin(instance_index)` 索引 `var<storage, read>` Storage Buffer 的 WGSL 着色器。
+    - 支持从 `InstanceData` struct 中解包 `pos`、`size`、`bg_color`、`radius`、`border_color`、`border_width` 等字段。
+    - 编写 `tests/smoke_phase3_3_3.lua`：覆盖 instance_index 绑定、storage buffer 声明、SDF 逻辑等断言。
+
+4.  **Phase 3.3.4: Instanced 管线工厂**
+    - 在 `pipeline_factory.lua` 中新增 `gen_pipeline_instanced` 函数。
+    - 生成 `<T>InstancedPipeline` record，包含 `init(renderer, max_instances)`、`upload(renderer, data, count)`、`update_viewport(renderer, vw, vh)`、`draw(pass, count)` 四个方法。
+    - 在 `nebula_gen_pipeline_source` 入口中添加 `spec.instanced` 分支。
+    - 编写 `tests/smoke_phase3_3_4.lua`：覆盖管线代码生成的结构正确性断言。
+
+5.  **Phase 3.3.5: 动态列表 Demo 与全面回归测试**
+    - 编写 `examples/dynamic_list_demo.nelua`：展示 10,000 个可交互列表项的单帧渲染，验证 60FPS 稳定性。
+    - 列表项支持 hover 高亮（通过 `component_id` 焦点链维护）。
+    - 将新增测试项集成至 `tools/run_all_tests.sh`。
+    - 验证所有历史 Demo（button_demo、login_demo、shadow_demo、layout_demo、text_demo）无回归。
 
 ---
 

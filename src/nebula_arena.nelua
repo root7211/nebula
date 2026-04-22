@@ -1,0 +1,164 @@
+-- =============================================================================
+-- nebula_arena.nelua
+-- Nebula GUI Compiler — Phase 3.3
+--
+-- Frame Arena 分配器（Frame Arena Allocator）
+--
+-- 设计哲学：
+--   · 每帧开始时调用 nebula_arena_reset()，将游标归零，"释放"上一帧所有分配。
+--   · 帧内所有动态数据（列表项坐标、实例数据）均从此处线性分配。
+--   · 无 GC、无 free、无内存碎片，分配复杂度 O(1)。
+--   · 完全符合 Nebula 的"零运行时开销"哲学：Arena 本身是编译期固定大小的
+--     静态数组，不依赖任何堆分配。
+--
+-- 使用方式：
+--   1. 在程序初始化时调用 nebula_arena_init(&arena, &backing_buf[0], ARENA_CAP)
+--   2. 每帧开始时调用 nebula_arena_reset(&arena)
+--   3. 需要临时内存时调用 nebula_arena_alloc(&arena, size, align)
+--   4. 无需任何释放操作
+--
+-- 容量建议：
+--   · 1000 个 ItemInstanceData（每个 64 字节）= 64 KB
+--   · 10000 个 ItemInstanceData = 640 KB
+--   · 建议默认容量 2 MB，足以支撑绝大多数 UI 场景
+-- =============================================================================
+
+## cinclude "<stdint.h>"
+## cinclude "<string.h>"
+
+global function memset(ptr: pointer, val: cint, n: csize): pointer <cimport, nodecl> end
+
+-- =============================================================================
+-- NebulaArena：线性分配器状态
+-- =============================================================================
+global NebulaArena = @record{
+  base:     *uint8,   -- 后备内存起始地址
+  capacity: csize,    -- 后备内存总字节数
+  offset:   csize,    -- 当前分配游标（已用字节数）
+  peak:     csize,    -- 本帧峰值使用量（用于调试/调优）
+}
+
+-- =============================================================================
+-- nebula_arena_init
+--
+-- 将 Arena 绑定到一块已存在的后备内存上。
+-- 后备内存的生命周期必须长于 Arena 本身（通常是静态数组或栈上数组）。
+--
+-- 参数：
+--   arena    — Arena 状态结构体指针
+--   backing  — 后备内存起始地址
+--   capacity — 后备内存字节数
+-- =============================================================================
+global function nebula_arena_init(arena: *NebulaArena, backing: *uint8, capacity: csize): void
+  arena.base     = backing
+  arena.capacity = capacity
+  arena.offset   = 0
+  arena.peak     = 0
+  -- 清零后备内存，确保初始状态干净
+  memset(backing, 0, capacity)
+end
+
+-- =============================================================================
+-- nebula_arena_reset
+--
+-- 将分配游标归零，"释放"本帧所有分配。
+-- 应在每帧开始时调用（在任何 alloc 之前）。
+--
+-- 注意：此操作不清零内存内容，仅移动游标。
+--       如需清零，使用 nebula_arena_reset_clear。
+-- =============================================================================
+global function nebula_arena_reset(arena: *NebulaArena): void
+  if arena.offset > arena.peak then
+    arena.peak = arena.offset
+  end
+  arena.offset = 0
+end
+
+-- =============================================================================
+-- nebula_arena_reset_clear
+--
+-- 归零游标并清零已用内存。
+-- 用于调试或需要确保数据干净的场景（略慢于 nebula_arena_reset）。
+-- =============================================================================
+global function nebula_arena_reset_clear(arena: *NebulaArena): void
+  if arena.offset > arena.peak then
+    arena.peak = arena.offset
+  end
+  if arena.offset > 0 then
+    memset(arena.base, 0, arena.offset)
+  end
+  arena.offset = 0
+end
+
+-- =============================================================================
+-- nebula_arena_alloc
+--
+-- 从 Arena 中线性分配 size 字节，按 align 对齐。
+--
+-- 参数：
+--   arena  — Arena 状态结构体指针
+--   size   — 请求的字节数
+--   align  — 对齐要求（必须是 2 的幂，通常为 4 或 8 或 16）
+--
+-- 返回：
+--   成功：指向已分配内存的指针（已对齐）
+--   失败（容量不足）：nilptr
+--
+-- 复杂度：O(1)
+-- =============================================================================
+global function nebula_arena_alloc(arena: *NebulaArena, size: csize, align: csize): pointer
+  if size == 0 then return nilptr end
+
+  -- 计算对齐后的起始偏移
+  local mask    = align - 1
+  local aligned = (arena.offset + mask) & ~mask
+
+  -- 检查容量
+  if aligned + size > arena.capacity then
+    -- 容量溢出：返回 nilptr，调用方应检查并降级处理
+    return nilptr
+  end
+
+  local ptr = (@pointer)(arena.base + aligned)
+  arena.offset = aligned + size
+  return ptr
+end
+
+-- =============================================================================
+-- nebula_arena_alloc_array
+--
+-- 便捷函数：分配 count 个元素的数组，每个元素 elem_size 字节，按 align 对齐。
+-- 等价于 nebula_arena_alloc(arena, count * elem_size, align)，
+-- 但额外检查乘法溢出。
+-- =============================================================================
+global function nebula_arena_alloc_array(
+  arena:     *NebulaArena,
+  count:     csize,
+  elem_size: csize,
+  align:     csize
+): pointer
+  if count == 0 or elem_size == 0 then return nilptr end
+  -- 简单溢出检查：如果 count * elem_size > capacity，直接拒绝
+  if count > arena.capacity // elem_size then return nilptr end
+  return nebula_arena_alloc(arena, count * elem_size, align)
+end
+
+-- =============================================================================
+-- nebula_arena_used
+--
+-- 返回当前帧已使用的字节数（游标位置）。
+-- 用于调试和性能监控。
+-- =============================================================================
+global function nebula_arena_used(arena: *NebulaArena): csize
+  return arena.offset
+end
+
+-- =============================================================================
+-- nebula_arena_remaining
+--
+-- 返回当前帧剩余可用字节数。
+-- =============================================================================
+global function nebula_arena_remaining(arena: *NebulaArena): csize
+  if arena.offset >= arena.capacity then return 0 end
+  return arena.capacity - arena.offset
+end

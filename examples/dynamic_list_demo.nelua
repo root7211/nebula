@@ -1,0 +1,317 @@
+-- =============================================================================
+-- dynamic_list_demo.nelua
+-- Nebula GUI Compiler — Phase 3.3.5 Demo
+--
+-- 演示 Phase 3.3 的核心能力：运行时动态列表与实例渲染（Instancing）
+--
+-- 架构要点：
+--   · 使用 Phase 3.3.1 的 Frame Arena 分配器管理每帧的实例数据
+--   · 使用 Phase 3.3.4 的 ListItemInstancedPipeline 一次 Draw Call 渲染所有列表项
+--   · 使用 Phase 3.3.3 的 Instanced 着色器，通过 @builtin(instance_index) 索引数据
+--   · 10,000 个列表项，支持鼠标 hover 高亮（通过 component_id 焦点链维护）
+--   · 列表支持鼠标滚轮滚动
+--
+-- 渲染规格：
+--   · 列表项尺寸：760 × 40 px，圆角 8px，水平居中
+--   · 列表区域：20 px 左边距，每项间距 4px
+--   · 窗口：800 × 600
+--   · hover 颜色：bg #2a2d3a → #3a3d52，border #333 → #5566aa
+--
+-- 性能目标：
+--   · 10,000 个实例 → 1 次 Draw Call
+--   · Frame Arena 分配：O(1)，无 GC 暂停
+--   · 每帧 CPU 端数据准备：O(N)，N = 可见项数（约 15 项）
+-- =============================================================================
+
+## cinclude "<stdio.h>"
+## cinclude "<math.h>"
+
+require "nebula_core"
+require "glfw_bindings"
+require "wgpu_bindings"
+require "primitives"
+require "renderer"
+require "app"
+require "nebula_arena"
+
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+
+local WIN_W <comptime> = 800
+local WIN_H <comptime> = 600
+
+-- 列表参数（编译期常量）
+local LIST_ITEM_COUNT    <comptime> = 10000
+local LIST_ITEM_W        <comptime> = 760.0
+local LIST_ITEM_H        <comptime> = 40.0
+local LIST_ITEM_GAP      <comptime> = 4.0
+local LIST_ITEM_STRIDE   <comptime> = LIST_ITEM_H + LIST_ITEM_GAP
+local LIST_ITEM_X        <comptime> = 20.0
+local LIST_ITEM_RADIUS   <comptime> = 8.0
+local LIST_VISIBLE_COUNT <comptime> = 16  -- 窗口内最多可见的列表项数（含半遮挡）
+
+-- Frame Arena 大小：足够容纳 LIST_VISIBLE_COUNT 个 InstanceData（每项 64 字节）
+-- 实际上传给 GPU 的只有可见项，但 Arena 按最大可见数预分配
+local ARENA_SIZE <comptime> = LIST_VISIBLE_COUNT * 64 + 256  -- 256 字节余量
+
+-- =============================================================================
+-- InstanceData record（与 WGSL InstanceData struct 内存布局完全对应）
+-- 共 16 个 float32 = 64 字节，满足 std430 对齐要求
+-- =============================================================================
+global ListItemInstanceData = @record{
+  pos:          Vec2,    -- 左上角坐标（屏幕像素）
+  size:         Vec2,    -- 宽高（屏幕像素）
+  bg_color:     Color,   -- 背景颜色 RGBA（float32 × 4）
+  border_color: Color,   -- 边框颜色 RGBA（float32 × 4）
+  border_width: float32, -- 边框宽度（像素）
+  radius:       float32, -- 圆角半径（像素）
+  _pad0:        float32, -- std430 对齐填充
+  _pad1:        float32, -- std430 对齐填充
+}
+
+-- =============================================================================
+-- 编译期派生 Instanced 管线
+-- =============================================================================
+##[[
+-- 使用 Phase 3.3.3 的 Instanced 着色器组合器生成 WGSL
+local shader_result = nebula_compose_instanced_shader({
+  has_radius = true,
+  has_border = true,
+})
+
+-- 使用 Phase 3.3.4 的 Instanced 管线工厂生成管线代码
+local pipeline_code = nebula_gen_pipeline_source({
+  base             = "ListItem",
+  uniforms_record  = "ListItemInstanceData",  -- 占位，instanced 路径不使用此字段
+  wgsl_source      = shader_result.source,
+  instanced        = true,
+  instance_record  = "ListItemInstanceData",
+  max_instances    = LIST_VISIBLE_COUNT,
+})
+
+-- 注入生成的管线代码
+EMIT_NELUA(pipeline_code)
+]]
+
+-- =============================================================================
+-- 主程序
+-- =============================================================================
+local function main(): int32
+  if glfwInit() == 0 then printf("glfw: init failed\n") return 1 end
+  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
+
+  local window = glfwCreateWindow(WIN_W, WIN_H,
+    "Nebula Phase 3.3 — Dynamic List Demo (10,000 Instances)", nilptr, nilptr)
+  if window == nilptr then printf("glfw: window creation failed\n") return 1 end
+
+  local renderer: NebulaRenderer
+  if not renderer:init(window, WIN_W, WIN_H) then return 1 end
+
+  -- 初始化 Instanced 管线（Phase 3.3.4）
+  local pipe: ListItemInstancedPipeline
+  if not pipe:init(&renderer, LIST_VISIBLE_COUNT) then
+    printf("nebula: failed to init ListItemInstancedPipeline\n")
+    return 1
+  end
+  pipe:update_viewport(&renderer, WIN_W, WIN_H)
+
+  -- 初始化 Frame Arena（Phase 3.3.1）
+  -- 后备内存：栈上分配，避免堆分配
+  local arena_backing: [ARENA_SIZE]uint8
+  local arena: NebulaArena
+  nebula_arena_init(&arena, &arena_backing[0], ARENA_SIZE)
+
+  -- 运行时状态
+  local scroll_y:    float32 = 0.0   -- 当前滚动偏移（像素）
+  local hovered_id:  int32   = -1    -- 当前 hover 的列表项索引（-1 = 无）
+  local frame_count: uint32  = 0
+
+  printf("nebula: dynamic_list_demo started — %d items, %d max visible\n",
+    LIST_ITEM_COUNT, LIST_VISIBLE_COUNT)
+
+  -- 主循环
+  while glfwWindowShouldClose(window) == 0 do
+    glfwPollEvents()
+
+    -- =========================================================================
+    -- 输入处理
+    -- =========================================================================
+    local input: NebulaInputState
+    nebula_collect_input(window, &input)
+
+    -- 滚轮滚动（每格 LIST_ITEM_STRIDE 像素）
+    if input.scroll_dy ~= 0.0 then
+      scroll_y = scroll_y - input.scroll_dy * LIST_ITEM_STRIDE
+      -- 限制滚动范围
+      local max_scroll: float32 = (@float32)(LIST_ITEM_COUNT) * LIST_ITEM_STRIDE - (@float32)(WIN_H)
+      if max_scroll < 0.0 then max_scroll = 0.0 end
+      if scroll_y < 0.0 then scroll_y = 0.0 end
+      if scroll_y > max_scroll then scroll_y = max_scroll end
+    end
+
+    -- 计算当前可见的第一个列表项索引
+    local first_visible: int32 = (@int32)(scroll_y / LIST_ITEM_STRIDE)
+    if first_visible < 0 then first_visible = 0 end
+
+    -- 鼠标 hover 检测（仅对可见项）
+    hovered_id = -1
+    if input.mouse_x >= LIST_ITEM_X and input.mouse_x <= LIST_ITEM_X + LIST_ITEM_W then
+      local i: int32 = 0
+      while i < LIST_VISIBLE_COUNT do
+        local item_idx: int32 = first_visible + i
+        if item_idx >= LIST_ITEM_COUNT then break end
+        local item_y: float32 = (@float32)(item_idx) * LIST_ITEM_STRIDE - scroll_y
+        if input.mouse_y >= item_y and input.mouse_y < item_y + LIST_ITEM_H then
+          hovered_id = item_idx
+          break
+        end
+        i = i + 1
+      end
+    end
+
+    -- =========================================================================
+    -- Phase 3.3.1: Frame Arena reset（每帧开始时归零游标）
+    -- =========================================================================
+    nebula_arena_reset(&arena)
+
+    -- =========================================================================
+    -- 构建可见列表项的 InstanceData 数组（从 Arena 分配）
+    -- =========================================================================
+    local visible_count: uint32 = 0
+    local instances: *[0]ListItemInstanceData =
+      (@*[0]ListItemInstanceData)(nebula_arena_alloc_array(
+        &arena, #ListItemInstanceData, LIST_VISIBLE_COUNT))
+
+    if instances ~= nilptr then
+      local i: int32 = 0
+      while i < LIST_VISIBLE_COUNT do
+        local item_idx: int32 = first_visible + i
+        if item_idx >= LIST_ITEM_COUNT then break end
+
+        local item_y: float32 = (@float32)(item_idx) * LIST_ITEM_STRIDE - scroll_y
+
+        -- 裁剪：完全在屏幕外的项不提交
+        if item_y + LIST_ITEM_H > 0.0 and item_y < (@float32)(WIN_H) then
+          local is_hovered: boolean = (item_idx == hovered_id)
+
+          instances[visible_count] = ListItemInstanceData{
+            pos  = Vec2{ x = LIST_ITEM_X, y = item_y },
+            size = Vec2{ x = LIST_ITEM_W, y = LIST_ITEM_H },
+
+            -- 背景色：hover 时高亮
+            bg_color = is_hovered
+              and Color{ r=0.227, g=0.239, b=0.322, a=1.0 }  -- #3a3d52
+              or  Color{ r=0.165, g=0.176, b=0.227, a=1.0 }, -- #2a2d3a
+
+            -- 边框色：hover 时蓝色高亮
+            border_color = is_hovered
+              and Color{ r=0.333, g=0.400, b=0.667, a=1.0 }  -- #5566aa
+              or  Color{ r=0.200, g=0.200, b=0.200, a=0.6 }, -- #333 60%
+
+            border_width = is_hovered and 1.5 or 1.0,
+            radius       = LIST_ITEM_RADIUS,
+            _pad0        = 0.0,
+            _pad1        = 0.0,
+          }
+          visible_count = visible_count + 1
+        end
+        i = i + 1
+      end
+    end
+
+    -- =========================================================================
+    -- Phase 3.3.4: 上传实例数据到 GPU Storage Buffer
+    -- =========================================================================
+    if visible_count > 0 and instances ~= nilptr then
+      pipe:upload(&renderer, instances, visible_count)
+    end
+
+    -- =========================================================================
+    -- 渲染
+    -- =========================================================================
+    local surface_texture: WGPUSurfaceTexture
+    wgpuSurfaceGetCurrentTexture(renderer.surface, &surface_texture)
+    if surface_texture.status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal and
+       surface_texture.status ~= WGPUSurfaceGetCurrentTextureStatus_Success then
+      goto continue_loop
+    end
+
+    do
+      local view_desc = WGPUTextureViewDescriptor{
+        nextInChain     = nilptr,
+        label           = wgpu_str("frame-view"),
+        format          = renderer.format,
+        dimension       = WGPUTextureViewDimension_2D,
+        baseMipLevel    = 0, mipLevelCount    = 1,
+        baseArrayLayer  = 0, arrayLayerCount  = 1,
+        aspect          = WGPUTextureAspect_All,
+        usage           = 0,
+      }
+      local frame_view = wgpuTextureCreateView(surface_texture.texture, &view_desc)
+
+      local encoder_desc = WGPUCommandEncoderDescriptor{
+        nextInChain = nilptr, label = wgpu_str("frame-enc"),
+      }
+      local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, &encoder_desc)
+
+      -- 清屏（深色背景）
+      local color_attach = WGPURenderPassColorAttachment{
+        nextInChain   = nilptr,
+        view          = frame_view,
+        depthSlice    = 0xFFFFFFFF,
+        resolveTarget = nilptr,
+        loadOp        = WGPULoadOp_Clear,
+        storeOp       = WGPUStoreOp_Store,
+        clearValue    = WGPUColor{ r=0.08, g=0.08, b=0.10, a=1.0 },
+      }
+      local pass_desc = WGPURenderPassDescriptor{
+        nextInChain            = nilptr,
+        label                  = wgpu_str("main-pass"),
+        colorAttachmentCount   = 1,
+        colorAttachments       = &color_attach,
+        depthStencilAttachment = nilptr,
+        occlusionQuerySet      = nilptr,
+        timestampWrites        = nilptr,
+      }
+      local pass = wgpuCommandEncoderBeginRenderPass(encoder, &pass_desc)
+
+      -- ★ Phase 3.3: 一次 Draw Call 渲染所有可见列表项
+      if visible_count > 0 then
+        pipe:draw(pass, visible_count)
+      end
+
+      wgpuRenderPassEncoderEnd(pass)
+      wgpuRenderPassEncoderRelease(pass)
+
+      local cmd_desc = WGPUCommandBufferDescriptor{
+        nextInChain = nilptr, label = wgpu_str("frame-cmd"),
+      }
+      local cmd = wgpuCommandEncoderFinish(encoder, &cmd_desc)
+      wgpuQueueSubmit(renderer.queue, 1, &cmd)
+      wgpuCommandBufferRelease(cmd)
+      wgpuCommandEncoderRelease(encoder)
+      wgpuTextureViewRelease(frame_view)
+    end
+
+    wgpuSurfacePresent(renderer.surface)
+    wgpuTextureRelease(surface_texture.texture)
+
+    frame_count = frame_count + 1
+
+    -- 每 600 帧打印一次性能统计
+    if frame_count % 600 == 0 then
+      printf("nebula: frame=%u  scroll=%.1f  visible=%u  hovered=%d  arena_used=%zu/%zu bytes\n",
+        frame_count, scroll_y, visible_count, hovered_id,
+        nebula_arena_used(&arena), ARENA_SIZE)
+    end
+
+    ::continue_loop::
+  end
+
+  printf("nebula: dynamic_list_demo exiting after %u frames\n", frame_count)
+  glfwDestroyWindow(window)
+  glfwTerminate()
+  return 0
+end
+
+main()

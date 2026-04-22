@@ -1108,3 +1108,77 @@ global function nebula_create_blur_bind_group(
 ): WGPUBindGroup
   return nebula_create_textured_bind_group(renderer, bgl, ubuf, tex_view, sampler, uniform_size, label)
 end
+
+-- =============================================================================
+-- ★ Phase 3.3: nebula_create_storage_buffer
+--
+-- 创建一个 Storage Buffer，用于存储实例化渲染中所有实例的数据数组。
+--
+-- Storage Buffer 与 Uniform Buffer 的关键区别：
+--   · Uniform Buffer：大小限制为 65536 字节，适合少量全局参数。
+--   · Storage Buffer：大小仅受设备内存限制，适合大量实例数据。
+--
+-- 在 WGSL 着色器中，通过 var<storage, read> 绑定。
+-- 在 Nelua 运行时，通过 wgpuQueueWriteBuffer 整体更新。
+--
+-- 参数：
+--   out_buf   — 输出：WGPUBuffer 句柄
+--   renderer  — 关联的 NebulaRenderer
+--   size      — Buffer 字节大小（通常为 max_instances * sizeof(InstanceData)）
+--   label     — 调试标签
+--
+-- 返回：成功返回 true
+-- =============================================================================
+global function nebula_create_storage_buffer(
+  out_buf:  *WGPUBuffer,
+  renderer: *NebulaRenderer,
+  size:     uint64,
+  label:    cstring
+): boolean
+  local buf_desc = WGPUBufferDescriptor{
+    nextInChain      = nilptr,
+    label            = wgpu_str(label),
+    usage            = (@uint32)(WGPUBufferUsage_Storage) | (@uint32)(WGPUBufferUsage_CopyDst),
+    size             = size,
+    mappedAtCreation = false,
+  }
+  $out_buf = wgpuDeviceCreateBuffer(renderer.device, &buf_desc)
+  if $out_buf == nilptr then
+    printf("wgpu: failed to create storage buffer (%s)\n", label)
+    return false
+  end
+  printf("wgpu: storage buffer created (%s, %llu bytes)\n", label, size)
+  return true
+end
+
+-- =============================================================================
+-- ★ Phase 3.3: nebula_create_vertex_buffer
+--
+-- 创建一个顶点缓冲区并可选地上传初始数据。
+-- 此函数已在 Phase 3.2.2 的 pipeline_factory.lua 中通过内联使用，
+-- 现将其提升为公共 API 以便其他模块直接调用。
+-- =============================================================================
+global function nebula_create_vertex_buffer(
+  out_buf:  *WGPUBuffer,
+  renderer: *NebulaRenderer,
+  data:     pointer,
+  size:     csize,
+  label:    cstring
+): boolean
+  local buf_desc = WGPUBufferDescriptor{
+    nextInChain      = nilptr,
+    label            = wgpu_str(label),
+    usage            = (@uint32)(WGPUBufferUsage_Vertex) | (@uint32)(WGPUBufferUsage_CopyDst),
+    size             = (@uint64)(size),
+    mappedAtCreation = false,
+  }
+  $out_buf = wgpuDeviceCreateBuffer(renderer.device, &buf_desc)
+  if $out_buf == nilptr then
+    printf("wgpu: failed to create vertex buffer (%s)\n", label)
+    return false
+  end
+  if data ~= nilptr and size > 0 then
+    wgpuQueueWriteBuffer(renderer.queue, $out_buf, 0, data, size)
+  end
+  return true
+end

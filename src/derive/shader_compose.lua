@@ -480,5 +480,168 @@ function nebula_compose_text_shader(opts)
   return nebula_compose_shader(opts)
 end
 
+-- =============================================================================
+-- ★ Phase 3.3.3: nebula_compose_instanced_shader(opts)
+--
+-- 生成基于实例渲染的 WGSL 着色器。
+--
+-- 架构要点：
+--   · binding 0: var<uniform>  Viewport { size: vec2<f32> }  — 屏幕尺寸
+--   · binding 1: var<storage, read>  array<InstanceData>  — 实例数据数组
+--   · 顶点着色器：无顶点缓冲，通过 @builtin(vertex_index) 生成全屏三角形
+--     再通过 @builtin(instance_index) 定位到具体实例的矩形区域内
+--   · 片段着色器：基于实例的 pos/size/radius 计算 SDF，支持圆角、填充和边框
+--
+-- opts 字段：
+--   has_radius  : boolean  — InstanceData 中是否包含 radius 字段
+--   has_border  : boolean  — InstanceData 中是否包含 border_color/border_width 字段
+--
+-- 返回对象：
+--   { source, features, required_passes, instanced=true }
+-- =============================================================================
+function nebula_compose_instanced_shader(opts)
+  opts = opts or {}
+  local has_radius = opts.has_radius or false
+  local has_border = opts.has_border or false
+
+  local features = {"instanced"}
+  if has_radius then table.insert(features, "radius") end
+  if has_border then table.insert(features, "border") end
+
+  -- InstanceData struct 定义（与 Nelua 端的 record 字段顺序对应）
+  -- 内存布局：所有字段均为 float32，共 16 个 float32 = 64 字节
+  local instance_struct = [[
+struct InstanceData {
+  pos:          vec2<f32>,  // 左上角坐标（屏幕像素）
+  size:         vec2<f32>,  // 宽高（屏幕像素）
+  bg_color:     vec4<f32>,  // 背景颜色 RGBA
+  border_color: vec4<f32>,  // 边框颜色 RGBA
+  border_width: f32,        // 边框宽度（像素）
+  radius:       f32,        // 圆角半径（像素）
+  _pad0:        f32,        // std430 对齐填充
+  _pad1:        f32,        // std430 对齐填充
+}
+]]
+
+  -- 着色器绑定声明
+  local bindings = [[
+struct Viewport {
+  size: vec2<f32>,
+  _pad0: f32,
+  _pad1: f32,
+}
+
+@group(0) @binding(0) var<uniform>          vp:        Viewport;
+@group(0) @binding(1) var<storage, read>    instances: array<InstanceData>;
+]]
+
+  -- VertexOutput
+  local vertex_io = [[
+struct VertexOutput {
+  @builtin(position) clip_position: vec4<f32>,
+  @location(0)       inst_pos:      vec2<f32>,  // 实例左上角
+  @location(1)       inst_size:     vec2<f32>,  // 实例宽高
+  @location(2)       inst_idx:      u32,        // 实例索引（传递给 fs）
+}
+]]
+
+  -- 顶点着色器：全屏三角形裁剪到实例矩形区域
+  -- 策略：生成覆盖整个实例矩形的 NDC 坐标，片段着色器再用 SDF 做圆角和边框
+  local vs_main = [[
+@vertex
+fn vs_main(
+  @builtin(vertex_index)   vi:   u32,
+  @builtin(instance_index) inst: u32,
+) -> VertexOutput {
+  let d = instances[inst];
+
+  // 实例矩形的四个角（屏幕像素坐标）
+  let x0 = d.pos.x;
+  let y0 = d.pos.y;
+  let x1 = d.pos.x + d.size.x;
+  let y1 = d.pos.y + d.size.y;
+
+  // 两个三角形拼成矩形（顶点顺序：左上、右上、左下、右上、右下、左下）
+  var corners = array<vec2<f32>, 6>(
+    vec2<f32>(x0, y0),
+    vec2<f32>(x1, y0),
+    vec2<f32>(x0, y1),
+    vec2<f32>(x1, y0),
+    vec2<f32>(x1, y1),
+    vec2<f32>(x0, y1),
+  );
+  let pixel = corners[vi];
+
+  // 像素坐标 → NDC
+  let ndc = vec2<f32>(
+    (pixel.x / vp.size.x) * 2.0 - 1.0,
+    1.0 - (pixel.y / vp.size.y) * 2.0,
+  );
+
+  var out: VertexOutput;
+  out.clip_position = vec4<f32>(ndc, 0.0, 1.0);
+  out.inst_pos      = d.pos;
+  out.inst_size     = d.size;
+  out.inst_idx      = inst;
+  return out;
+}
+]]
+
+  -- SDF 函数
+  local sdf_func
+  if has_radius then
+    sdf_func = WGSL_FRAGMENTS.sdf_rounded_rect({})
+  else
+    sdf_func = WGSL_FRAGMENTS.sdf_rect({})
+  end
+
+  -- 片段着色器
+  local fs_lines = {}
+  table.insert(fs_lines, "\n@fragment")
+  table.insert(fs_lines, "fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {")
+  table.insert(fs_lines, "  let d = instances[in.inst_idx];")
+  table.insert(fs_lines, "  let pixel    = in.clip_position.xy;")
+  table.insert(fs_lines, "  let center   = in.inst_pos + in.inst_size * 0.5;")
+  table.insert(fs_lines, "  let p        = pixel - center;")
+  table.insert(fs_lines, "  let half_size = in.inst_size * 0.5;")
+  table.insert(fs_lines, "")
+
+  if has_radius then
+    table.insert(fs_lines, "  let dist = sdf_rounded_rect(p, half_size, d.radius);")
+  else
+    table.insert(fs_lines, "  let dist = sdf_rect(p, half_size);")
+  end
+
+  table.insert(fs_lines, "  let aa = 1.0;")
+  table.insert(fs_lines, "  let fill_alpha = 1.0 - smoothstep(-aa, aa, dist);")
+
+  if has_border then
+    table.insert(fs_lines, "  let border_alpha = (1.0 - smoothstep(-aa, aa, dist + d.border_width)) - fill_alpha;")
+  end
+
+  table.insert(fs_lines, "")
+  table.insert(fs_lines, "  var color = d.bg_color * fill_alpha;")
+
+  if has_border then
+    table.insert(fs_lines, "  color = color + d.border_color * border_alpha;")
+  end
+
+  table.insert(fs_lines, "")
+  table.insert(fs_lines, "  if color.a < 0.001 {")
+  table.insert(fs_lines, "    discard;")
+  table.insert(fs_lines, "  }")
+  table.insert(fs_lines, "  return color;")
+  table.insert(fs_lines, "}")
+
+  local source = instance_struct .. bindings .. vertex_io .. vs_main .. sdf_func .. table.concat(fs_lines, "\n")
+
+  return {
+    source          = source,
+    features        = features,
+    required_passes = {"main"},
+    instanced       = true,
+  }
+end
+
 -- 返回模块标识，供 require 验证
-return "nebula_shader_compose_v0.3_phase3.2.3"
+return "nebula_shader_compose_v0.4_phase3.3.3"

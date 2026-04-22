@@ -1,7 +1,7 @@
 package.path = "/home/ubuntu/nebula/src/?.lua;/home/ubuntu/nebula/src/?/init.lua;" .. package.path
 
 local mod = require "derive.shader_compose"
-assert(mod == "nebula_shader_compose_v0.3_phase3.2.3", "unexpected shader_compose version")
+assert(mod == "nebula_shader_compose_v0.4_phase3.3.3", "unexpected shader_compose version")
 
 local result = nebula_compose_text_shader {
   wgsl_struct = [[
