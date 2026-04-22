@@ -1,15 +1,20 @@
 -- =============================================================================
 -- app.nelua
--- Nebula GUI Compiler — Phase 2.4
+-- Nebula GUI Compiler — Phase 3.4.1
 --
 -- 统一输入收集层（Unified Input Collection Layer）
 --
 -- 提供 nebula_collect_input()，在每帧主循环开头调用，将 GLFW 的原始事件
--- 映射到 NebulaInputState 结构。调用方只需维护一个 NebulaInputState 局部变量，并在
--- 每帧开头调用此函数即可；不再需要手动查询 glfwGetMouseButton / glfwGetCursorPos。
+-- 映射到 NebulaInputState 结构。
+--
+-- Phase 3.4.1 新增：
+--   · 键盘字符输入（glfwSetCharCallback → char_input / char_count）
+--   · 控制键输入（glfwSetKeyCallback → key_pressed）
+--   · nebula_input_install_callbacks(window) — 一次性注册所有回调
 --
 -- 用法：
 --   local input: NebulaInputState
+--   nebula_input_install_callbacks(window)   -- 在主循环前调用一次
 --   while glfwWindowShouldClose(window) == 0 do
 --     glfwPollEvents()
 --     nebula_collect_input(window, &input, dt)
@@ -18,22 +23,91 @@
 -- =============================================================================
 
 ## cinclude "<stdio.h>"
+## cinclude "<string.h>"
 
 require "nebula_core"
 require "glfw_bindings"
 
 -- =============================================================================
+-- 内部全局事件队列（环形缓冲区，仅在 app.nelua 内部可见）
+-- 回调函数写入，nebula_collect_input 读取并清空。
+-- =============================================================================
+global _nebula_char_queue:  [64]uint32   -- Unicode 码位队列
+global _nebula_char_head:   uint8 = 0
+global _nebula_char_tail:   uint8 = 0
+
+global _nebula_key_queue:   [16]NebulaKey  -- 控制键队列
+global _nebula_key_head:    uint8 = 0
+global _nebula_key_tail:    uint8 = 0
+
+-- =============================================================================
+-- GLFW 回调：字符输入（Unicode 可打印字符）
+-- =============================================================================
+global function _nebula_char_callback(window: GLFWwindow, codepoint: uint32): void
+  local next = (_nebula_char_tail + 1) % 64
+  if next ~= _nebula_char_head then  -- 队列未满
+    _nebula_char_queue[_nebula_char_tail] = codepoint
+    _nebula_char_tail = next
+  end
+end
+
+-- =============================================================================
+-- GLFW 回调：控制键（Backspace / Delete / Enter / Tab / 方向键 / Home / End）
+-- =============================================================================
+global function _nebula_key_callback(
+  window:   GLFWwindow,
+  key:      int32,
+  scancode: int32,
+  action:   int32,
+  mods:     int32
+): void
+  -- 只处理按下和重复（不处理释放）
+  if action == GLFW_RELEASE then return end
+
+  local nk: NebulaKey = NebulaKey.None
+  if     key == GLFW_KEY_BACKSPACE then nk = NebulaKey.Backspace
+  elseif key == GLFW_KEY_DELETE    then nk = NebulaKey.Delete
+  elseif key == GLFW_KEY_ENTER     then nk = NebulaKey.Enter
+  elseif key == GLFW_KEY_KP_ENTER  then nk = NebulaKey.Enter
+  elseif key == GLFW_KEY_TAB       then nk = NebulaKey.Tab
+  elseif key == GLFW_KEY_ESCAPE    then nk = NebulaKey.Escape
+  elseif key == GLFW_KEY_LEFT      then nk = NebulaKey.Left
+  elseif key == GLFW_KEY_RIGHT     then nk = NebulaKey.Right
+  elseif key == GLFW_KEY_HOME      then nk = NebulaKey.Home
+  elseif key == GLFW_KEY_END       then nk = NebulaKey.End
+  end
+
+  if nk ~= NebulaKey.None then
+    local next = (_nebula_key_tail + 1) % 16
+    if next ~= _nebula_key_head then
+      _nebula_key_queue[_nebula_key_tail] = nk
+      _nebula_key_tail = next
+    end
+  end
+end
+
+-- =============================================================================
+-- nebula_input_install_callbacks(window)
+--
+-- 在主循环开始前调用一次，将上述两个回调注册到 GLFW 窗口。
+-- =============================================================================
+global function nebula_input_install_callbacks(window: GLFWwindow): void
+  glfwSetCharCallback(window, _nebula_char_callback)
+  glfwSetKeyCallback(window,  _nebula_key_callback)
+end
+
+-- =============================================================================
 -- nebula_collect_input(window, input, dt)
 --
 -- 参数：
---   window : GLFWwindow*  — 当前窗口句柄
---   input  : *NebulaInputState  — 输出：本帧的输入快照（原地更新）
---   dt     : float32      — 本帧时长（秒），保留供后续手势检测扩展使用
+--   window : GLFWwindow*       — 当前窗口句柄
+--   input  : *NebulaInputState — 输出：本帧的输入快照（原地更新）
+--   dt     : float32           — 本帧时长（秒）
 --
 -- 行为：
---   · 读取鼠标坐标（glfwGetCursorPos）
---   · 读取左键当前状态（glfwGetMouseButton）
---   · 推导 mouse_left_pressed（本帧新按下）和 mouse_left_released（本帧新释放）
+--   · 读取鼠标坐标与左键状态（同 Phase 2.4）
+--   · 将字符队列中的码位提取到 input.char_input / char_count
+--   · 将控制键队列中第一个键提取到 input.key_pressed（每帧最多一个控制键）
 --   · 不修改 focused_id：焦点由 process_input() 内部管理
 -- =============================================================================
 global function nebula_collect_input(
@@ -41,17 +115,32 @@ global function nebula_collect_input(
   input:   *NebulaInputState,
   dt:      float32
 ): void
-  -- 鼠标坐标
+  -- ---- 鼠标 ----
   local mx_f64: float64 = 0.0
   local my_f64: float64 = 0.0
   glfwGetCursorPos(window, &mx_f64, &my_f64)
   input.mouse_x = (@float32)(mx_f64)
   input.mouse_y = (@float32)(my_f64)
 
-  -- 左键状态：推导上升沿与下降沿
   local prev_down = input.mouse_left_down
   local cur_down  = (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
   input.mouse_left_down     = cur_down
-  input.mouse_left_pressed  = (cur_down and not prev_down)   -- 本帧新按下
-  input.mouse_left_released = (not cur_down and prev_down)   -- 本帧新释放
+  input.mouse_left_pressed  = (cur_down and not prev_down)
+  input.mouse_left_released = (not cur_down and prev_down)
+
+  -- ---- 字符输入：从队列提取到 input.char_input ----
+  input.char_count = 0
+  while _nebula_char_head ~= _nebula_char_tail and input.char_count < 16 do
+    input.char_input[input.char_count] = _nebula_char_queue[_nebula_char_head]
+    input.char_count = input.char_count + 1
+    _nebula_char_head = (_nebula_char_head + 1) % 64
+  end
+
+  -- ---- 控制键：每帧取一个（FIFO，支持按键重复） ----
+  if _nebula_key_head ~= _nebula_key_tail then
+    input.key_pressed = _nebula_key_queue[_nebula_key_head]
+    _nebula_key_head = (_nebula_key_head + 1) % 16
+  else
+    input.key_pressed = NebulaKey.None
+  end
 end

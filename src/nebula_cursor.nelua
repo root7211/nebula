@@ -1,0 +1,61 @@
+-- =============================================================================
+-- nebula_cursor.nelua
+-- Nebula GUI Compiler — Phase 3.4.3
+--
+-- 极简光标渲染辅助模块（Minimal Caret Renderer）
+--
+-- 设计原则：
+--   · 不依赖排版解耦或复杂的命中测试
+--   · 利用 SDF 字体的 Advance 宽度累加计算光标 X 偏移
+--   · 光标本身作为一个 1px 宽的矩形，通过 glfwGetTime() 实现 0.5Hz 闪烁
+--   · 所有计算在 CPU 端完成，结果作为额外 Uniform 传递给渲染层
+--
+-- 公开 API：
+--   nebula_cursor_x_offset(advances, cursor_pos, count) -> float32
+--     根据字形 Advance 数组累加计算光标的 X 像素偏移
+--
+--   nebula_cursor_visible(time) -> boolean
+--     根据当前时间计算光标是否可见（每 0.5 秒切换一次）
+-- =============================================================================
+
+## cinclude "<math.h>"
+
+require "glfw_bindings"
+
+-- =============================================================================
+-- nebula_cursor_x_offset
+--
+-- 参数：
+--   advances   : *float32  — 字形 Advance 宽度数组（每个字符对应一个元素）
+--   cursor_pos : uint32    — 光标位置（0 = 最左侧，即第 0 个字符之前）
+--   count      : uint32    — advances 数组中有效元素的数量（= text_len）
+--
+-- 返回：光标相对于文本起始点的 X 像素偏移（float32）
+-- =============================================================================
+global function nebula_cursor_x_offset(
+  advances:   *float32,
+  cursor_pos: uint32,
+  count:      uint32
+): float32
+  local offset: float32 = 0.0
+  local i: uint32 = 0
+  while i < cursor_pos and i < count do
+    offset = offset + advances[i]
+    i = i + 1
+  end
+  return offset
+end
+
+-- =============================================================================
+-- nebula_cursor_visible
+--
+-- 参数：
+--   time : float64  — 当前时间（秒），通常由 glfwGetTime() 提供
+--
+-- 返回：true 表示光标当前应可见（每 0.5 秒切换一次）
+-- =============================================================================
+global function nebula_cursor_visible(time: float64): boolean
+  -- fmod(time, 1.0) < 0.5 => 前半秒可见，后半秒不可见
+  local t = time - (@float64)((@int64)(time))  -- 等价于 fmod(time, 1.0)
+  return t < 0.5
+end

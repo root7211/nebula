@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # run_all_tests.sh
-# Nebula GUI Compiler — Phase 3.3.5 Full Regression Test Suite
+# Nebula GUI Compiler — Phase 3.4.4 Full Regression Test Suite
 #
 # 运行所有 Lua 冒烟测试和编译回归测试。
 #
@@ -34,7 +34,7 @@ run_test() {
 }
 
 echo "============================================"
-echo " Nebula Phase 3.3.5 — Full Regression Suite"
+echo " Nebula Phase 3.4.4 — Full Regression Suite"
 echo "============================================"
 
 # ---- Part 1: Lua 冒烟测试（纯编译期逻辑验证） ----
@@ -67,6 +67,19 @@ run_test "smoke_phase3_3_3 (Phase 3.3.3 — Instanced shader composer)" \
 run_test "smoke_phase3_3_4 (Phase 3.3.4 — Instanced pipeline factory)" \
   nelua-lua tests/smoke_phase3_3_4.lua
 
+# Phase 3.4.x 新增测试
+run_test "smoke_phase3_4_1 (Phase 3.4.1 — Keyboard event collection)" \
+  nelua-lua tests/smoke_phase3_4_1.lua
+
+run_test "smoke_phase3_4_2 (Phase 3.4.2 — Text buffer logic)" \
+  nelua-lua tests/smoke_phase3_4_2.lua
+
+run_test "smoke_phase3_4_3 (Phase 3.4.3 — Cursor renderer)" \
+  nelua-lua tests/smoke_phase3_4_3.lua
+
+run_test "smoke_phase3_4_4 (Phase 3.4.4 — Login demo upgrade)" \
+  nelua-lua tests/smoke_phase3_4_4.lua
+
 # ---- Part 2: 编译回归测试（Nelua → C → 二进制） ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="
@@ -78,7 +91,7 @@ run_test "compile text_demo (Phase 3.2.5)" \
 run_test "compile button_demo (Phase 2.4)" \
   bash build.sh button_demo
 
-run_test "compile login_demo (Phase 2.4)" \
+run_test "compile login_demo (Phase 3.4.4)" \
   bash build.sh login_demo
 
 run_test "compile simple_rect_demo (Phase 2.4)" \
@@ -107,6 +120,6 @@ if [ "$FAIL" -gt 0 ]; then
   echo "[REGRESSION DETECTED] $FAIL test(s) failed!"
   exit 1
 else
-  echo "[ALL PASS] Phase 3.3.5 regression suite complete."
+  echo "[ALL PASS] Phase 3.4.4 regression suite complete."
   exit 0
 fi

@@ -29,13 +29,38 @@ global Color = @record{ r: float32, g: float32, b: float32, a: float32 }
 -- 由 app.nelua 的 nebula_collect_input() 在每帧开头填充。
 -- 交互原语派生的 process_input() 方法接收指向此结构的指针。
 -- =============================================================================
+-- =============================================================================
+-- 键盘控制键枚举（用于 input.key_pressed 字段）
+-- =============================================================================
+global NebulaKey = @enum(uint8){
+  None      = 0,
+  Backspace = 1,
+  Delete    = 2,
+  Enter     = 3,
+  Tab       = 4,
+  Escape    = 5,
+  Left      = 6,
+  Right     = 7,
+  Home      = 8,
+  End       = 9,
+}
+
+-- =============================================================================
+-- ★ Phase 2.4: 统一输入状态（Unified Input State）
+-- ★ Phase 3.4.1: 新增键盘事件字段
+-- =============================================================================
 global NebulaInputState = @record{
+  -- 鼠标状态（Phase 2.4）
   mouse_x:            float32,   -- 当前帧鼠标 X 坐标（像素）
   mouse_y:            float32,   -- 当前帧鼠标 Y 坐标（像素）
   mouse_left_down:    boolean,   -- 左键当前是否按下（持续状态）
   mouse_left_pressed: boolean,   -- 左键本帧是否刚刚按下（上升沿）
   mouse_left_released:boolean,   -- 左键本帧是否刚刚释放（下降沿）
   focused_id:         uint32,    -- 当前获得焦点的组件 ID；0 表示无焦点
+  -- 键盘事件（Phase 3.4.1 新增）
+  char_input:         [16]uint32, -- 本帧输入的 Unicode 码位数组（最多 16 个字符）
+  char_count:         uint8,     -- char_input 中有效字符数量
+  key_pressed:        NebulaKey, -- 本帧按下的控制键；不存在控制键时为 None
 }
 
 -- =============================================================================

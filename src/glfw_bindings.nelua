@@ -36,3 +36,31 @@ global function glfwSetWindowShouldClose(window: GLFWwindow, value: int32): void
 global function glfwGetX11Display(): pointer <cimport, nodecl> end
 global function glfwGetX11Window(window: GLFWwindow): uint64 <cimport, nodecl> end
 global function glfwGetTime(): float64 <cimport, nodecl> end
+
+-- =============================================================================
+-- ★ Phase 3.4.1: 键盘输入绑定
+-- =============================================================================
+
+-- 常用控制键 keycode 常量
+global GLFW_KEY_BACKSPACE  <comptime> = 259
+global GLFW_KEY_DELETE     <comptime> = 261
+global GLFW_KEY_ENTER      <comptime> = 257
+global GLFW_KEY_KP_ENTER   <comptime> = 335
+global GLFW_KEY_TAB        <comptime> = 258
+global GLFW_KEY_ESCAPE     <comptime> = 256
+global GLFW_KEY_LEFT       <comptime> = 263
+global GLFW_KEY_RIGHT      <comptime> = 262
+global GLFW_KEY_HOME       <comptime> = 268
+global GLFW_KEY_END        <comptime> = 269
+
+-- 修饰键 mods 位掩码
+global GLFW_MOD_SHIFT    <comptime> = 0x0001
+global GLFW_MOD_CONTROL  <comptime> = 0x0002
+
+-- 回调函数类型（C 函数指针）
+global GLFWkeyfun    <cimport, nodecl> = @function(window: GLFWwindow, key: int32, scancode: int32, action: int32, mods: int32): void
+global GLFWcharfun   <cimport, nodecl> = @function(window: GLFWwindow, codepoint: uint32): void
+
+-- 注册回调
+global function glfwSetKeyCallback(window: GLFWwindow, callback: GLFWkeyfun): GLFWkeyfun <cimport, nodecl> end
+global function glfwSetCharCallback(window: GLFWwindow, callback: GLFWcharfun): GLFWcharfun <cimport, nodecl> end

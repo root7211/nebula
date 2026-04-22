@@ -1,16 +1,18 @@
 -- =============================================================================
 -- login_demo.nelua
--- Nebula GUI Compiler — Phase 2.4 Login Demo
+-- Nebula GUI Compiler — Phase 3.4.4
 --
--- Phase 2.4 升级：
---   · 全部三种组件（Card / Input / Button）的交互逻辑由 nebula_derive 自动生成
---   · update() 签名改为 (input: *NebulaInputState, dt: float32)
---   · Input 组件的 focused 状态通过 focusable 原语 + component_id 自动管理
---   · 不再需要手写 focused_input_id / click.just_clicked 焦点切换代码
---   · 输入收集统一由 nebula_collect_input() 完成
+-- Phase 3.4.4 升级：
+--   · 接入 nebula_input_install_callbacks() 注册键盘回调
+--   · InputContext 新增 text_buf / text_len / cursor_pos 字段
+--   · 每帧调用 process_text_input() 消费键盘事件，文本变化时重建 TextContext 网格
+--   · 使用 nebula_cursor_x_offset() + nebula_cursor_visible() 渲染闪烁光标
+--   · 按 Enter 键时在控制台打印当前 email / password 内容
+--   · 完全向后兼容 Phase 2.4 的视觉规格与焦点管理
 -- =============================================================================
 
 ## cinclude "<stdio.h>"
+## cinclude "<string.h>"
 
 require "nebula_core"
 require "glfw_bindings"
@@ -18,17 +20,20 @@ require "wgpu_bindings"
 require "primitives"
 require "renderer"
 require "app"
+require "text_runtime"
+require "nebula_cursor"
 
 global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+global function memset(ptr: pointer, value: int32, size: usize): pointer <cimport, nodecl> end
 
 local WIN_W <comptime> = 800
 local WIN_H <comptime> = 600
 
 -- =============================================================================
--- 视觉规格 + 注解 + 派生（开发者只需要写这些）
+-- 视觉规格 + 注解 + 派生
 -- =============================================================================
 
--- ---- 卡片背景：仅 default 状态，无原语 ----
+-- ---- 卡片背景 ----
 global CardVisual = @record{
   pos:    Vec2,
   size:   Vec2,
@@ -37,13 +42,10 @@ global CardVisual = @record{
   default_border_color: Color,
   default_border_width: float32,
 }
-##[[
-nebula_annotate("CardVisual", { states={"default"}, primitives={}, transitions={} })
-]]
+##[[ nebula_annotate("CardVisual", { states={"default"}, primitives={}, transitions={} }) ]]
 ## nebula_derive("CardVisual")
 
 -- ---- 输入框：default + hovered + focused ----
--- Phase 2.4: 声明 focusable 原语 + component_id，焦点管理由派生器自动处理
 global InputVisual = @record{
   pos:    Vec2,
   size:   Vec2,
@@ -60,9 +62,12 @@ global InputVisual = @record{
   focused_bg_color:     Color,
   focused_border_color: Color,
   focused_border_width: float32,
-}
 
--- 输入框：focusable 原语，component_id 在运行时赋值
+  -- Phase 3.4.4: 文本缓冲区字段（由 nebula_gen_text_buffer 生成的方法使用）
+  text_buf:   [256]uint8,
+  text_len:   uint32,
+  cursor_pos: uint32,
+}
 ##[[
 nebula_annotate("InputVisual", {
   states     = {"default", "hovered", "focused"},
@@ -78,7 +83,10 @@ nebula_annotate("InputVisual", {
 ]]
 ## nebula_derive("InputVisual")
 
--- ---- 按钮：default + hovered + pressed ----
+-- Phase 3.4.4: 为 InputContext 生成 process_text_input / get_text 方法
+##[[ nebula_gen_text_buffer({ base = "Input" }) ]]
+
+-- ---- 按钮 ----
 global ButtonVisual = @record{
   pos:    Vec2,
   size:   Vec2,
@@ -118,13 +126,16 @@ local function main(): int32
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
 
-  local window = glfwCreateWindow(WIN_W, WIN_H, "Nebula Phase 2.4 — Login Demo", nilptr, nilptr)
+  local window = glfwCreateWindow(WIN_W, WIN_H, "Nebula Phase 3.4 — Login Demo", nilptr, nilptr)
   if window == nilptr then printf("glfw: window creation failed\n") return 1 end
+
+  -- Phase 3.4.1: 注册键盘回调（在主循环前调用一次）
+  nebula_input_install_callbacks(window)
 
   local renderer: NebulaRenderer
   if not renderer:init(window, WIN_W, WIN_H) then return 1 end
 
-  -- 四个组件各自拥有独立派生的管线
+  -- 管线
   local pipe_card:     CardPipeline
   local pipe_email:    InputPipeline
   local pipe_password: InputPipeline
@@ -134,7 +145,13 @@ local function main(): int32
   if not pipe_password:init(&renderer) then return 1 end
   if not pipe_button:init(&renderer)   then return 1 end
 
-  -- 卡片
+  -- 文本渲染管线（用于显示输入框内容）
+  local pipe_email_text:    TextPipeline
+  local pipe_password_text: TextPipeline
+  if not pipe_email_text:init(&renderer)    then return 1 end
+  if not pipe_password_text:init(&renderer) then return 1 end
+
+  -- ---- 卡片 ----
   local card: CardContext
   card:init(CardVisual{
     pos    = Vec2{ x = 220.0, y = 100.0 },
@@ -145,7 +162,7 @@ local function main(): int32
     default_border_width = 1.0,
   })
 
-  -- Email 输入框（component_id = 1）
+  -- ---- Email 输入框（component_id = 1）----
   local email_input: InputContext
   email_input:init(InputVisual{
     pos    = Vec2{ x = 252.0, y = 196.0 },
@@ -160,10 +177,13 @@ local function main(): int32
     focused_bg_color     = Color{ r=0.16, g=0.18, b=0.24, a=1.0 },
     focused_border_color = Color{ r=0.35, g=0.60, b=1.00, a=1.0 },
     focused_border_width = 2.0,
+    text_buf   = {},
+    text_len   = 0,
+    cursor_pos = 0,
   })
   email_input.component_id = 1
 
-  -- Password 输入框（component_id = 2）
+  -- ---- Password 输入框（component_id = 2）----
   local password_input: InputContext
   password_input:init(InputVisual{
     pos    = Vec2{ x = 252.0, y = 264.0 },
@@ -178,10 +198,13 @@ local function main(): int32
     focused_bg_color     = Color{ r=0.16, g=0.18, b=0.24, a=1.0 },
     focused_border_color = Color{ r=0.35, g=0.60, b=1.00, a=1.0 },
     focused_border_width = 2.0,
+    text_buf   = {},
+    text_len   = 0,
+    cursor_pos = 0,
   })
   password_input.component_id = 2
 
-  -- 登录按钮
+  -- ---- 登录按钮 ----
   local login_btn: ButtonContext
   login_btn:init(ButtonVisual{
     pos    = Vec2{ x = 252.0, y = 356.0 },
@@ -198,7 +221,25 @@ local function main(): int32
     pressed_border_width = 2.0,
   })
 
-  -- Phase 2.4: 统一输入状态
+  -- ---- 文本上下文（用于显示输入框内容）----
+  local email_text:    TextContext
+  local password_text: TextContext
+  email_text:init(
+    Vec2{ x = 260.0, y = 212.0 },  -- 文本起始位置（输入框内左侧）
+    Color{ r=0.90, g=0.90, b=0.92, a=1.0 },
+    14.0
+  )
+  password_text:init(
+    Vec2{ x = 260.0, y = 280.0 },
+    Color{ r=0.90, g=0.90, b=0.92, a=1.0 },
+    14.0
+  )
+
+  -- 初始占位符文本
+  email_text:set_text("email")
+  password_text:set_text("password")
+
+  -- ---- 统一输入状态 ----
   local input: NebulaInputState
   local prev_time = glfwGetTime()
 
@@ -208,17 +249,47 @@ local function main(): int32
     local dt  = (@float32)(now - prev_time)
     prev_time = now
 
-    -- Phase 2.4: 一行收集输入
+    -- 收集输入（鼠标 + 键盘）
     nebula_collect_input(window, &input, dt)
 
-    -- Phase 2.4: 所有组件统一调用 update，交互逻辑全部自动处理
-    -- 不再需要手写 focused_input_id / click.just_clicked 焦点切换代码
+    -- 更新组件状态机与焦点
     card:update(&input, dt)
     email_input:update(&input, dt)
     password_input:update(&input, dt)
     login_btn:update(&input, dt)
 
-    -- 渲染
+    -- Phase 3.4.4: 处理文本输入，文本变化时重建网格
+    if email_input:process_text_input(&input) then
+      if email_input.visual.text_len > 0 then
+        email_text:set_text(email_input:get_text())
+      else
+        email_text:set_text("email")
+      end
+    end
+
+    if password_input:process_text_input(&input) then
+      if password_input.visual.text_len > 0 then
+        -- 密码框：显示 * 号
+        local mask: [256]uint8
+        local mi: uint32 = 0
+        while mi < password_input.visual.text_len do
+          mask[mi] = 0x2A  -- '*'
+          mi = mi + 1
+        end
+        mask[password_input.visual.text_len] = 0
+        password_text:set_text((@cstring)(&mask[0]))
+      else
+        password_text:set_text("password")
+      end
+    end
+
+    -- Enter 键：打印表单内容
+    if input.key_pressed == NebulaKey.Enter then
+      printf("email: %s\n", email_input:get_text())
+      printf("password: [%d chars]\n", email_input.visual.text_len)
+    end
+
+    -- ---- 渲染 ----
     local surface_tex: WGPUSurfaceTexture
     wgpuSurfaceGetCurrentTexture(renderer.surface, &surface_tex)
     local status = surface_tex.status
@@ -226,16 +297,17 @@ local function main(): int32
        status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal then
       continue
     end
+
     local view_desc = WGPUTextureViewDescriptor{
-      nextInChain     = nilptr, label = wgpu_str_null(),
-      format          = renderer.format,
-      dimension       = 2,
-      baseMipLevel    = 0, mipLevelCount = 1,
-      baseArrayLayer  = 0, arrayLayerCount = 1,
-      aspect          = 1, usage = 0,
+      nextInChain = nilptr, label = wgpu_str_null(),
+      format = renderer.format, dimension = 2,
+      baseMipLevel = 0, mipLevelCount = 1,
+      baseArrayLayer = 0, arrayLayerCount = 1,
+      aspect = 1, usage = 0,
     }
     local view = wgpuTextureCreateView(surface_tex.texture, &view_desc)
 
+    -- 更新 Uniform
     local u_card  = card:to_uniforms(WIN_W, WIN_H)
     local u_email = email_input:to_uniforms(WIN_W, WIN_H)
     local u_pwd   = password_input:to_uniforms(WIN_W, WIN_H)
@@ -245,6 +317,11 @@ local function main(): int32
     pipe_password:update_uniforms(&renderer, &u_pwd)
     pipe_button:update_uniforms(&renderer, &u_btn)
 
+    -- 上传文本顶点
+    pipe_email_text:upload_vertices(&renderer, &email_text)
+    pipe_password_text:upload_vertices(&renderer, &password_text)
+
+    -- 提交渲染
     local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, nilptr)
     local clear_color = WGPURenderPassColorAttachment{
       nextInChain = nilptr, view = view, depthSlice = 0xFFFFFFFF,
@@ -263,6 +340,8 @@ local function main(): int32
     pipe_email:draw(pass)
     pipe_password:draw(pass)
     pipe_button:draw(pass)
+    pipe_email_text:draw(pass)
+    pipe_password_text:draw(pass)
     wgpuRenderPassEncoderEnd(pass)
     wgpuRenderPassEncoderRelease(pass)
 

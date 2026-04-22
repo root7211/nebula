@@ -171,5 +171,87 @@ function nebula_gen_process_input(spec)
   return table.concat(lines, "\n")
 end
 
+-- =============================================================================
+-- nebula_gen_text_buffer(spec) -> string
+--
+-- 为声明了 "editable" 原语的 Visual 生成文本缓冲区字段与操作方法。
+-- 产出的方法与已有的 process_input 协同工作：
+--   先由 process_input 更新焦点和状态机，
+--   再由 process_text_input 消费键盘事件。
+--
+-- 生成的内容：
+--   方法：<T>Context:process_text_input(input: *NebulaInputState): boolean
+--         返回 true 表示文本内容发生变化
+--   方法：<T>Context:get_text(): cstring
+-- =============================================================================
+function nebula_gen_text_buffer(spec)
+  assert(spec.base, "nebula_gen_text_buffer: spec.base required")
+  local ctx = spec.base .. "Context"
+  local lines = {}
+
+  table.insert(lines, ("-- [editable] %s: process_text_input"):format(ctx))
+  table.insert(lines, ("function %s:process_text_input(input: *NebulaInputState): boolean"):format(ctx))
+  table.insert(lines,  "  if input.focused_id ~= self.component_id then return false end")
+  table.insert(lines,  "  local changed = false")
+  -- 字符输入
+  table.insert(lines,  "  local i: uint8 = 0")
+  table.insert(lines,  "  while i < input.char_count do")
+  table.insert(lines,  "    local cp = input.char_input[i]")
+  table.insert(lines,  "    if cp >= 0x20 and cp <= 0x7E and self.text_len < 255 then")
+  table.insert(lines,  "      local j = self.text_len")
+  table.insert(lines,  "      while j > self.cursor_pos do")
+  table.insert(lines,  "        self.text_buf[j] = self.text_buf[j - 1]")
+  table.insert(lines,  "        j = j - 1")
+  table.insert(lines,  "      end")
+  table.insert(lines,  "      self.text_buf[self.cursor_pos] = (@uint8)(cp)")
+  table.insert(lines,  "      self.text_len = self.text_len + 1")
+  table.insert(lines,  "      self.cursor_pos = self.cursor_pos + 1")
+  table.insert(lines,  "      self.text_buf[self.text_len] = 0")
+  table.insert(lines,  "      changed = true")
+  table.insert(lines,  "    end")
+  table.insert(lines,  "    i = i + 1")
+  table.insert(lines,  "  end")
+  -- 控制键处理
+  table.insert(lines,  "  local k = input.key_pressed")
+  table.insert(lines,  "  if k == NebulaKey.Backspace and self.cursor_pos > 0 then")
+  table.insert(lines,  "    local j2 = self.cursor_pos")
+  table.insert(lines,  "    while j2 < self.text_len do")
+  table.insert(lines,  "      self.text_buf[j2 - 1] = self.text_buf[j2]")
+  table.insert(lines,  "      j2 = j2 + 1")
+  table.insert(lines,  "    end")
+  table.insert(lines,  "    self.text_len = self.text_len - 1")
+  table.insert(lines,  "    self.cursor_pos = self.cursor_pos - 1")
+  table.insert(lines,  "    self.text_buf[self.text_len] = 0")
+  table.insert(lines,  "    changed = true")
+  table.insert(lines,  "  elseif k == NebulaKey.Delete and self.cursor_pos < self.text_len then")
+  table.insert(lines,  "    local j3 = self.cursor_pos + 1")
+  table.insert(lines,  "    while j3 < self.text_len do")
+  table.insert(lines,  "      self.text_buf[j3 - 1] = self.text_buf[j3]")
+  table.insert(lines,  "      j3 = j3 + 1")
+  table.insert(lines,  "    end")
+  table.insert(lines,  "    self.text_len = self.text_len - 1")
+  table.insert(lines,  "    self.text_buf[self.text_len] = 0")
+  table.insert(lines,  "    changed = true")
+  table.insert(lines,  "  elseif k == NebulaKey.Left and self.cursor_pos > 0 then")
+  table.insert(lines,  "    self.cursor_pos = self.cursor_pos - 1")
+  table.insert(lines,  "  elseif k == NebulaKey.Right and self.cursor_pos < self.text_len then")
+  table.insert(lines,  "    self.cursor_pos = self.cursor_pos + 1")
+  table.insert(lines,  "  elseif k == NebulaKey.Home then")
+  table.insert(lines,  "    self.cursor_pos = 0")
+  table.insert(lines,  "  elseif k == NebulaKey.End then")
+  table.insert(lines,  "    self.cursor_pos = self.text_len")
+  table.insert(lines,  "  end")
+  table.insert(lines,  "  return changed")
+  table.insert(lines,  "end")
+
+  -- get_text
+  table.insert(lines, ("-- [editable] %s: get_text"):format(ctx))
+  table.insert(lines, ("function %s:get_text(): cstring"):format(ctx))
+  table.insert(lines,  "  return (@cstring)(&self.text_buf[0])")
+  table.insert(lines,  "end")
+
+  return table.concat(lines, "\n")
+end
+
 -- 返回模块标识
-return "nebula_interaction_factory_v0.1"
+return "nebula_interaction_factory_v0.2_phase3.4"
