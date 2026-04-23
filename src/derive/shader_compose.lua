@@ -249,4 +249,130 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
   }
 end
 
-return "nebula_shader_compose_v0.4_phase3.3.3"
+-- =============================================================================
+-- ★ Phase 3.5.1: 标准 Visual 的 Instanced 着色器组合
+--
+-- 与 nebula_compose_instanced_shader 的区别：
+--   · 本函数接受 nebula_gen_uniform_layout 生成的 wgsl_struct 作为 InstanceData
+--   · 这样 <T>Uniforms 的字段布局就是 InstanceData 的布局，实现零冗余
+--   · 适用于 nebula_derive 派生的标准 Visual 类型（Button/Card/Input 等）
+--
+-- opts:
+--   wgsl_struct    : string  — 已生成的 WGSL struct 定义（含 viewport 字段）
+--   struct_name    : string  — struct 名称（如 "ButtonUniforms"）
+--   has_radius     : boolean
+--   has_border     : boolean
+-- =============================================================================
+function nebula_compose_shader_instanced(opts)
+  opts = opts or {}
+  local struct_name = opts.struct_name or "Uniforms"
+  local has_radius  = opts.has_radius  or false
+  local has_border  = opts.has_border  or false
+
+  local features = {"instanced", "standard_visual"}
+  if has_radius then table.insert(features, "radius") end
+  if has_border then table.insert(features, "border") end
+
+  -- 使用传入的 wgsl_struct 作为 InstanceData（字段与 <T>Uniforms 完全一致）
+  local instance_struct = (opts.wgsl_struct or "") .. "\n"
+
+  -- 绑定声明：binding 0 = viewport uniform，binding 1 = storage array
+  local bindings = string.format([[
+
+struct NebulaViewport {
+  size: vec2<f32>,
+  _pad0: f32,
+  _pad1: f32,
+}
+
+@group(0) @binding(0) var<uniform>       vp:        NebulaViewport;
+@group(0) @binding(1) var<storage, read>  instances: array<%s>;
+]], struct_name)
+
+  -- VertexOutput
+  local vertex_io = [[
+
+struct VertexOutput {
+  @builtin(position) clip_position: vec4<f32>,
+  @location(0)       inst_idx:      u32,
+}
+]]
+
+  -- 顶点着色器：每个实例生成 6 个顶点（两个三角形），通过 instance_index 定位
+  local vs_main = [[
+
+@vertex
+fn vs_main(
+  @builtin(vertex_index)   vi:   u32,
+  @builtin(instance_index) inst: u32,
+) -> VertexOutput {
+  let d = instances[inst];
+  var pos = array<vec2<f32>, 6>(
+    vec2<f32>(0.0, 0.0),
+    vec2<f32>(1.0, 0.0),
+    vec2<f32>(0.0, 1.0),
+    vec2<f32>(0.0, 1.0),
+    vec2<f32>(1.0, 0.0),
+    vec2<f32>(1.0, 1.0)
+  );
+  let p = d.pos + pos[vi] * d.size;
+  let ndc = (p / vp.size) * 2.0 - 1.0;
+  var out: VertexOutput;
+  out.clip_position = vec4<f32>(ndc.x, -ndc.y, 0.0, 1.0);
+  out.inst_idx      = inst;
+  return out;
+}
+]]
+
+  -- SDF 函数
+  local sdf_func = ""
+  if has_radius then
+    sdf_func = WGSL_FRAGMENTS.sdf_rounded_rect
+  else
+    sdf_func = WGSL_FRAGMENTS.sdf_rect
+  end
+
+  -- 片段着色器
+  local fs_lines = {}
+  table.insert(fs_lines, "\n@fragment")
+  table.insert(fs_lines, "fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {")
+  table.insert(fs_lines, "  let d = instances[in.inst_idx];")
+  table.insert(fs_lines, "  let pixel     = in.clip_position.xy;")
+  table.insert(fs_lines, "  let center    = d.pos + d.size * 0.5;")
+  table.insert(fs_lines, "  let p         = pixel - center;")
+  table.insert(fs_lines, "  let half_size = d.size * 0.5;")
+  table.insert(fs_lines, "")
+  table.insert(fs_lines, "  if (pixel.x < d.pos.x || pixel.x > d.pos.x + d.size.x ||")
+  table.insert(fs_lines, "      pixel.y < d.pos.y || pixel.y > d.pos.y + d.size.y) {")
+  table.insert(fs_lines, "    discard;")
+  table.insert(fs_lines, "  }")
+
+  if has_radius then
+    table.insert(fs_lines, "  let dist = sdf_rounded_rect(p, half_size, d.radius);")
+  else
+    table.insert(fs_lines, "  let dist = sdf_rect(p, half_size);")
+  end
+
+  table.insert(fs_lines, "  let aa = 1.0;")
+  table.insert(fs_lines, "  let fill_alpha = 1.0 - smoothstep(-aa, aa, dist);")
+  if has_border then
+    table.insert(fs_lines, "  let border_alpha = (1.0 - smoothstep(-aa, aa, dist + d.border_width)) - fill_alpha;")
+  end
+  table.insert(fs_lines, "  var color = d.bg_color * fill_alpha;")
+  if has_border then
+    table.insert(fs_lines, "  color = color + d.border_color * border_alpha;")
+  end
+  table.insert(fs_lines, "  if color.a < 0.001 { discard; }")
+  table.insert(fs_lines, "  return color;")
+  table.insert(fs_lines, "}")
+
+  return {
+    source          = instance_struct .. bindings .. vertex_io .. vs_main .. sdf_func .. table.concat(fs_lines, "\n"),
+    features        = features,
+    required_passes = {"main"},
+    instanced       = true,
+    standard_visual = true,
+  }
+end
+
+return "nebula_shader_compose_v0.5_phase3.5.1"

@@ -1,24 +1,25 @@
-# Phase 3.5 详细规划：高层组件编排与渲染管线共享
+# Phase 3.5 详细规划：哲学驱动的高层组件编排与全面 Instancing 化
 
 **作者**：Manus AI
-**日期**：2026-04-23
+**日期**：2026-04-24
 
-基于对 Nebula 核心代码（截至 Phase 3.4.4）的全面审视，我们发现框架的底层渲染与推导引擎已足够强悍，但**应用组装层的样板代码（Boilerplate）极其冗长**。在 `login_demo.nelua` 等示例中，开发者必须手动初始化每一个 Pipeline，手动调用每个 Context 的 `update` 和 `draw`，并手动编写重复的 WebGPU 渲染循环 [1] [2]。
+基于对 Nebula 核心代码（截至 Phase 3.4.4）的全面审视，我们发现框架的底层渲染与推导引擎已足够强悍，但**应用组装层的样板代码（Boilerplate）极其冗长**。在 `login_demo.nelua` 等示例中，开发者必须手动初始化每一个 Pipeline，手动调用每个 Context 的 `update` 和 `draw`，并手动编写重复的 WebGPU 渲染循环 [1]。
 
-为了将 Nebula 从一个“图形学库”提升为真正的“GUI 框架”，同时坚守“零运行时开销”的核心哲学，Phase 3.5 将聚焦于**高层组件编排（App Orchestration）**与**管线共享（Pipeline Sharing）**，而非急于进行跨平台移植或开发复杂的业务组件 [3]。
+为了将 Nebula 从一个“图形学库”提升为真正的“GUI 框架”，同时坚守“零运行时开销”与“形状即渲染”的核心哲学，Phase 3.5 将聚焦于**高层组件编排（App Orchestration）**与**全面 Instancing 化（Universal Instancing）**。
 
 ---
 
 ## 1. 设计哲学与演进方向
 
-### 1.1 坚持内部 DSL，拒绝外部语法
-正如前期的架构决策分析所指出，Nebula 绝不应该引入 XML 或 YAML 等外部 DSL。我们将继续深耕 Nelua 的编译期元编程（`##` 语法），通过 Lua 宏来声明组件树，并在编译期将其展开为高效的、静态类型的运行时代码 [4]。
+在重新审视了 Phase 0 到 Phase 3.4 的演进历程后，我们决定摒弃原计划中基于 `wgpuQueueWriteBuffer` 的“运行时管线共享”和纯静态的“黑盒运行时编排”，回归 Nebula 的第一性原理 [2] [3]：
 
-### 1.2 消除“Pipeline 与 Context 的 1:1 绑定”
-目前，每个 `Context` 实例都需要一个独立的 `Pipeline` 实例（例如 `pipe_email` 和 `pipe_password`）。这不仅导致代码冗长，还浪费了大量的 WebGPU BindGroup 资源。Phase 3.5 将重构派生引擎，使**同一种 Visual 类型的所有实例共享同一个 Pipeline**，通过动态更新 Uniform Buffer 或使用动态偏移（Dynamic Offset）来渲染不同实例。
+### 1.1 摒弃“运行时管线共享”，坚持“编译期专属 Instancing”
+原计划通过频繁更新单一 Uniform Buffer 来实现管线共享，这是一种典型的“运行时通用化”妥协，违背了“形状即渲染”的专属生成原则。
+我们将坚持为每种 Visual 生成专属管线，并将 Phase 3.3 的 Storage Buffer Instancing 提升为所有派生管线的默认标准。`pipeline_factory.lua` 将不再生成单实例的 `draw` 方法，而是生成 `draw_instanced(pass, context_array, count)`。这既保留了编译期专属优化的优雅，又通过 Instancing 彻底解决了 WebGPU 绑定瓶颈，实现了极致性能。
 
-### 1.3 自动化生命周期管理
-开发者不应再手动编写包含 50 行样板代码的 `while` 循环。我们将引入 `NebulaApp` 概念，接管事件收集、组件更新（Update）和绘制分发（Draw Dispatch）。
+### 1.2 摒弃“黑盒运行时编排”，坚持“编译期显式代码生成”
+原计划的 `nebula_derive_app` 试图在运行时接管生命周期，这容易退化为不透明的框架，且难以与动态列表（Arena 分配）融合。
+我们将让 `nebula_derive_app` 直接生成包含所有组件显式调用序列的 `app:update()` 和 `app:draw()` 源码。对于声明的动态插槽（Slots），生成器会直接插入遍历 Arena 并收集数据的内联代码。生成的代码就像是开发者手写的一样清晰、直接，没有任何运行时的虚假抽象。
 
 ---
 
@@ -31,17 +32,19 @@
 *   在 `renderer.nelua` 中新增 `nebula_frame_begin()` 和 `nebula_frame_end()`。
 *   `nebula_frame_begin()`：负责获取 Surface Texture、创建 TextureView 和 CommandEncoder，并开启 RenderPass。
 *   `nebula_frame_end()`：负责结束 RenderPass、提交 CommandBuffer 并调用 Present。
+*   **注意**：必须提供健壮的错误处理和资源清理机制，防止在缺乏 RAII 机制的 Nelua 中发生 WGPU 资源泄漏。
 
-### 2.2 同类型管线共享（Pipeline Sharing via Dynamic Uniforms）
-修改 `nebula_derive` 生成的 `<T>Pipeline`，使其能够渲染多个同类型的 `Context` 实例。
+### 2.2 全面 Instancing 化（Universal Instancing via Storage Buffers）
+修改 `nebula_derive` 生成的 `<T>Pipeline`，使其默认采用基于 Storage Buffer 的 Instanced 渲染路径。
 
 **技术方案：**
-*   **方案 A（单 Buffer 多偏移）**：创建一个足够大的 Uniform Buffer，使用 `wgpuRenderPassEncoderSetBindGroup` 的 `dynamicOffset` 参数。每次绘制前设置偏移量，指向当前实例的数据。
-*   **方案 B（每实例更新）**：在调用 `pipe:draw(pass, &context)` 时，内部调用 `wgpuQueueWriteBuffer` 更新唯一的 Uniform Buffer，然后执行绘制。由于 UI 组件数量通常不大（非动态列表场景），这种简单的更新策略在性能上是可接受的，且实现更简单。
-*   **决策**：考虑到代码生成的简易性，优先采用**方案 B**。如果后续发现性能瓶颈，再无缝切换到方案 A。
+*   **废弃单 Uniform 绑定**：修改 `nebula_pipeline_base_init`，不再为每个 Pipeline 创建独立的 Uniform Buffer（仅保留一个全局的 Viewport Uniform）。
+*   **统一使用 Storage Buffer**：所有派生的 `<T>Pipeline` 默认采用 `gen_pipeline_instanced` 的生成逻辑。每个 Pipeline 维护一个 `Storage Buffer`，其大小为 `max_instances * sizeof(<T>Uniforms)`。
+*   **着色器统一**：修改 `shader_compose.lua`，使所有生成的 WGSL 着色器默认通过 `@builtin(instance_index)` 从 Storage Buffer 中读取组件属性。
+*   **批量绘制**：生成 `upload(renderer, data_array, count)` 和 `draw_instanced(pass, count)` 方法。
 
-### 2.3 编译期组件树注册与自动编排（App Derivation）
-这是 Phase 3.5 的核心挑战。我们需要一个机制，在编译期收集应用中所有的组件实例，并自动生成它们的 `update` 和 `draw` 调用序列。
+### 2.3 编译期显式编排与动态插槽（Explicit App Derivation & Dynamic Slots）
+引入 `nebula_derive_app` 宏，在编译期声明组件树，并生成显式的生命周期方法。
 
 **技术方案（概念设计）：**
 ```nelua
@@ -51,32 +54,25 @@
     nebula_app_register_component("card", "CardVisual")
     nebula_app_register_component("email", "InputVisual")
     nebula_app_register_component("password", "InputVisual")
+    nebula_app_register_slot("list_container", "ListItemVisual") -- 动态插槽
     nebula_app_register_component("login_btn", "ButtonVisual")
   nebula_app_end()
 ]]
 
 -- 2. 自动派生 App 结构体与方法
 ## nebula_derive_app("LoginApp")
-
--- 3. 运行时使用
-local app: LoginApp
-app:init(&renderer)
--- 配置初始视觉属性
-app.card.visual.radius = 16.0
--- 运行主循环（内部自动处理事件、更新和渲染）
-app:run()
 ```
 *   `nebula_derive_app` 将在编译期生成一个包含所有注册组件 `Context` 和所需共享 `Pipeline` 的 `LoginApp` 记录。
-*   自动生成 `app:update(input, dt)`，内部按注册顺序调用 `self.card:update(...)`、`self.email:update(...)` 等。
-*   自动生成 `app:draw(pass)`，内部按注册顺序调用 `self.pipe_card:draw(pass, &self.card)` 等。
+*   自动生成 `app:update(input, dt)`，内部按注册顺序显式调用 `self.card:update(...)` 等，并遍历动态插槽数据。
+*   自动生成 `app:draw(pass)`，内部将同类型组件（包括静态组件和动态插槽数据）收集到连续数组中，调用专属管线的 `upload` 和 `draw_instanced`。
 
-### 2.4 新增交互原语：Toggleable
+### 2.4 新增交互原语：Toggleable（支持正交状态）
 为了支持复选框（Checkbox）和开关（Switch），在 `interaction_factory.lua` 中新增 `toggleable` 原语。
 
 **技术方案：**
+*   **状态机重构**：在引入 `toggleable` 之前，重构状态机生成逻辑，支持正交状态（Orthogonal States）或位掩码（Bitmask）表示法，解决 `focusable` 和 `toggleable` 同时存在时的优先级冲突。
 *   生成 `toggle: ToggleableState`（包含 `is_on` 布尔值）。
 *   在 `process_input` 中，如果检测到 `click.just_clicked`，则翻转 `is_on` 的值。
-*   允许在状态机中定义 `on` 和 `off` 相关的状态分支。
 
 ---
 
@@ -84,26 +80,25 @@ app:run()
 
 | 子阶段 | 标题 | 核心交付物 |
 | :--- | :--- | :--- |
-| **3.5.1** | 渲染循环与管线共享重构 | 封装 `nebula_frame_begin/end`；修改 `<T>Pipeline:draw` 以接受 Context 指针并内部更新 Uniform。 |
-| **3.5.2** | `nebula_derive_app` 编译期编排 | 实现 Lua 宏以注册组件树；自动生成 `App` 记录及其生命周期方法。 |
-| **3.5.3** | `Toggleable` 原语与 Checkbox 组件 | 扩展交互工厂；实现一个基础的复选框组件演示。 |
-| **3.5.4** | `form_demo` 综合演示与重构验证 | 使用新的 App 编排机制重写 `login_demo`（更名为 `form_demo` 并加入复选框），验证代码量缩减目标（预期缩减 50% 以上的样板代码）。 |
+| **3.5.1** | 全面 Instancing 化 | 修改 `pipeline_factory.lua` 和 `shader_compose.lua`，为所有派生管线生成基于 Storage Buffer 的 `draw_instanced` 方法。 |
+| **3.5.2** | 编译期显式编排与动态插槽 | 实现 `nebula_derive_app` 宏；自动生成包含显式调用序列的 `update` 和 `draw` 方法；支持动态插槽的数据收集。 |
+| **3.5.3** | `Toggleable` 原语与正交状态 | 重构状态机支持正交状态；扩展交互工厂实现 `toggleable` 原语；实现基础复选框组件。 |
+| **3.5.4** | `form_demo` 综合演示与重构验证 | 封装 `nebula_frame_begin/end`；使用新的 App 编排机制重写 `login_demo`（更名为 `form_demo` 并加入复选框），验证代码量缩减目标和极致性能。 |
 
 ---
 
 ## 4. 预期收益与风险评估
 
 ### 4.1 预期收益
-*   **极简的开发者体验**：应用组装代码将从数百行锐减至几十行。
-*   **资源优化**：消除冗余的 Pipeline 和 BindGroup 实例。
-*   **架构闭环**：真正确立 Nebula 基于内部 eDSL 的声明式 UI 范式。
+*   **极致性能**：通过全面 Instancing 化，将 $N$ 次 `WriteBuffer` + $N$ 次 `Draw` 优化为 1 次 `WriteBuffer` + 1 次 `Draw`。
+*   **极简的开发者体验**：应用组装代码将从数百行锐减至几十行，且生成的代码清晰透明。
+*   **架构统一**：彻底消除了静态表单与动态列表在底层渲染机制上的差异，为 Phase 3.6 铺平道路。
 
 ### 4.2 风险评估
-*   **编译期状态管理复杂性**：`nebula_derive_app` 需要在 Lua 环境中维护复杂的组件树状态，并正确生成强类型的 Nelua 字段。这要求对现有的推导引擎进行小心翼翼的扩展，以避免破坏现有的向后兼容性。
-*   **动态列表的兼容性**：Phase 3.3 的动态列表（Instancing）由于其特殊的数据供给方式，可能暂时无法完美融入这种静态的组件树编排。Phase 3.5 的首要目标是解决常规静态 UI（如表单）的编排，动态列表的统一编排将留至 Phase 3.6 探索。
+*   **编译期代码生成的复杂性**：`nebula_derive_app` 需要在 Lua 环境中维护复杂的组件树状态，并生成高效的数据收集（Gathering）代码。这要求对现有的推导引擎进行小心翼翼的扩展。
+*   **状态机重构的兼容性**：将状态机从线性枚举重构为正交状态（位掩码）可能会影响现有的 `transition_to` 逻辑，需要进行全面的回归测试。
 
 ## 参考文献
 [1] `examples/login_demo.nelua` - 当前最复杂的静态组件演示，暴露了应用组装层的冗长痛点。
-[2] `examples/layout_demo.nelua` - 展示了编译期 Flexbox 的潜力，但同样受困于手动的生命周期管理。
-[3] `docs/PLAN_PHASE3_5_PROPOSAL.md` - 早期的 Phase 3.5 提案，现已被本规划的“高层组件编排”方向所取代。
-[4] `docs/NEBULA_ABSTRACTION_DSL_ANALYSIS.md` - 关于 Nebula 架构决策的深度分析，确立了拒绝外部 DSL、拥抱内部 eDSL 的基调。
+[2] `docs/DESIGN_PHASE1.md` - 确立了“零运行时开销”与“编译期元编程”的核心哲学。
+[3] `docs/PLAN_PHASE2_3.md` - 确立了“形状即渲染”与“按需生成”的专属管线原则。
