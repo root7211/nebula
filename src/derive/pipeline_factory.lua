@@ -580,7 +580,7 @@ local function gen_pipeline_instanced(base, uniforms_record, wgsl_source, instan
   emit("  entries[1] = WGPUBindGroupLayoutEntry{")
   emit("    nextInChain = nilptr,")
   emit("    binding     = 1,")
-  emit("    visibility  = (@uint64)(WGPUShaderStage_Vertex) | (@uint64)(WGPUShaderStage_Fragment),")
+  emit("    visibility  = (@uint64)(WGPUShaderStage_Fragment),")
   emit("    buffer      = { nextInChain = nilptr, type = (@uint32)(WGPUBufferBindingType_ReadOnlyStorage), hasDynamicOffset = 0, minBindingSize = 0 },")
   emit("    sampler        = { nextInChain = nilptr, type = 0 },")
   emit("    texture        = { nextInChain = nilptr, sampleType = 0, viewDimension = 0, multisampled = 0 },")
@@ -732,7 +732,7 @@ function nebula_gen_pipeline_source(spec)
     assert(spec.instance_record, "nebula_gen_pipeline_source: instance_record required when instanced")
     local max_inst = spec.max_instances or 10000
     return gen_pipeline_instanced(spec.base, spec.uniforms_record, spec.wgsl_source, spec.instance_record, max_inst)
-  elseif spec.textured and spec.vertex_layout == "pos_uv" then
+  elseif spec.textured and (spec.vertex_layout == "textured" or spec.vertex_layout == "pos_uv") then
     return gen_pipeline_textured_vertex(spec.base, spec.uniforms_record, spec.wgsl_source)
   else
     return gen_pipeline_simple(spec.base, spec.uniforms_record, spec.wgsl_source)

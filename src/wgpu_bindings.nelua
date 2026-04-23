@@ -100,7 +100,7 @@ global WGPUShaderStage_Fragment <comptime> = (@WGPUShaderStage)(0x00000002)
 global WGPUBufferBindingType = @uint32
 global WGPUBufferBindingType_Uniform <comptime> = (@WGPUBufferBindingType)(0x00000001)
 global WGPUBufferBindingType_Storage <comptime> = (@WGPUBufferBindingType)(0x00000002)
-global WGPUBufferBindingType_ReadOnlyStorage <comptime> = (@WGPUBufferBindingType)(0x00000003)
+global WGPUBufferBindingType_ReadOnlyStorage <comptime> = (@WGPUBufferBindingType)(0x00000004)
 
 global WGPUPrimitiveTopology = @uint32
 global WGPUPrimitiveTopology_TriangleList  <comptime> = (@WGPUPrimitiveTopology)(0x00000004)
