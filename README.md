@@ -1,16 +1,16 @@
-# Nebula GUI Compiler — Phase 3.3.5 已合入
+# Nebula GUI Compiler — Phase 3.4.4 已合入
 
-> 当前仓库的**主线能力**已完成到 **Phase 2.5**。与此同时，**Phase 3.1（静态布局）、Phase 3.2.1–3.2.5（文本渲染子系统）与 Phase 3.3.1–3.3.5（运行时动态列表与实例渲染）已全部合入仓库**。Nebula 现已支持通过单次 Draw Call 渲染 10,000+ 个动态列表项，并引入了零 GC 的 Frame Arena 分配器。
+> 当前仓库的**主线能力**已完成到 **Phase 2.5**。与此同时，**Phase 3.1（静态布局）、Phase 3.2.x（文本渲染子系统）、Phase 3.3.x（运行时动态列表与实例渲染）与 Phase 3.4.1–3.4.4（键盘输入与基础单行 Input 组件）已全部合入仓库**。Nebula 现已支持通过单次 Draw Call 渲染 10,000+ 个动态列表项，并引入了零 GC 的 Frame Arena 分配器以及完整的键盘事件流转与文本输入能力。
 
 ---
 
 ## 各阶段演进
 
-| 项目 | Phase 0–2.5 | Phase 3.1 | Phase 3.2.x | Phase 3.3.1 | Phase 3.3.2 | Phase 3.3.3 | Phase 3.3.4 | Phase 3.3.5 |
-|---|---|---|---|---|---|---|---|---|
-| 核心推导 | 形状 → 状态机/管线 | 静态 Flexbox 布局 | SDF 文本子系统 | **Frame Arena 分配器** | **Storage Buffer 基础设施** | **Instanced 着色器组合器** | **Instanced 管线工厂** | **动态列表 Demo + 回归集成** |
-| 渲染技术 | SDF 形状 + 多 Pass 阴影 | 布局对齐 | SDF 文本渲染 | 零 GC 线性内存分配 | `WGPUBufferUsage_Storage` | `@builtin(instance_index)` | `<T>InstancedPipeline` | 10,000 项 × 1 Draw Call |
-| 质量保障 | 手动验证 | 同左 | 31 项 Lua 断言 + 11 项编译回归 | 27 项断言 | 20 项断言 | 34 项断言 | 30 项断言 | **8/8 测试套件，111 项断言** |
+| 项目 | Phase 0–2.5 | Phase 3.1 | Phase 3.2.x | Phase 3.3.x | Phase 3.4.x |
+|---|---|---|---|---|---|
+| 核心推导 | 形状 → 状态机/管线 | 静态 Flexbox 布局 | SDF 文本子系统 | **运行时动态列表与实例渲染** | **键盘输入与单行 Input 组件** |
+| 渲染技术 | SDF 形状 + 多 Pass 阴影 | 布局对齐 | SDF 文本渲染 | Storage Buffer + Instanced 渲染 | 键盘事件流转 + 极简光标渲染 |
+| 质量保障 | 手动验证 | 同左 | 31 项 Lua 断言 + 11 项编译回归 | 111 项断言 | **12/12 测试套件，全量回归集成** |
 
 ---
 
@@ -181,7 +181,8 @@ chmod +x build.sh
 ./build.sh shadow_demo          # Phase 2.5 阴影演示
 ./build.sh layout_demo          # Phase 3.1 布局演示
 ./build.sh text_demo            # Phase 3.2.5 文本渲染完整展示
-./build.sh dynamic_list_demo    # ★ Phase 3.3.5 动态列表演示（10,000 项）
+./build.sh dynamic_list_demo    # Phase 3.3.5 动态列表演示（10,000 项）
+./build.sh login_demo           # ★ Phase 3.4.4 登录框与键盘输入演示
 ```
 
 ### 运行全量回归测试
@@ -209,4 +210,8 @@ bash tools/run_all_tests.sh     # 运行全部 8 项测试套件（111 项断言
 - [x] **Phase 3.3.3** — Instanced 着色器组合器（`@builtin(instance_index)`）。
 - [x] **Phase 3.3.4** — Instanced 管线工厂（`<T>InstancedPipeline`）。
 - [x] **Phase 3.3.5** — 动态列表 Demo 与全量回归测试集成。
-- [ ] **Phase 3.4** — （待规划）
+- [x] **Phase 3.4.1** — 键盘事件收集基础设施。
+- [x] **Phase 3.4.2** — `InputContext` 文本缓冲区逻辑。
+- [x] **Phase 3.4.3** — 极简光标渲染。
+- [x] **Phase 3.4.4** — `login_demo` 升级与全量回归测试集成。
+- [ ] **Phase 3.5** — （待规划）
