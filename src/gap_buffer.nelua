@@ -1,0 +1,200 @@
+-- gap_buffer.nelua
+-- Nebula GUI Compiler — Phase 3.6.1
+--
+-- 编译期定容 Gap Buffer（Compile-Time Fixed-Capacity Gap Buffer）
+--
+-- 设计哲学：
+--   · 零堆分配：底层由编译期固定大小的 [N]uint8 静态数组支撑（heapless 模式）
+--   · 持久状态：存活在组件 Record 中，跨帧不丢失（与 Frame Arena 正交）
+--   · 声明意图：通过 nebula_derive 的 max_text_len 参数在编译期确定容量
+--   · 零运行时开销：所有方法均为内联展开的显式操作，无虚分发、无 GC
+--
+-- Gap Buffer 内存布局：
+--
+--   [ left_text | GAP (空洞) | right_text ]
+--   ^           ^            ^            ^
+--   0        gap_start    gap_end       capacity
+--
+--   · gap_start：光标位置（也是 gap 的起始）
+--   · gap_end：gap 的结束（right_text 的起始）
+--   · 文本长度 = capacity - (gap_end - gap_start)
+--   · 插入字符：写入 buf[gap_start]，gap_start++（O(1)）
+--   · 删除字符（Backspace）：gap_start--（O(1)）
+--   · 删除字符（Delete）：gap_end++（O(1)）
+--   · 移动光标：memmove gap 内容（O(N)，但 N 通常很小）
+--
+-- 使用方式（由 nebula_derive 自动生成，开发者无需手动调用）：
+--
+--   ## nebula_annotate("InputVisual", {
+--        ...
+--        primitives = {"hoverable", "clickable", "focusable", "editable"},
+--        max_text_len = 256,   -- 编译期声明最大容量
+--      })
+--
+-- =============================================================================
+
+-- =============================================================================
+-- 编译期泛型宏：nebula_gen_gap_buffer_type(N)
+--
+-- 生成一个容量为 N 字节的 GapBuffer 结构体类型定义。
+-- N 必须是编译期常量（由 nebula_annotate 的 max_text_len 字段提供）。
+-- =============================================================================
+##[[
+function nebula_gen_gap_buffer_type(capacity)
+  assert(type(capacity) == "number" and capacity > 0 and capacity <= 65535,
+    ("nebula_gen_gap_buffer_type: capacity must be 1..65535, got %s"):format(tostring(capacity)))
+
+  local type_name = ("NebulaBuf%d"):format(capacity)
+
+  -- 防止重复生成同一容量的类型
+  if _nebula_gap_buf_types and _nebula_gap_buf_types[type_name] then
+    return type_name
+  end
+  _nebula_gap_buf_types = _nebula_gap_buf_types or {}
+  _nebula_gap_buf_types[type_name] = true
+
+  local lines = {}
+  table.insert(lines, ("-- [gap_buffer] %s (capacity=%d)"):format(type_name, capacity))
+  table.insert(lines, ("global %s = @record{"):format(type_name))
+  table.insert(lines, ("  buf:       [%d]uint8,"):format(capacity + 1)) -- +1 for null terminator
+  table.insert(lines, ("  gap_start: uint16,"))
+  table.insert(lines, ("  gap_end:   uint16,"))
+  table.insert(lines, ("  capacity:  uint16,"))
+  table.insert(lines, "}")
+  table.insert(lines, "")
+
+  -- init: 初始化 Gap Buffer，gap 占满整个缓冲区
+  table.insert(lines, ("function %s:init()"):format(type_name))
+  table.insert(lines, ("  self.gap_start = 0"))
+  table.insert(lines, ("  self.gap_end   = %d"):format(capacity))
+  table.insert(lines, ("  self.capacity  = %d"):format(capacity))
+  table.insert(lines, ("  self.buf[0]    = 0"))
+  table.insert(lines, "end")
+  table.insert(lines, "")
+
+  -- len: 返回当前文本长度（不含 gap）
+  table.insert(lines, ("function %s:len(): uint16"):format(type_name))
+  table.insert(lines, ("  return self.capacity - (self.gap_end - self.gap_start)"))
+  table.insert(lines, "end")
+  table.insert(lines, "")
+
+  -- is_full: 判断缓冲区是否已满
+  table.insert(lines, ("function %s:is_full(): boolean"):format(type_name))
+  table.insert(lines, ("  return self.gap_start == self.gap_end"))
+  table.insert(lines, "end")
+  table.insert(lines, "")
+
+  -- cursor: 返回当前光标位置（逻辑位置，即左侧文本长度）
+  table.insert(lines, ("function %s:cursor(): uint16"):format(type_name))
+  table.insert(lines, ("  return self.gap_start"))
+  table.insert(lines, "end")
+  table.insert(lines, "")
+
+  -- insert_char: 在光标处插入一个 ASCII 字符（O(1)）
+  table.insert(lines, ("function %s:insert_char(ch: uint8): boolean"):format(type_name))
+  table.insert(lines, ("  if self:is_full() then return false end"))
+  table.insert(lines, ("  self.buf[self.gap_start] = ch"))
+  table.insert(lines, ("  self.gap_start = self.gap_start + 1"))
+  table.insert(lines, ("  return true"))
+  table.insert(lines, "end")
+  table.insert(lines, "")
+
+  -- delete_before: 删除光标前的字符（Backspace，O(1)）
+  table.insert(lines, ("function %s:delete_before(): boolean"):format(type_name))
+  table.insert(lines, ("  if self.gap_start == 0 then return false end"))
+  table.insert(lines, ("  self.gap_start = self.gap_start - 1"))
+  table.insert(lines, ("  return true"))
+  table.insert(lines, "end")
+  table.insert(lines, "")
+
+  -- delete_after: 删除光标后的字符（Delete，O(1)）
+  table.insert(lines, ("function %s:delete_after(): boolean"):format(type_name))
+  table.insert(lines, ("  if self.gap_end >= self.capacity then return false end"))
+  table.insert(lines, ("  self.gap_end = self.gap_end + 1"))
+  table.insert(lines, ("  return true"))
+  table.insert(lines, "end")
+  table.insert(lines, "")
+
+  -- move_cursor_left: 光标左移一位（O(1) memmove 1 字节）
+  table.insert(lines, ("function %s:move_cursor_left(): boolean"):format(type_name))
+  table.insert(lines, ("  if self.gap_start == 0 then return false end"))
+  table.insert(lines, ("  self.gap_end   = self.gap_end   - 1"))
+  table.insert(lines, ("  self.buf[self.gap_end] = self.buf[self.gap_start - 1]"))
+  table.insert(lines, ("  self.gap_start = self.gap_start - 1"))
+  table.insert(lines, ("  return true"))
+  table.insert(lines, "end")
+  table.insert(lines, "")
+
+  -- move_cursor_right: 光标右移一位（O(1) memmove 1 字节）
+  table.insert(lines, ("function %s:move_cursor_right(): boolean"):format(type_name))
+  table.insert(lines, ("  if self.gap_end >= self.capacity then return false end"))
+  table.insert(lines, ("  self.buf[self.gap_start] = self.buf[self.gap_end]"))
+  table.insert(lines, ("  self.gap_start = self.gap_start + 1"))
+  table.insert(lines, ("  self.gap_end   = self.gap_end   + 1"))
+  table.insert(lines, ("  return true"))
+  table.insert(lines, "end")
+  table.insert(lines, "")
+
+  -- move_cursor_home: 光标移到行首（O(N)）
+  table.insert(lines, ("function %s:move_cursor_home()"):format(type_name))
+  table.insert(lines, ("  while self.gap_start > 0 do"))
+  table.insert(lines, ("    self.gap_end   = self.gap_end   - 1"))
+  table.insert(lines, ("    self.buf[self.gap_end] = self.buf[self.gap_start - 1]"))
+  table.insert(lines, ("    self.gap_start = self.gap_start - 1"))
+  table.insert(lines, ("  end"))
+  table.insert(lines, "end")
+  table.insert(lines, "")
+
+  -- move_cursor_end: 光标移到行尾（O(N)）
+  table.insert(lines, ("function %s:move_cursor_end()"):format(type_name))
+  table.insert(lines, ("  while self.gap_end < self.capacity do"))
+  table.insert(lines, ("    self.buf[self.gap_start] = self.buf[self.gap_end]"))
+  table.insert(lines, ("    self.gap_start = self.gap_start + 1"))
+  table.insert(lines, ("    self.gap_end   = self.gap_end   + 1"))
+  table.insert(lines, ("  end"))
+  table.insert(lines, "end")
+  table.insert(lines, "")
+
+  -- as_cstring: 将文本内容展平为 C 字符串（写入 buf 末尾的 null terminator 区域）
+  -- 注意：此方法会临时修改 buf 末尾，调用后应立即使用返回的 cstring
+  -- 实现：将 right_text 部分移到 gap_start 之后，写入 null，返回 &buf[0]
+  -- 为了不破坏 Gap Buffer 的结构，我们使用 buf[capacity] 作为临时展平区
+  -- 实际上采用"视图展平"策略：构造一个连续的输出视图
+  table.insert(lines, ("function %s:flatten(out: *[0]uint8, max_out: uint16): uint16"):format(type_name))
+  table.insert(lines, ("  local n: uint16 = 0"))
+  table.insert(lines, ("  local i: uint16 = 0"))
+  -- 复制 left_text（buf[0..gap_start)）
+  table.insert(lines, ("  while i < self.gap_start and n < max_out do"))
+  table.insert(lines, ("    out[n] = self.buf[i]"))
+  table.insert(lines, ("    i = i + 1"))
+  table.insert(lines, ("    n = n + 1"))
+  table.insert(lines, ("  end"))
+  -- 复制 right_text（buf[gap_end..capacity)）
+  table.insert(lines, ("  i = self.gap_end"))
+  table.insert(lines, ("  while i < self.capacity and n < max_out do"))
+  table.insert(lines, ("    out[n] = self.buf[i]"))
+  table.insert(lines, ("    i = i + 1"))
+  table.insert(lines, ("    n = n + 1"))
+  table.insert(lines, ("  end"))
+  table.insert(lines, ("  out[n] = 0"))
+  table.insert(lines, ("  return n"))
+  table.insert(lines, "end")
+  table.insert(lines, "")
+
+  -- clear: 清空缓冲区
+  table.insert(lines, ("function %s:clear()"):format(type_name))
+  table.insert(lines, ("  self.gap_start = 0"))
+  table.insert(lines, ("  self.gap_end   = self.capacity"))
+  table.insert(lines, "end")
+  table.insert(lines, "")
+
+  return type_name, table.concat(lines, "\n")
+end
+]]
+
+-- =============================================================================
+-- 版本标记（供 nebula_core.nelua 版本断言使用）
+-- =============================================================================
+##[[
+nebula_gap_buffer_version = "v0.1_phase3.6.1"
+]]

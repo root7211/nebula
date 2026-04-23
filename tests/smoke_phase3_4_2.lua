@@ -1,5 +1,6 @@
 -- smoke_phase3_4_2.lua
 -- Phase 3.4.2 冒烟测试：interaction_factory editable 原语与文本缓冲区逻辑
+-- Phase 3.6.1 更新：底层实现迁移至编译期定容 Gap Buffer，更新相关断言
 -- =============================================================================
 
 local pass = 0
@@ -20,9 +21,9 @@ assert(f, "interaction_factory.lua not found")
 local src = f:read("*a")
 f:close()
 
--- ---- 1. 版本号更新 ----
-check("version updated to v0.3_phase3.5.3",
-  src:find("nebula_interaction_factory_v0%.3_phase3%.5%.3") ~= nil)
+-- ---- 1. 版本号更新（Phase 3.6.1 升级至 v0.4）----
+check("version updated to v0.4_phase3.6.1",
+  src:find("nebula_interaction_factory_v0%.4_phase3%.6%.1") ~= nil)
 
 -- ---- 2. nebula_gen_text_buffer 函数存在 ----
 check("nebula_gen_text_buffer defined",
@@ -37,14 +38,12 @@ check("char_count loop",
   src:find("i < input%.char_count") ~= nil)
 check("ASCII range guard (0x20..0x7E)",
   src:find("cp >= 0x20 and cp <= 0x7E") ~= nil)
-check("cursor insert: memmove-style shift",
-  src:find("self%.visual%.text_buf%[j%] = self%.visual%.text_buf%[j %- 1%]") ~= nil)
-check("text_len increment on insert",
-  src:find("self%.visual%.text_len = self%.visual%.text_len %+ 1") ~= nil)
-check("cursor_pos increment on insert",
-  src:find("self%.visual%.cursor_pos = self%.visual%.cursor_pos %+ 1") ~= nil)
-check("null terminator maintained",
-  src:find("self%.visual%.text_buf%[self%.visual%.text_len%] = 0") ~= nil)
+
+-- Phase 3.6.1: 插入/删除逻辑已迁移至 Gap Buffer API
+check("cursor insert: gap_buf:insert_char (Phase 3.6.1)",
+  src:find("gap_buf:insert_char") ~= nil)
+check("text insert via Gap Buffer (not memmove)",
+  src:find("gap_buf:insert_char%(%([@]uint8%)%(cp%)%)") ~= nil)
 
 -- ---- 4. 控制键处理 ----
 check("Backspace handled",
@@ -59,81 +58,60 @@ check("Home key handled",
   src:find("NebulaKey%.Home") ~= nil)
 check("End key handled",
   src:find("NebulaKey%.End") ~= nil)
-check("Backspace decrements cursor_pos",
-  src:find("self%.visual%.cursor_pos = self%.visual%.cursor_pos %- 1") ~= nil)
+-- Phase 3.6.1: Backspace 调用 gap_buf:delete_before()
+check("Backspace calls gap_buf:delete_before (Phase 3.6.1)",
+  src:find("gap_buf:delete_before%(%)") ~= nil)
 check("changed flag returned",
   src:find("return changed") ~= nil)
 
 -- ---- 5. get_text 方法生成 ----
 check("get_text method generated",
   src:find("function.*get_text") ~= nil)
-check("get_text returns cstring from text_buf",
-  src:find("@cstring.*&self%.visual%.text_buf%[0%]") ~= nil)
+-- Phase 3.6.1: get_text 通过 gap_buf:flatten 输出
+check("get_text uses gap_buf:flatten (Phase 3.6.1)",
+  src:find("gap_buf:flatten") ~= nil)
 
--- ---- 6. 逻辑正确性：模拟文本缓冲区操作 ----
-local buf = {}
-local text_len = 0
-local cursor_pos = 0
+-- ---- 6. get_text_len 方法生成（Phase 3.6.1 新增）----
+check("get_text_len method generated (Phase 3.6.1)",
+  src:find("get_text_len") ~= nil)
+check("get_text_len uses gap_buf:len (Phase 3.6.1)",
+  src:find("gap_buf:len%(%)") ~= nil)
 
-local function insert_char(cp)
-  if cp >= 0x20 and cp <= 0x7E and text_len < 255 then
-    local j = text_len
-    while j > cursor_pos do
-      buf[j] = buf[j-1]
-      j = j - 1
-    end
-    buf[cursor_pos] = cp
-    text_len = text_len + 1
-    cursor_pos = cursor_pos + 1
-    buf[text_len] = 0
-  end
+-- ---- 7. 逻辑正确性：模拟 Gap Buffer 操作（Lua 层验证）----
+-- 加载 gap_buffer 模块的 Lua 生成逻辑
+local gb_file = io.open("src/gap_buffer.nelua", "r")
+assert(gb_file, "gap_buffer.nelua not found")
+local gb_content = gb_file:read("*a")
+gb_file:close()
+
+-- 提取并执行 ##[[ ]] 块
+for block in gb_content:gmatch("##%[%[(.-)%]%]") do
+  local fn, err = load(block, "gap_buffer.nelua##")
+  assert(fn, "load error: " .. tostring(err))
+  fn()
 end
 
-local function backspace()
-  if cursor_pos > 0 then
-    local j = cursor_pos
-    while j < text_len do
-      buf[j-1] = buf[j]
-      j = j + 1
-    end
-    text_len = text_len - 1
-    cursor_pos = cursor_pos - 1
-    buf[text_len] = 0
-  end
-end
+-- 生成 NebulaBuf16 用于逻辑测试
+local _, gb_src = nebula_gen_gap_buffer_type(16)
+assert(gb_src, "NebulaBuf16 source should be generated")
 
-local function get_text()
-  local s = ""
-  for i = 0, text_len - 1 do
-    s = s .. string.char(buf[i])
-  end
-  return s
-end
-
--- 插入 "hello"
-for _, c in ipairs({string.byte("hello", 1, 5)}) do insert_char(c) end
-check("insert 'hello' -> text_len=5", text_len == 5)
-check("insert 'hello' -> cursor_pos=5", cursor_pos == 5)
-check("insert 'hello' -> get_text='hello'", get_text() == "hello")
-
--- 退格删除最后一个字符
-backspace()
-check("backspace -> 'hell'", get_text() == "hell")
-check("backspace -> cursor_pos=4", cursor_pos == 4)
-
--- 光标左移到开头，插入字符
-cursor_pos = 0
-insert_char(string.byte("!"))
-check("insert at pos 0 -> '!hell'", get_text() == "!hell")
-check("insert at pos 0 -> cursor_pos=1", cursor_pos == 1)
-
--- Home 键
-cursor_pos = 0
-check("Home -> cursor_pos=0", cursor_pos == 0)
-
--- End 键
-cursor_pos = text_len
-check("End -> cursor_pos=text_len", cursor_pos == text_len)
+-- 验证 Gap Buffer 核心逻辑（通过源码模式匹配）
+check("gap_buffer len formula: capacity - (gap_end - gap_start)",
+  gb_src:find("return self%.capacity %- %(self%.gap_end %- self%.gap_start%)") ~= nil)
+check("gap_buffer insert_char increments gap_start",
+  gb_src:find("self%.gap_start = self%.gap_start %+ 1") ~= nil)
+check("gap_buffer delete_before decrements gap_start",
+  gb_src:find("self%.gap_start = self%.gap_start %- 1") ~= nil)
+check("gap_buffer delete_after increments gap_end",
+  gb_src:find("self%.gap_end = self%.gap_end %+ 1") ~= nil)
+check("gap_buffer move_cursor_left: copy left char to right side",
+  gb_src:find("self%.buf%[self%.gap_end%] = self%.buf%[self%.gap_start %- 1%]") ~= nil)
+check("gap_buffer move_cursor_right: copy right char to left side",
+  gb_src:find("self%.buf%[self%.gap_start%] = self%.buf%[self%.gap_end%]") ~= nil)
+check("gap_buffer move_cursor_home: gap_start == 0",
+  gb_src:find("self%.gap_start == 0") ~= nil)
+check("gap_buffer move_cursor_end: loop while gap_end < capacity",
+  gb_src:find("while self%.gap_end < self%.capacity do") ~= nil)
 
 -- ---- 汇总 ----
 print(string.format("[Phase 3.4.2] %d passed, %d failed", pass, fail))

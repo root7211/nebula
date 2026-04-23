@@ -61,7 +61,7 @@ end
 -- =============================================================================
 -- 测试 1: 版本号
 -- =============================================================================
-assert_eq("interaction_factory 版本号", interaction_ver, "nebula_interaction_factory_v0.3_phase3.5.3")
+assert_eq("interaction_factory 版本号", interaction_ver, "nebula_interaction_factory_v0.4_phase3.6.1")
 
 -- =============================================================================
 -- 测试 2: nebula_gen_toggle_state 生成 NebulaToggleState 和 process_toggle

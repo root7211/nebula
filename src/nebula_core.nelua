@@ -106,6 +106,12 @@ function nebula_annotate(type_name, spec)
     -- Phase 3.5.1: 全面 Instancing 化支持
     instanced     = spec.instanced     or false,
     max_instances = spec.max_instances or 128,
+    -- Phase 3.6.1: 编译期定容 Gap Buffer 容量声明
+    --   若声明了 "editable" 原语，应同时提供此字段
+    --   对应的 Visual Record 中应包含：
+    --     gap_buf  : NebulaBuf<N>   -- Gap Buffer 持久状态
+    --     flat_buf : [N+1]uint8     -- 展平缓冲区（用于 get_text() 输出）
+    max_text_len  = spec.max_text_len  or 255,
   }
 end
 
@@ -477,7 +483,7 @@ assert(pipeline_factory_mod == "nebula_pipeline_factory_v0.6_phase3.5.1",
 
 -- ★ Phase 2.4: 加载交互原语工厂模块
 local interaction_factory_mod = require "derive.interaction_factory"
-assert(interaction_factory_mod == "nebula_interaction_factory_v0.3_phase3.5.3",
+assert(interaction_factory_mod == "nebula_interaction_factory_v0.4_phase3.6.1",
   "nebula: failed to load derive/interaction_factory.lua")
 
 -- ★ Phase 3.1: 加载编译期布局引擎模块

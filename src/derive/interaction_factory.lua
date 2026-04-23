@@ -172,82 +172,72 @@ function nebula_gen_process_input(spec)
 end
 
 -- =============================================================================
--- nebula_gen_text_buffer(spec) -> string
+-- ★ Phase 3.6.1: nebula_gen_text_buffer(spec) -> string
 --
--- 为声明了 "editable" 原语的 Visual 生成文本缓冲区字段与操作方法。
--- 产出的方法与已有的 process_input 协同工作：
---   先由 process_input 更新焦点和状态机，
---   再由 process_text_input 消费键盘事件。
+-- 为声明了 "editable" 原语的 Visual 生成 Gap Buffer 驱动的文本输入方法。
 --
--- 生成的内容：
---   方法：<T>Context:process_text_input(input: *NebulaInputState): boolean
---         返回 true 表示文本内容发生变化
---   方法：<T>Context:get_text(): cstring
+-- 相较于旧版（Phase 3.4.4）的改进：
+--   · 底层从 [N]uint8 线性数组迁移至编译期定容 Gap Buffer（NebulaBufN 类型）
+--   · 插入/删除操作从 O(N) 降至 O(1)（光标移动仍为 O(N)，但 N 通常极小）
+--   · 新增 get_text_len() 方法，直接从 Gap Buffer 读取长度
+--   · get_text() 改为调用 gap_buf:flatten()，输出连续 C 字符串
+--
+-- spec:
+--   base         : string  — 派生基名（如 "Input"）
+--   max_text_len : number  — 编译期最大容量（默认 255）
 -- =============================================================================
 function nebula_gen_text_buffer(spec)
   assert(spec.base, "nebula_gen_text_buffer: spec.base required")
-  local ctx = spec.base .. "Context"
-  local lines = {}
+  local ctx      = spec.base .. "Context"
+  local cap      = spec.max_text_len or 255
+  local buf_type = ("NebulaBuf%d"):format(cap)
+  local lines    = {}
 
-  table.insert(lines, ("-- [editable] %s: process_text_input"):format(ctx))
+  -- process_text_input：消费键盘事件，委托给 Gap Buffer 方法
+  table.insert(lines, ("-- [editable/gap_buffer] %s: process_text_input (Phase 3.6.1)"):format(ctx))
   table.insert(lines, ("function %s:process_text_input(input: *NebulaInputState): boolean"):format(ctx))
   table.insert(lines,  "  if input.focused_id ~= self.component_id then return false end")
   table.insert(lines,  "  local changed = false")
-  -- 字符输入
+  -- 字符输入：O(1) 插入
   table.insert(lines,  "  local i: uint8 = 0")
   table.insert(lines,  "  while i < input.char_count do")
   table.insert(lines,  "    local cp = input.char_input[i]")
-  table.insert(lines,  "    if cp >= 0x20 and cp <= 0x7E and self.visual.text_len < 255 then")
-  table.insert(lines,  "      local j = self.visual.text_len")
-  table.insert(lines,  "      while j > self.visual.cursor_pos do")
-  table.insert(lines,  "        self.visual.text_buf[j] = self.visual.text_buf[j - 1]")
-  table.insert(lines,  "        j = j - 1")
+  table.insert(lines,  "    if cp >= 0x20 and cp <= 0x7E then")
+  table.insert(lines,  "      if self.visual.gap_buf:insert_char((@uint8)(cp)) then")
+  table.insert(lines,  "        changed = true")
   table.insert(lines,  "      end")
-  table.insert(lines,  "      self.visual.text_buf[self.visual.cursor_pos] = (@uint8)(cp)")
-  table.insert(lines,  "      self.visual.text_len = self.visual.text_len + 1")
-  table.insert(lines,  "      self.visual.cursor_pos = self.visual.cursor_pos + 1")
-  table.insert(lines,  "      self.visual.text_buf[self.visual.text_len] = 0")
-  table.insert(lines,  "      changed = true")
   table.insert(lines,  "    end")
   table.insert(lines,  "    i = i + 1")
   table.insert(lines,  "  end")
-  -- 控制键处理
+  -- 控制键处理：全部 O(1) 或 O(N) 操作
   table.insert(lines,  "  local k = input.key_pressed")
-  table.insert(lines,  "  if k == NebulaKey.Backspace and self.visual.cursor_pos > 0 then")
-  table.insert(lines,  "    local j2 = self.visual.cursor_pos")
-  table.insert(lines,  "    while j2 < self.visual.text_len do")
-  table.insert(lines,  "      self.visual.text_buf[j2 - 1] = self.visual.text_buf[j2]")
-  table.insert(lines,  "      j2 = j2 + 1")
-  table.insert(lines,  "    end")
-  table.insert(lines,  "    self.visual.text_len = self.visual.text_len - 1")
-  table.insert(lines,  "    self.visual.cursor_pos = self.visual.cursor_pos - 1")
-  table.insert(lines,  "    self.visual.text_buf[self.visual.text_len] = 0")
-  table.insert(lines,  "    changed = true")
-  table.insert(lines,  "  elseif k == NebulaKey.Delete and self.visual.cursor_pos < self.visual.text_len then")
-  table.insert(lines,  "    local j3 = self.visual.cursor_pos + 1")
-  table.insert(lines,  "    while j3 < self.visual.text_len do")
-  table.insert(lines,  "      self.visual.text_buf[j3 - 1] = self.visual.text_buf[j3]")
-  table.insert(lines,  "      j3 = j3 + 1")
-  table.insert(lines,  "    end")
-  table.insert(lines,  "    self.visual.text_len = self.visual.text_len - 1")
-  table.insert(lines,  "    self.visual.text_buf[self.visual.text_len] = 0")
-  table.insert(lines,  "    changed = true")
-  table.insert(lines,  "  elseif k == NebulaKey.Left and self.visual.cursor_pos > 0 then")
-  table.insert(lines,  "    self.visual.cursor_pos = self.visual.cursor_pos - 1")
-  table.insert(lines,  "  elseif k == NebulaKey.Right and self.visual.cursor_pos < self.visual.text_len then")
-  table.insert(lines,  "    self.visual.cursor_pos = self.visual.cursor_pos + 1")
+  table.insert(lines,  "  if k == NebulaKey.Backspace then")
+  table.insert(lines,  "    if self.visual.gap_buf:delete_before() then changed = true end")
+  table.insert(lines,  "  elseif k == NebulaKey.Delete then")
+  table.insert(lines,  "    if self.visual.gap_buf:delete_after() then changed = true end")
+  table.insert(lines,  "  elseif k == NebulaKey.Left then")
+  table.insert(lines,  "    self.visual.gap_buf:move_cursor_left()")
+  table.insert(lines,  "  elseif k == NebulaKey.Right then")
+  table.insert(lines,  "    self.visual.gap_buf:move_cursor_right()")
   table.insert(lines,  "  elseif k == NebulaKey.Home then")
-  table.insert(lines,  "    self.visual.cursor_pos = 0")
+  table.insert(lines,  "    self.visual.gap_buf:move_cursor_home()")
   table.insert(lines,  "  elseif k == NebulaKey.End then")
-  table.insert(lines,  "    self.visual.cursor_pos = self.visual.text_len")
+  table.insert(lines,  "    self.visual.gap_buf:move_cursor_end()")
   table.insert(lines,  "  end")
   table.insert(lines,  "  return changed")
   table.insert(lines,  "end")
 
-  -- get_text
-  table.insert(lines, ("-- [editable] %s: get_text"):format(ctx))
+  -- get_text_len：直接从 Gap Buffer 读取文本长度
+  table.insert(lines, ("-- [editable/gap_buffer] %s: get_text_len"):format(ctx))
+  table.insert(lines, ("function %s:get_text_len(): uint16"):format(ctx))
+  table.insert(lines,  "  return self.visual.gap_buf:len()")
+  table.insert(lines,  "end")
+
+  -- get_text：将 Gap Buffer 展平为 C 字符串（写入 visual.flat_buf）
+  table.insert(lines, ("-- [editable/gap_buffer] %s: get_text"):format(ctx))
   table.insert(lines, ("function %s:get_text(): cstring"):format(ctx))
-  table.insert(lines,  "  return (@cstring)(&self.visual.text_buf[0])")
+  table.insert(lines,  "  self.visual.gap_buf:flatten(&self.visual.flat_buf[0], self.visual.gap_buf.capacity)")
+  table.insert(lines,  "  return (@cstring)(&self.visual.flat_buf[0])")
   table.insert(lines,  "end")
 
   return table.concat(lines, "\n")
@@ -319,4 +309,4 @@ function nebula_gen_process_input(spec)
 end
 
 -- 返回模块标识
-return "nebula_interaction_factory_v0.3_phase3.5.3"
+return "nebula_interaction_factory_v0.4_phase3.6.1"
