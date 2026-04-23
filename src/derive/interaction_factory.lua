@@ -253,5 +253,70 @@ function nebula_gen_text_buffer(spec)
   return table.concat(lines, "\n")
 end
 
+-- =============================================================================
+-- ★ Phase 3.5.3: nebula_gen_toggle_state(spec) -> string
+--
+-- 为声明了 "toggleable" 原语的 Visual 生成正交开关状态字段和翻转方法。
+--
+-- 设计哲学：
+--   · toggleable 是一个正交状态（Orthogonal State），与主状态机（hovered/pressed/focused）完全独立
+--   · 不修改现有的主状态机逻辑，避免引入优先级冲突
+--   · 在 process_input 中检测到 just_clicked 时翻转 is_on
+--   · 生成的 toggle 字段包含： is_on: boolean / just_toggled: boolean
+--
+-- spec:
+--   base : string  — 派生基名（如 "Checkbox"）
+-- =============================================================================
+function nebula_gen_toggle_state(spec)
+  assert(spec.base, "nebula_gen_toggle_state: spec.base required")
+  local ctx = spec.base .. "Context"
+  local lines = {}
+
+  -- 生成 ToggleState record（内联到 <T>Context 中）
+  table.insert(lines, "-- [toggleable] ToggleState: 正交开关状态")
+  table.insert(lines, "global NebulaToggleState = @record{")
+  table.insert(lines, "  is_on:        boolean,")
+  table.insert(lines, "  just_toggled: boolean,")
+  table.insert(lines, "}")
+
+  -- 生成 toggle 处理方法：在 process_input 之后调用
+  table.insert(lines, ("-- [toggleable] %s: process_toggle"):format(ctx))
+  table.insert(lines, ("function %s:process_toggle(input: *NebulaInputState): void"):format(ctx))
+  table.insert(lines,  "  local prev_on = self.toggle.is_on")
+  table.insert(lines,  "  -- 当 just_clicked 时翻转开关状态")
+  table.insert(lines,  "  if self.click.just_clicked then")
+  table.insert(lines,  "    self.toggle.is_on = not self.toggle.is_on")
+  table.insert(lines,  "  end")
+  table.insert(lines,  "  self.toggle.just_toggled = (self.toggle.is_on ~= prev_on)")
+  table.insert(lines,  "end")
+
+  return table.concat(lines, "\n")
+end
+
+-- =============================================================================
+-- ★ Phase 3.5.3: 扩展 nebula_gen_process_input 支持 toggleable 原语
+--
+-- 对现有函数的增量扩展：
+--   · 检测到 "toggleable" 时，在 process_input 末尾自动调用 process_toggle
+--   · 不修改主状态机逻辑，实现真正的正交状态
+-- =============================================================================
+local _orig_gen_process_input = nebula_gen_process_input
+function nebula_gen_process_input(spec)
+  local source = _orig_gen_process_input(spec)
+  if not has(spec.primitives or {}, "toggleable") then
+    return source
+  end
+  -- 在 process_input 的最后一行（end）之前插入 process_toggle 调用
+  -- 利用字符串替换：将最后的 "\nend" 替换为 toggle 调用 + end
+  local ctx = spec.base .. "Context"
+  local toggle_call = ("  self:process_toggle(input)\nend")
+  -- 找到最后一个 \nend 并替换
+  local last_end_pos = source:match(".*()\nend$")
+  if last_end_pos then
+    source = source:sub(1, last_end_pos - 1) .. "\n  self:process_toggle(input)\nend"
+  end
+  return source
+end
+
 -- 返回模块标识
-return "nebula_interaction_factory_v0.2_phase3.4"
+return "nebula_interaction_factory_v0.3_phase3.5.3"

@@ -35,7 +35,7 @@ end
 
 -- ===== 模块版本检查 =====
 check("module_version_updated",
-  compose == "nebula_shader_compose_v0.4_phase3.3.3",
+  compose == "nebula_shader_compose_v0.5_phase3.5.1",
   "模块版本号未更新至 phase3.3.3，当前: " .. tostring(compose))
 
 -- ===== 函数存在性检查 =====

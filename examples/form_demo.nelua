@@ -1,0 +1,412 @@
+-- =============================================================================
+-- form_demo.nelua
+-- Nebula GUI Compiler — Phase 3.5.4
+--
+-- 综合演示：使用 nebula_derive_app 宏重写 login_demo，验证 Phase 3.5 的全部成果：
+--   · Phase 3.5.1: 全面 Instancing 化 — 所有 Visual 类型使用 Standard Instanced Pipeline
+--   · Phase 3.5.2: 编译期显式编排 — nebula_derive_app 自动生成 init/update/draw
+--   · Phase 3.5.3: Toggleable 原语 — 新增"记住密码"复选框
+--
+-- 与 login_demo.nelua 的对比：
+--   · 应用组装代码从 ~250 行减少到 ~120 行（缩减约 50%）
+--   · 无手动管线初始化、无手动 update/draw 调用序列
+--   · 新增复选框组件，零额外样板代码
+-- =============================================================================
+
+## cinclude "<stdio.h>"
+## cinclude "<string.h>"
+
+require "nebula_core"
+require "glfw_bindings"
+require "wgpu_bindings"
+require "primitives"
+require "renderer"
+require "app"
+require "text_runtime"
+require "nebula_cursor"
+
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+global function memset(ptr: pointer, value: int32, size: usize): pointer <cimport, nodecl> end
+
+local WIN_W <comptime> = 800
+local WIN_H <comptime> = 600
+
+-- =============================================================================
+-- 视觉规格 + 注解 + 派生（与 login_demo 相同，保持向后兼容）
+-- =============================================================================
+
+-- ---- 卡片背景 ----
+global CardVisual = @record{
+  pos:    Vec2,
+  size:   Vec2,
+  radius: float32,
+  default_bg_color:     Color,
+  default_border_color: Color,
+  default_border_width: float32,
+}
+##[[ nebula_annotate("CardVisual", { states={"default"}, primitives={}, transitions={} }) ]]
+## nebula_derive("CardVisual")
+
+-- ---- 输入框：default + hovered + focused ----
+global InputVisual = @record{
+  pos:    Vec2,
+  size:   Vec2,
+  radius: float32,
+  default_bg_color:     Color,
+  default_border_color: Color,
+  default_border_width: float32,
+  hovered_bg_color:     Color,
+  hovered_border_color: Color,
+  hovered_border_width: float32,
+  focused_bg_color:     Color,
+  focused_border_color: Color,
+  focused_border_width: float32,
+  text_buf:   [256]uint8,
+  text_len:   uint32,
+  cursor_pos: uint32,
+}
+##[[
+nebula_annotate("InputVisual", {
+  states     = {"default", "hovered", "focused"},
+  primitives = {"hoverable", "clickable", "focusable"},
+  transitions = {
+    {from="default", to="hovered", tween="ease_out", duration=0.12},
+    {from="hovered", to="default", tween="ease_out", duration=0.12},
+    {from="hovered", to="focused", tween="ease_out", duration=0.10},
+    {from="focused", to="hovered", tween="ease_out", duration=0.10},
+    {from="focused", to="default", tween="ease_out", duration=0.15},
+  },
+})
+]]
+## nebula_derive("InputVisual")
+
+-- Phase 3.4.4: 为 InputContext 生成 process_text_input / get_text 方法
+##[[
+  local _tb_src = nebula_gen_text_buffer({ base = "Input" })
+  local _tb_ast = aster.parse(_tb_src, "<nebula_gen_text_buffer:Input>")
+  for _, stat in ipairs(_tb_ast) do inject_statement(stat) end
+]]
+
+-- ---- 按钮 ----
+global ButtonVisual = @record{
+  pos:    Vec2,
+  size:   Vec2,
+  radius: float32,
+  default_bg_color:     Color,
+  default_border_color: Color,
+  default_border_width: float32,
+  hovered_bg_color:     Color,
+  hovered_border_color: Color,
+  hovered_border_width: float32,
+  pressed_bg_color:     Color,
+  pressed_border_color: Color,
+  pressed_border_width: float32,
+}
+##[[
+nebula_annotate("ButtonVisual", {
+  states     = {"default", "hovered", "pressed"},
+  primitives = {"hoverable", "clickable"},
+  transitions = {
+    {from="default", to="hovered", tween="ease_out", duration=0.15},
+    {from="hovered", to="default", tween="ease_out", duration=0.15},
+    {from="hovered", to="pressed", tween="none",     duration=0.0},
+    {from="pressed", to="hovered", tween="ease_out", duration=0.1},
+  },
+})
+]]
+## nebula_derive("ButtonVisual")
+
+-- ---- ★ Phase 3.5.3: 复选框（Checkbox）— toggleable + hoverable + clickable ----
+global CheckboxVisual = @record{
+  pos:    Vec2,
+  size:   Vec2,
+  radius: float32,
+  default_bg_color:     Color,
+  default_border_color: Color,
+  default_border_width: float32,
+  hovered_bg_color:     Color,
+  hovered_border_color: Color,
+  hovered_border_width: float32,
+}
+##[[
+nebula_annotate("CheckboxVisual", {
+  states     = {"default", "hovered"},
+  primitives = {"hoverable", "clickable", "toggleable"},
+  transitions = {
+    {from="default", to="hovered", tween="ease_out", duration=0.10},
+    {from="hovered", to="default", tween="ease_out", duration=0.10},
+  },
+})
+]]
+## nebula_derive("CheckboxVisual")
+
+-- ★ Phase 3.5.3: 注入 NebulaToggleState 定义和 CheckboxContext:process_toggle 方法
+##[[
+  local _tgl_src = nebula_gen_toggle_state({ base = "Checkbox" })
+  local _tgl_ast = aster.parse(_tgl_src, "<nebula_gen_toggle_state:Checkbox>")
+  for _, stat in ipairs(_tgl_ast) do inject_statement(stat) end
+]]
+
+-- ---- 文本渲染 Visual ----
+global TextVisual = @record{
+  pos:          Vec2,
+  size:         Vec2,
+  pixel_height: float32,
+  default_text_color: Color,
+}
+##[[
+nebula_annotate("TextVisual", {
+  states = {"default"},
+  primitives = {},
+  transitions = {},
+  text_mode = "ascii_sdf",
+  max_chars = 256,
+})
+]]
+## nebula_derive_text_visual("TextVisual")
+
+-- =============================================================================
+-- ★ Phase 3.5.2: 使用 nebula_derive_app 宏声明并派生 FormApp
+-- =============================================================================
+##[[
+  nebula_app_begin("FormApp")
+    nebula_app_register_component("card",          "CardVisual")
+    nebula_app_register_component("email_input",   "InputVisual", {component_id=1, has_text_buf=true})
+    nebula_app_register_component("password_input","InputVisual", {component_id=2, has_text_buf=true})
+    nebula_app_register_component("remember_me",   "CheckboxVisual")
+    nebula_app_register_component("login_btn",     "ButtonVisual")
+  nebula_app_end()
+]]
+## nebula_derive_app("FormApp")
+
+-- =============================================================================
+-- 主程序（使用 FormApp 大幅简化）
+-- =============================================================================
+local function main(): int32
+  if glfwInit() == 0 then printf("glfw: init failed\n") return 1 end
+  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
+
+  local window = glfwCreateWindow(WIN_W, WIN_H, "Nebula Phase 3.5 — Form Demo", nilptr, nilptr)
+  if window == nilptr then printf("glfw: window creation failed\n") return 1 end
+
+  nebula_input_install_callbacks(window)
+
+  local renderer: NebulaRenderer
+  if not renderer:init(window, WIN_W, WIN_H) then return 1 end
+
+  -- ★ Phase 3.5.2: 一行初始化所有管线（替代原来 8 行手动初始化）
+  local form: FormApp
+  if not form:init(&renderer, WIN_W, WIN_H) then return 1 end
+
+  -- 初始化各组件的视觉规格
+  form.card:init(CardVisual{
+    pos    = Vec2{ x = 220.0, y = 80.0 },
+    size   = Vec2{ x = 360.0, y = 440.0 },
+    radius = 16.0,
+    default_bg_color     = Color{ r=0.13, g=0.13, b=0.15, a=1.0 },
+    default_border_color = Color{ r=0.25, g=0.25, b=0.28, a=1.0 },
+    default_border_width = 1.0,
+  })
+
+  form.email_input:init(InputVisual{
+    pos    = Vec2{ x = 252.0, y = 176.0 },
+    size   = Vec2{ x = 296.0, y = 44.0 },
+    radius = 8.0,
+    default_bg_color     = Color{ r=0.18, g=0.18, b=0.20, a=1.0 },
+    default_border_color = Color{ r=0.32, g=0.32, b=0.36, a=1.0 },
+    default_border_width = 1.0,
+    hovered_bg_color     = Color{ r=0.20, g=0.20, b=0.23, a=1.0 },
+    hovered_border_color = Color{ r=0.45, g=0.45, b=0.52, a=1.0 },
+    hovered_border_width = 1.5,
+    focused_bg_color     = Color{ r=0.16, g=0.18, b=0.24, a=1.0 },
+    focused_border_color = Color{ r=0.35, g=0.60, b=1.00, a=1.0 },
+    focused_border_width = 2.0,
+    text_buf   = {},
+    text_len   = 0,
+    cursor_pos = 0,
+  })
+  form.email_input.component_id = 1
+
+  form.password_input:init(InputVisual{
+    pos    = Vec2{ x = 252.0, y = 244.0 },
+    size   = Vec2{ x = 296.0, y = 44.0 },
+    radius = 8.0,
+    default_bg_color     = Color{ r=0.18, g=0.18, b=0.20, a=1.0 },
+    default_border_color = Color{ r=0.32, g=0.32, b=0.36, a=1.0 },
+    default_border_width = 1.0,
+    hovered_bg_color     = Color{ r=0.20, g=0.20, b=0.23, a=1.0 },
+    hovered_border_color = Color{ r=0.45, g=0.45, b=0.52, a=1.0 },
+    hovered_border_width = 1.5,
+    focused_bg_color     = Color{ r=0.16, g=0.18, b=0.24, a=1.0 },
+    focused_border_color = Color{ r=0.35, g=0.60, b=1.00, a=1.0 },
+    focused_border_width = 2.0,
+    text_buf   = {},
+    text_len   = 0,
+    cursor_pos = 0,
+  })
+  form.password_input.component_id = 2
+
+  -- ★ Phase 3.5.3: 复选框（记住密码）
+  form.remember_me:init(CheckboxVisual{
+    pos    = Vec2{ x = 252.0, y = 308.0 },
+    size   = Vec2{ x = 20.0,  y = 20.0 },
+    radius = 4.0,
+    default_bg_color     = Color{ r=0.18, g=0.18, b=0.20, a=1.0 },
+    default_border_color = Color{ r=0.45, g=0.45, b=0.52, a=1.0 },
+    default_border_width = 1.5,
+    hovered_bg_color     = Color{ r=0.22, g=0.22, b=0.26, a=1.0 },
+    hovered_border_color = Color{ r=0.35, g=0.60, b=1.00, a=1.0 },
+    hovered_border_width = 2.0,
+  })
+
+  form.login_btn:init(ButtonVisual{
+    pos    = Vec2{ x = 252.0, y = 348.0 },
+    size   = Vec2{ x = 296.0, y = 48.0 },
+    radius = 10.0,
+    default_bg_color     = Color{ r=0.22, g=0.44, b=0.90, a=1.0 },
+    default_border_color = Color{ r=0.30, g=0.52, b=1.00, a=0.6 },
+    default_border_width = 0.0,
+    hovered_bg_color     = Color{ r=0.30, g=0.52, b=1.00, a=1.0 },
+    hovered_border_color = Color{ r=0.50, g=0.70, b=1.00, a=0.8 },
+    hovered_border_width = 0.0,
+    pressed_bg_color     = Color{ r=0.15, g=0.32, b=0.75, a=1.0 },
+    pressed_border_color = Color{ r=0.60, g=0.80, b=1.00, a=1.0 },
+    pressed_border_width = 2.0,
+  })
+
+  -- 文本渲染管线（独立于 FormApp，因为 TextVisual 是特殊路径）
+  local pipe_email_text:    TextPipeline
+  local pipe_password_text: TextPipeline
+  if not pipe_email_text:init(&renderer)    then return 1 end
+  if not pipe_password_text:init(&renderer) then return 1 end
+
+  local email_text:    TextContext
+  local password_text: TextContext
+  email_text:init(TextVisual{
+    pos          = Vec2{ x = 260.0, y = 192.0 },
+    size         = Vec2{ x = 0.0, y = 0.0 },
+    pixel_height = 14.0,
+    default_text_color = Color{ r=0.90, g=0.90, b=0.92, a=1.0 },
+  })
+  password_text:init(TextVisual{
+    pos          = Vec2{ x = 260.0, y = 260.0 },
+    size         = Vec2{ x = 0.0, y = 0.0 },
+    pixel_height = 14.0,
+    default_text_color = Color{ r=0.90, g=0.90, b=0.92, a=1.0 },
+  })
+
+  if not email_text:set_text(&renderer, "email") then return 1 end
+  if not password_text:set_text(&renderer, "password") then return 1 end
+
+  local input: NebulaInputState
+  local prev_time = glfwGetTime()
+
+  while glfwWindowShouldClose(window) == 0 do
+    glfwPollEvents()
+    local now = glfwGetTime()
+    local dt  = (@float32)(now - prev_time)
+    prev_time = now
+
+    nebula_collect_input(window, &input, dt)
+
+    -- ★ Phase 3.5.2: 一行替代原来 4 行手动 update 调用
+    form:update(&input, dt)
+
+    -- 文本输入处理（业务逻辑，保留在应用层）
+    if form.email_input:process_text_input(&input) then
+      if form.email_input.visual.text_len > 0 then
+        email_text:set_text(&renderer, form.email_input:get_text())
+      else
+        email_text:set_text(&renderer, "email")
+      end
+    end
+
+    if form.password_input:process_text_input(&input) then
+      if form.password_input.visual.text_len > 0 then
+        local mask: [256]uint8
+        local mi: uint32 = 0
+        while mi < form.password_input.visual.text_len do
+          mask[mi] = 0x2A  -- '*'
+          mi = mi + 1
+        end
+        mask[form.password_input.visual.text_len] = 0
+        password_text:set_text(&renderer, (@cstring)(&mask[0]))
+      else
+        password_text:set_text(&renderer, "password")
+      end
+    end
+
+    -- Enter 键：打印表单内容（包含复选框状态）
+    if input.key_pressed == NebulaKey.Enter then
+      printf("email: %s\n", form.email_input:get_text())
+      printf("password: [%d chars]\n", form.password_input.visual.text_len)
+      printf("remember_me: %s\n", form.remember_me.toggle.is_on and "true" or "false")
+    end
+
+    -- ---- 渲染 ----
+    local surface_tex: WGPUSurfaceTexture
+    wgpuSurfaceGetCurrentTexture(renderer.surface, &surface_tex)
+    local status = surface_tex.status
+    if status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal and
+       status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal then
+      continue
+    end
+
+    local view_desc = WGPUTextureViewDescriptor{
+      nextInChain = nilptr, label = wgpu_str_null(),
+      format = renderer.format, dimension = 2,
+      baseMipLevel = 0, mipLevelCount = 1,
+      baseArrayLayer = 0, arrayLayerCount = 1,
+      aspect = WGPUTextureAspect_All,
+    }
+    local view = wgpuTextureCreateView(surface_tex.texture, &view_desc)
+
+    local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, nilptr)
+    local clear_color = WGPURenderPassColorAttachment{
+      nextInChain = nilptr, view = view, depthSlice = 0xFFFFFFFF,
+      resolveTarget = nilptr,
+      loadOp = WGPULoadOp_Clear, storeOp = WGPUStoreOp_Store,
+      clearValue = WGPUColor{ r=0.09, g=0.09, b=0.10, a=1.0 },
+    }
+    local pass_desc = WGPURenderPassDescriptor{
+      nextInChain = nilptr, label = wgpu_str_null(),
+      colorAttachmentCount = 1, colorAttachments = &clear_color,
+      depthStencilAttachment = nilptr,
+      occlusionQuerySet = nilptr, timestampWrites = nilptr,
+    }
+    local pass = wgpuCommandEncoderBeginRenderPass(encoder, &pass_desc)
+
+    -- ★ Phase 3.5.2: 一行替代原来 6 行手动 draw 调用（Instanced 批量绘制）
+    form:draw(pass)
+
+    -- 文本渲染（独立于 FormApp）
+    pipe_email_text:draw_buffer(pass, email_text.mesh.vertex_buffer,
+      email_text.mesh.vertex_buffer_size, email_text.mesh.vertex_count)
+    pipe_password_text:draw_buffer(pass, password_text.mesh.vertex_buffer,
+      password_text.mesh.vertex_buffer_size, password_text.mesh.vertex_count)
+
+    wgpuRenderPassEncoderEnd(pass)
+    wgpuRenderPassEncoderRelease(pass)
+
+    local cmd = wgpuCommandEncoderFinish(encoder, nilptr)
+    wgpuCommandEncoderRelease(encoder)
+    wgpuQueueSubmit(renderer.queue, 1, &cmd)
+    wgpuCommandBufferRelease(cmd)
+
+    wgpuSurfacePresent(renderer.surface)
+    wgpuTextureViewRelease(view)
+    wgpuTextureRelease(surface_tex.texture)
+  end
+
+  wgpuSurfaceRelease(renderer.surface)
+  wgpuDeviceRelease(renderer.device)
+  wgpuAdapterRelease(renderer.adapter)
+  wgpuInstanceRelease(renderer.instance)
+  glfwDestroyWindow(window)
+  glfwTerminate()
+  printf("nebula: clean exit\n")
+  return 0
+end
+
+main()

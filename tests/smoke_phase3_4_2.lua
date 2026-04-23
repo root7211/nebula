@@ -21,8 +21,8 @@ local src = f:read("*a")
 f:close()
 
 -- ---- 1. 版本号更新 ----
-check("version updated to v0.2_phase3.4",
-  src:find("nebula_interaction_factory_v0%.2_phase3%.4") ~= nil)
+check("version updated to v0.3_phase3.5.3",
+  src:find("nebula_interaction_factory_v0%.3_phase3%.5%.3") ~= nil)
 
 -- ---- 2. nebula_gen_text_buffer 函数存在 ----
 check("nebula_gen_text_buffer defined",

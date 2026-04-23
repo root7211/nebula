@@ -32,7 +32,7 @@ end
 
 -- ===== 模块版本检查 =====
 check("module_version_updated",
-  factory == "nebula_pipeline_factory_v0.5_phase3.3",
+  factory == "nebula_pipeline_factory_v0.6_phase3.5.1",
   "模块版本号未更新至 phase3.3，当前: " .. tostring(factory))
 
 -- ===== 函数存在性 =====

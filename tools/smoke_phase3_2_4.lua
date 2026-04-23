@@ -18,11 +18,11 @@ package.path = "/home/ubuntu/nebula/src/?.lua;/home/ubuntu/nebula/src/?/init.lua
 -- Part 1: 验证模块版本
 -- =========================================================================
 local shader_mod = require "derive.shader_compose"
-assert(shader_mod == "nebula_shader_compose_v0.4_phase3.3.3",
+assert(shader_mod == "nebula_shader_compose_v0.5_phase3.5.1",
   "FAIL: unexpected shader_compose version: " .. tostring(shader_mod))
 
 local pipeline_mod = require "derive.pipeline_factory"
-assert(pipeline_mod == "nebula_pipeline_factory_v0.5_phase3.3",
+assert(pipeline_mod == "nebula_pipeline_factory_v0.6_phase3.5.1",
   "FAIL: unexpected pipeline_factory version: " .. tostring(pipeline_mod))
 
 print("[PASS] module versions verified")

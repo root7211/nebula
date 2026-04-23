@@ -477,13 +477,18 @@ assert(pipeline_factory_mod == "nebula_pipeline_factory_v0.6_phase3.5.1",
 
 -- ★ Phase 2.4: 加载交互原语工厂模块
 local interaction_factory_mod = require "derive.interaction_factory"
-assert(interaction_factory_mod == "nebula_interaction_factory_v0.2_phase3.4",
+assert(interaction_factory_mod == "nebula_interaction_factory_v0.3_phase3.5.3",
   "nebula: failed to load derive/interaction_factory.lua")
 
 -- ★ Phase 3.1: 加载编译期布局引擎模块
 local layout_engine_mod = require "derive.layout_engine"
 assert(layout_engine_mod == "nebula_layout_engine_v0.1_phase3.1",
   "nebula: failed to load derive/layout_engine.lua")
+
+-- ★ Phase 3.5.2: 加载应用编排工厂模块
+local app_factory_mod = require "derive.app_factory"
+assert(app_factory_mod == "nebula_app_factory_v0.1_phase3.5.2",
+  "nebula: failed to load derive/app_factory.lua")
 
 -- 从 Visual 字段集合中检测着色器特性
 local function detect_shader_features(base_fields, all_props)
@@ -1096,6 +1101,35 @@ function nebula_derive(type_name)
 
   -- 然后注入其余部分
   local block_ast = aster.parse(source, "<nebula_derive:" .. type_name .. ">")
+  for _, stat in ipairs(block_ast) do
+    inject_statement(stat)
+  end
+end
+
+-- =============================================================================
+-- ★ Phase 3.5.2: nebula_derive_app(app_name)
+--
+-- 从已注册的 App 组件树中生成：
+--   · <App> record（包含所有 Context + 共享 Pipeline）
+--   · <App>:init(renderer, vw, vh)
+--   · <App>:update(input, dt)
+--   · <App>:draw(pass)
+--
+-- 使用方式：
+--   ##[[
+--     nebula_app_begin("LoginApp")
+--       nebula_app_register_component("card", "CardVisual")
+--       nebula_app_register_component("email", "InputVisual", {component_id=1, has_text_buf=true})
+--       nebula_app_register_component("password", "InputVisual", {component_id=2, has_text_buf=true})
+--       nebula_app_register_component("login_btn", "ButtonVisual")
+--     nebula_app_end()
+--   ]]
+--   ## nebula_derive_app("LoginApp")
+-- =============================================================================
+function nebula_derive_app(app_name)
+  -- 调用 app_factory.lua 中由 require 加载的 nebula_app_generate 函数生成源码
+  local source = nebula_app_generate(app_name)
+  local block_ast = aster.parse(source, "<nebula_derive_app:" .. app_name .. ">")
   for _, stat in ipairs(block_ast) do
     inject_statement(stat)
   end
