@@ -1,16 +1,16 @@
-# Nebula GUI Compiler — Phase 3.4.4 已合入
+# Nebula GUI Compiler — Phase 3.5.4 已合入
 
-> 当前仓库的**主线能力**已完成到 **Phase 2.5**。与此同时，**Phase 3.1（静态布局）、Phase 3.2.x（文本渲染子系统）、Phase 3.3.x（运行时动态列表与实例渲染）与 Phase 3.4.1–3.4.4（键盘输入与基础单行 Input 组件）已全部合入仓库**。Nebula 现已支持通过单次 Draw Call 渲染 10,000+ 个动态列表项，并引入了零 GC 的 Frame Arena 分配器以及完整的键盘事件流转与文本输入能力。
+> 当前仓库的**主线能力**已完成到 **Phase 2.5**。与此同时，**Phase 3.1（静态布局）、Phase 3.2.x（文本渲染子系统）、Phase 3.3.x（运行时动态列表与实例渲染）、Phase 3.4.1–3.4.4（键盘输入与基础单行 Input 组件）与 Phase 3.5.1–3.5.4（高层组件编排与渲染管线统一）已全部合入仓库**。Nebula 现已支持通过 `nebula_derive_app` 宏在编译期自动生成应用的 `init/update/draw` 代码序列，实现零样板代码的声明式 GUI 组装，同时引入了 Toggleable 正交原语与全面 Instancing 化渲染路径。
 
 ---
 
 ## 各阶段演进
 
-| 项目 | Phase 0–2.5 | Phase 3.1 | Phase 3.2.x | Phase 3.3.x | Phase 3.4.x |
-|---|---|---|---|---|---|
-| 核心推导 | 形状 → 状态机/管线 | 静态 Flexbox 布局 | SDF 文本子系统 | **运行时动态列表与实例渲染** | **键盘输入与单行 Input 组件** |
-| 渲染技术 | SDF 形状 + 多 Pass 阴影 | 布局对齐 | SDF 文本渲染 | Storage Buffer + Instanced 渲染 | 键盘事件流转 + 极简光标渲染 |
-| 质量保障 | 手动验证 | 同左 | 31 项 Lua 断言 + 11 项编译回归 | 111 项断言 | **12/12 测试套件，全量回归集成** |
+| 项目 | Phase 0–2.5 | Phase 3.1 | Phase 3.2.x | Phase 3.3.x | Phase 3.4.x | Phase 3.5.x |
+|---|---|---|---|---|---|---|
+| 核心推导 | 形状 → 状态机/管线 | 静态 Flexbox 布局 | SDF 文本子系统 | 运行时动态列表与实例渲染 | 键盘输入与单行 Input 组件 | **编译期显式编排与全面 Instancing 化** |
+| 渲染技术 | SDF 形状 + 多 Pass 阴影 | 布局对齐 | SDF 文本渲染 | Storage Buffer + Instanced 渲染 | 键盘事件流转 + 极简光标渲染 | **Standard Instanced Pipeline + 类型分组批量绘制** |
+| 质量保障 | 手动验证 | 同左 | 31 项 Lua 断言 + 11 项编译回归 | 111 项断言 | 12/12 测试套件，全量回归集成 | **16/16 测试套件，150+ 项断言，全量回归通过** |
 
 ---
 
@@ -19,14 +19,16 @@
 ```text
 nebula/
 ├── src/
-│   ├── nebula_core.nelua           # 编译期推导引擎
+│   ├── nebula_core.nelua           # 编译期推导引擎（含 nebula_derive_app 宏）
 │   ├── nebula_arena.nelua          # ★ Phase 3.3.1: Frame Arena 线性分配器
 │   ├── stb_truetype_bindings.nelua # Phase 3.2.1: stb_truetype FFI 绑定
 │   ├── text_runtime.nelua          # Phase 3.2.4: 文本运行时，字形顶点装配与上传
 │   ├── derive/
 │   │   ├── layout_engine.lua       # Phase 3.1: 编译期静态 Flexbox 布局引擎
-│   │   ├── shader_compose.lua      # Phase 3.2.3 + 3.3.3: 着色器组合器（含 Instanced）
-│   │   ├── pipeline_factory.lua    # Phase 3.2.4 + 3.3.4: 管线工厂（含 Instanced 路径）
+│   │   ├── shader_compose.lua      # Phase 3.2.3 + 3.3.3 + 3.5.1: 着色器组合器（含 Standard Instanced）
+│   │   ├── pipeline_factory.lua    # Phase 3.2.4 + 3.3.4 + 3.5.1: 管线工厂（含 Standard Instanced 路径）
+│   │   ├── interaction_factory.lua # Phase 2.4 + 3.5.3: 交互原语工厂（含 Toggleable 正交原语）
+│   │   ├── app_factory.lua         # ★ Phase 3.5.2: 编译期应用编排工厂
 │   │   └── ... (其他派生模块)
 │   └── ...
 ├── assets/
@@ -37,24 +39,138 @@ nebula/
 │   ├── smoke_phase3_2_3.lua        # Phase 3.2.3: 文本着色器组合器冒烟测试
 │   ├── smoke_phase3_2_4.lua        # Phase 3.2.4: TextVisual 派生引擎冒烟测试
 │   ├── verify_p2_4.lua             # Phase 2.4: 交互原语工厂验证
-│   └── run_all_tests.sh            # ★ Phase 3.3.5: 全量回归测试运行器（8 项测试）
+│   └── run_all_tests.sh            # ★ Phase 3.5.4: 全量回归测试运行器（16 项测试套件）
 ├── tests/
 │   ├── smoke_arena.lua             # ★ Phase 3.3.1: Frame Arena 冒烟测试（27 项断言）
 │   ├── smoke_phase3_3_2.lua        # ★ Phase 3.3.2: Storage Buffer 冒烟测试（20 项断言）
 │   ├── smoke_phase3_3_3.lua        # ★ Phase 3.3.3: Instanced 着色器冒烟测试（34 项断言）
-│   └── smoke_phase3_3_4.lua        # ★ Phase 3.3.4: Instanced 管线工厂冒烟测试（30 项断言）
+│   ├── smoke_phase3_3_4.lua        # ★ Phase 3.3.4: Instanced 管线工厂冒烟测试（30 项断言）
+│   ├── smoke_phase3_4_1.lua        # ★ Phase 3.4.1: 键盘事件收集冒烟测试
+│   ├── smoke_phase3_4_2.lua        # ★ Phase 3.4.2: 文本缓冲区逻辑冒烟测试
+│   ├── smoke_phase3_4_3.lua        # ★ Phase 3.4.3: 光标渲染冒烟测试
+│   ├── smoke_phase3_4_4.lua        # ★ Phase 3.4.4: login_demo 升级冒烟测试
+│   ├── smoke_phase3_5_1.lua        # ★ Phase 3.5.1: Standard Instanced 管线冒烟测试（44 项断言）
+│   ├── smoke_phase3_5_2.lua        # ★ Phase 3.5.2: App factory 编排冒烟测试（48 项断言）
+│   ├── smoke_phase3_5_3.lua        # ★ Phase 3.5.3: Toggleable 原语冒烟测试（20 项断言）
+│   └── smoke_phase3_5_4.lua        # ★ Phase 3.5.4: form_demo 综合集成冒烟测试（38 项断言）
 ├── examples/
 │   ├── layout_demo.nelua           # Phase 3.1: 布局演示
 │   ├── text_demo.nelua             # Phase 3.2.5: 文本渲染完整展示（7 个文本组件）
-│   └── dynamic_list_demo.nelua     # ★ Phase 3.3.5: 动态列表演示（10,000 项，1 Draw Call）
+│   ├── dynamic_list_demo.nelua     # ★ Phase 3.3.5: 动态列表演示（10,000 项，1 Draw Call）
+│   ├── login_demo.nelua            # ★ Phase 3.4.4: 登录框与键盘输入演示
+│   └── form_demo.nelua             # ★ Phase 3.5.4: 表单演示（nebula_derive_app + 复选框）
 ├── docs/
-│   ├── PLAN_PHASE3.md              # Phase 3 完整规划（含 3.3 子阶段）
+│   ├── PLAN_PHASE3.md              # Phase 3 完整规划
+│   ├── PLAN_PHASE3_5.md            # ★ Phase 3.5 详细规划（已更新为哲学驱动版本）
 │   ├── PHASE3_3_OVERVIEW.md        # Phase 3.3 技术规划概述
 │   ├── PHILOSOPHY_ANALYSIS_PHASE3_3.md # Phase 3.3 与核心哲学的兼容性分析
 │   ├── PHASE3_3_SUITABILITY_ASSESSMENT.md # Phase 3.3 适配性评估
 │   └── WASM_TARGET_ANALYSIS.md     # Nebula 编译到 WebAssembly 的可行性分析
 ├── build.sh                        # 一键构建脚本
 └── README.md
+```
+
+---
+
+## ★ Phase 3.5 核心：高层组件编排与渲染管线统一
+
+Phase 3.5 是 Nebula 从"图形学库"向"真正 GUI 框架"跨越的关键阶段，分为 4 个子阶段交付。所有实现严格遵循 Nebula 的三大设计哲学：**零运行时开销、形状即渲染、声明意图派生代码**。
+
+### Phase 3.5.1 — 全面 Instancing 化
+
+`pipeline_factory.lua` 新增 `gen_pipeline_standard_instanced` 路径，通过 `spec.standard_instanced = true` 触发。将 Phase 3.3 引入的 Instanced 渲染思想**泛化为所有标准 Visual 类型的默认多实例渲染范式**，而非仅限于动态列表。
+
+生成的 `<T>Pipeline` 同时具备：
+
+| 方法 | 说明 |
+|---|---|
+| `init(renderer, max_instances)` | 创建 Storage Buffer、BindGroup、RenderPipeline |
+| `upload(renderer, data_array, count)` | 将 CPU 端实例数组整体写入 Storage Buffer |
+| `draw_instanced(pass, count)` | 一次 Draw Call 渲染 `count` 个实例 |
+
+**架构意义**：消除了原有"单实例管线"与"Instanced 管线"的双轨制，确立了统一的多实例渲染范式。
+
+### Phase 3.5.2 — 编译期显式编排
+
+新增 `src/derive/app_factory.lua`，实现 `nebula_derive_app` 宏的编译期代码生成逻辑。
+
+**使用方式：**
+
+```nelua
+## nebula_app_begin("FormApp")
+##   nebula_app_register_component("card",        "CardVisual")
+##   nebula_app_register_component("email_input", "InputVisual", {component_id=1})
+##   nebula_app_register_component("login_btn",   "ButtonVisual")
+## nebula_app_end()
+## nebula_derive_app("FormApp")
+```
+
+**生成内容（93 行，完全等价于手写代码）：**
+
+```nelua
+-- 自动生成的 FormApp record（含共享 Pipeline 字段）
+global FormApp = @record{
+  card:        CardContext,
+  email_input: InputContext,
+  login_btn:   ButtonContext,
+  pipe_card:   CardPipeline,     -- 共享 Pipeline（max_instances 自动计算）
+  pipe_input:  InputPipeline,    -- InputVisual 有 2 个实例，max_instances=2
+  pipe_button: ButtonPipeline,
+  vw: float32, vh: float32,
+}
+
+-- 自动生成的 init/update/draw 方法（显式调用序列，无任何运行时黑盒）
+function FormApp:init(renderer, vw, vh): boolean  ...  end
+function FormApp:update(input, dt): void           ...  end
+function FormApp:draw(pass): void                  ...  end
+```
+
+**核心设计原则**：生成的代码与手写代码完全等价，无虚函数、无反射、无运行时分发。同类型组件自动合并为一个 Instanced 批次，通过 `draw_instanced` 一次绘制。
+
+**动态插槽支持**：通过 `nebula_app_register_slot` 声明占位符，生成器在 `draw` 方法中内联 Arena 遍历代码，实现静态表单与动态列表的无缝融合。
+
+### Phase 3.5.3 — Toggleable 正交原语
+
+`interaction_factory.lua` 新增 `nebula_gen_toggle_state(spec)` 函数，生成与主状态机**完全正交**的开关状态。
+
+**生成的 Nelua 代码结构：**
+
+```nelua
+-- 正交状态记录（不是主状态机的一个状态）
+global NebulaToggleState = @record{
+  is_on:        boolean,  -- 当前开关状态
+  just_toggled: boolean,  -- 本帧是否发生翻转
+}
+
+-- 追加到 process_input 末尾，不干扰主状态机优先级
+function CheckboxContext:process_toggle(input: *NebulaInputState): void
+  self.toggle.just_toggled = false
+  if self.click.just_clicked then
+    self.toggle.is_on = not self.toggle.is_on
+    self.toggle.just_toggled = true
+  end
+end
+```
+
+**正交性保证**：`is_on` 不是主状态机的一个状态，不会与 `hovered`/`pressed`/`focused` 产生优先级冲突，可以同时为真。
+
+### Phase 3.5.4 — form_demo 综合演示
+
+`examples/form_demo.nelua` 使用 Phase 3.5 的全部新能力重写了 `login_demo`，新增"记住密码"复选框。
+
+**代码量对比：**
+
+| 指标 | login_demo (Phase 3.4.4) | form_demo (Phase 3.5.4) | 变化 |
+|---|---|---|---|
+| 应用组装代码 | ~250 行 | ~120 行 | **↓ 52%** |
+| 手动管线初始化 | 8 行 | 1 行 (`form:init(...)`) | **↓ 87%** |
+| 手动 update 调用 | 4 行 | 1 行 (`form:update(...)`) | **↓ 75%** |
+| 手动 draw 调用 | 6 行 | 1 行 (`form:draw(pass)`) | **↓ 83%** |
+| 新增组件（复选框） | — | 零额外样板代码 | ✓ |
+
+```bash
+bash build.sh form_demo
+./build/form_demo
 ```
 
 ---
@@ -182,13 +298,14 @@ chmod +x build.sh
 ./build.sh layout_demo          # Phase 3.1 布局演示
 ./build.sh text_demo            # Phase 3.2.5 文本渲染完整展示
 ./build.sh dynamic_list_demo    # Phase 3.3.5 动态列表演示（10,000 项）
-./build.sh login_demo           # ★ Phase 3.4.4 登录框与键盘输入演示
+./build.sh login_demo           # Phase 3.4.4 登录框与键盘输入演示
+./build.sh form_demo            # ★ Phase 3.5.4 表单演示（nebula_derive_app + 复选框）
 ```
 
 ### 运行全量回归测试
 
 ```bash
-bash tools/run_all_tests.sh     # 运行全部 8 项测试套件（111 项断言）
+bash tools/run_all_tests.sh     # 运行全部 16 项测试套件（150+ 项断言）
 ```
 
 ---
@@ -214,4 +331,8 @@ bash tools/run_all_tests.sh     # 运行全部 8 项测试套件（111 项断言
 - [x] **Phase 3.4.2** — `InputContext` 文本缓冲区逻辑。
 - [x] **Phase 3.4.3** — 极简光标渲染。
 - [x] **Phase 3.4.4** — `login_demo` 升级与全量回归测试集成。
-- [ ] **Phase 3.5** — （待规划）
+- [x] **Phase 3.5.1** — 全面 Instancing 化：Standard Instanced Pipeline 统一渲染范式。
+- [x] **Phase 3.5.2** — 编译期显式编排：`nebula_derive_app` 宏与 `app_factory.lua`。
+- [x] **Phase 3.5.3** — Toggleable 正交原语：`nebula_gen_toggle_state` 与正交状态机。
+- [x] **Phase 3.5.4** — `form_demo` 综合演示与全量回归测试集成（16/16 套件通过）。
+- [ ] **Phase 3.6** — （待规划）
