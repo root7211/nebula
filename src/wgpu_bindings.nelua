@@ -73,9 +73,17 @@ global WGPUStoreOp_Store   <comptime> = (@WGPUStoreOp)(0x00000002)
 global WGPUStoreOp_Discard <comptime> = (@WGPUStoreOp)(0x00000003)
 
 global WGPUBufferUsage = @uint32
-global WGPUBufferUsage_Uniform <comptime> = (@WGPUBufferUsage)(0x00000040)
-global WGPUBufferUsage_CopyDst <comptime> = (@WGPUBufferUsage)(0x00000008)
-global WGPUBufferUsage_Vertex  <comptime> = (@WGPUBufferUsage)(0x00000020)
+global WGPUBufferUsage_None         <comptime> = (@WGPUBufferUsage)(0x00000000)
+global WGPUBufferUsage_MapRead      <comptime> = (@WGPUBufferUsage)(0x00000001)
+global WGPUBufferUsage_MapWrite     <comptime> = (@WGPUBufferUsage)(0x00000002)
+global WGPUBufferUsage_CopySrc      <comptime> = (@WGPUBufferUsage)(0x00000004)
+global WGPUBufferUsage_CopyDst      <comptime> = (@WGPUBufferUsage)(0x00000008)
+global WGPUBufferUsage_Index        <comptime> = (@WGPUBufferUsage)(0x00000010)
+global WGPUBufferUsage_Vertex       <comptime> = (@WGPUBufferUsage)(0x00000020)
+global WGPUBufferUsage_Uniform      <comptime> = (@WGPUBufferUsage)(0x00000040)
+global WGPUBufferUsage_Storage      <comptime> = (@WGPUBufferUsage)(0x00000080)
+global WGPUBufferUsage_Indirect     <comptime> = (@WGPUBufferUsage)(0x00000100)
+global WGPUBufferUsage_QueryResolve <comptime> = (@WGPUBufferUsage)(0x00000200)
 
 global WGPUVertexFormat = @uint32
 global WGPUVertexFormat_Float32x2 <comptime> = (@WGPUVertexFormat)(0x0000001D)
@@ -91,6 +99,8 @@ global WGPUShaderStage_Fragment <comptime> = (@WGPUShaderStage)(0x00000002)
 
 global WGPUBufferBindingType = @uint32
 global WGPUBufferBindingType_Uniform <comptime> = (@WGPUBufferBindingType)(0x00000001)
+global WGPUBufferBindingType_Storage <comptime> = (@WGPUBufferBindingType)(0x00000002)
+global WGPUBufferBindingType_ReadOnlyStorage <comptime> = (@WGPUBufferBindingType)(0x00000003)
 
 global WGPUPrimitiveTopology = @uint32
 global WGPUPrimitiveTopology_TriangleList  <comptime> = (@WGPUPrimitiveTopology)(0x00000004)
@@ -123,6 +133,7 @@ global WGPUInstanceBackend_Metal  <comptime> = (@WGPUInstanceBackend)(0x00000004
 global WGPUInstanceBackend_Dx12   <comptime> = (@WGPUInstanceBackend)(0x00000008)
 
 global WGPUSurfaceGetCurrentTextureStatus = @uint32
+global WGPUSurfaceGetCurrentTextureStatus_Success           <comptime> = (@WGPUSurfaceGetCurrentTextureStatus)(0x00000000)
 global WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal    <comptime> = (@WGPUSurfaceGetCurrentTextureStatus)(0x00000001)
 global WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal <comptime> = (@WGPUSurfaceGetCurrentTextureStatus)(0x00000002)
 global WGPUSurfaceGetCurrentTextureStatus_Timeout           <comptime> = (@WGPUSurfaceGetCurrentTextureStatus)(0x00000003)
@@ -434,7 +445,11 @@ global function wgpuDeviceCreateBindGroup(device: WGPUDevice, desc: *WGPUBindGro
 global function wgpuDeviceCreatePipelineLayout(device: WGPUDevice, desc: *WGPUPipelineLayoutDescriptor): WGPUPipelineLayout <cimport, nodecl> end
 global function wgpuDeviceCreateShaderModule(device: WGPUDevice, desc: *WGPUShaderModuleDescriptor): WGPUShaderModule <cimport, nodecl> end
 global function wgpuDeviceCreateRenderPipeline(device: WGPUDevice, desc: *WGPURenderPipelineDescriptor): WGPURenderPipeline <cimport, nodecl> end
-global function wgpuDeviceCreateCommandEncoder(device: WGPUDevice, desc: pointer): WGPUCommandEncoder <cimport, nodecl> end
+global WGPUCommandEncoderDescriptor <cimport, nodecl> = @record{
+  nextInChain: pointer,
+  label:       WGPUStringView,
+}
+global function wgpuDeviceCreateCommandEncoder(device: WGPUDevice, desc: *WGPUCommandEncoderDescriptor): WGPUCommandEncoder <cimport, nodecl> end
 global function wgpuCommandEncoderBeginRenderPass(encoder: WGPUCommandEncoder, desc: *WGPURenderPassDescriptor): WGPURenderPassEncoder <cimport, nodecl> end
 global function wgpuRenderPassEncoderSetPipeline(pass: WGPURenderPassEncoder, pipeline: WGPURenderPipeline): void <cimport, nodecl> end
 global function wgpuRenderPassEncoderSetBindGroup(pass: WGPURenderPassEncoder, groupIndex: uint32, group: WGPUBindGroup, dynamicOffsetCount: csize, dynamicOffsets: pointer): void <cimport, nodecl> end
@@ -442,7 +457,11 @@ global function wgpuRenderPassEncoderSetVertexBuffer(pass: WGPURenderPassEncoder
 global function wgpuRenderPassEncoderDraw(pass: WGPURenderPassEncoder, vertexCount: uint32, instanceCount: uint32, firstVertex: uint32, firstInstance: uint32): void <cimport, nodecl> end
 global function wgpuRenderPassEncoderEnd(pass: WGPURenderPassEncoder): void <cimport, nodecl> end
 global function wgpuRenderPassEncoderRelease(pass: WGPURenderPassEncoder): void <cimport, nodecl> end
-global function wgpuCommandEncoderFinish(encoder: WGPUCommandEncoder, desc: pointer): WGPUCommandBuffer <cimport, nodecl> end
+global WGPUCommandBufferDescriptor <cimport, nodecl> = @record{
+  nextInChain: pointer,
+  label:       WGPUStringView,
+}
+global function wgpuCommandEncoderFinish(encoder: WGPUCommandEncoder, desc: *WGPUCommandBufferDescriptor): WGPUCommandBuffer <cimport, nodecl> end
 global function wgpuCommandEncoderRelease(encoder: WGPUCommandEncoder): void <cimport, nodecl> end
 global function wgpuQueueSubmit(queue: WGPUQueue, commandCount: csize, commands: *WGPUCommandBuffer): void <cimport, nodecl> end
 global function wgpuCommandBufferRelease(buf: WGPUCommandBuffer): void <cimport, nodecl> end
@@ -576,3 +595,9 @@ global WGPUSamplerDescriptor <cimport, nodecl> = @record{
 global function wgpuDeviceCreateTexture(device: WGPUDevice, desc: *WGPUTextureDescriptor): WGPUTexture <cimport, nodecl> end
 global function wgpuDeviceCreateSampler(device: WGPUDevice, desc: *WGPUSamplerDescriptor): WGPUSampler <cimport, nodecl> end
 global function wgpuQueueWriteTexture(queue: WGPUQueue, destination: *WGPUTexelCopyTextureInfo, data: pointer, dataSize: csize, dataLayout: *WGPUTexelCopyBufferLayout, writeSize: *WGPUExtent3D): void <cimport, nodecl> end
+
+global function wgpuShaderModuleRelease(shaderModule: WGPUShaderModule): void <cimport, nodecl> end
+global function wgpuBindGroupLayoutRelease(bindGroupLayout: WGPUBindGroupLayout): void <cimport, nodecl> end
+global function wgpuPipelineLayoutRelease(pipelineLayout: WGPUPipelineLayout): void <cimport, nodecl> end
+global function wgpuRenderPipelineRelease(renderPipeline: WGPURenderPipeline): void <cimport, nodecl> end
+global function wgpuQueueRelease(queue: WGPUQueue): void <cimport, nodecl> end

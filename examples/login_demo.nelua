@@ -84,7 +84,11 @@ nebula_annotate("InputVisual", {
 ## nebula_derive("InputVisual")
 
 -- Phase 3.4.4: 为 InputContext 生成 process_text_input / get_text 方法
-##[[ nebula_gen_text_buffer({ base = "Input" }) ]]
+##[[
+  local _tb_src = nebula_gen_text_buffer({ base = "Input" })
+  local _tb_ast = aster.parse(_tb_src, "<nebula_gen_text_buffer:Input>")
+  for _, stat in ipairs(_tb_ast) do inject_statement(stat) end
+]]
 
 -- ---- 按钮 ----
 global ButtonVisual = @record{
@@ -117,6 +121,24 @@ nebula_annotate("ButtonVisual", {
 })
 ]]
 ## nebula_derive("ButtonVisual")
+
+-- ---- 文本渲染 Visual（用于输入框内容显示）----
+global TextVisual = @record{
+  pos:          Vec2,
+  size:         Vec2,
+  pixel_height: float32,
+  default_text_color: Color,
+}
+##[[
+nebula_annotate("TextVisual", {
+  states = {"default"},
+  primitives = {},
+  transitions = {},
+  text_mode = "ascii_sdf",
+  max_chars = 256,
+})
+]]
+## nebula_derive_text_visual("TextVisual")
 
 -- =============================================================================
 -- 主程序
@@ -224,20 +246,22 @@ local function main(): int32
   -- ---- 文本上下文（用于显示输入框内容）----
   local email_text:    TextContext
   local password_text: TextContext
-  email_text:init(
-    Vec2{ x = 260.0, y = 212.0 },  -- 文本起始位置（输入框内左侧）
-    Color{ r=0.90, g=0.90, b=0.92, a=1.0 },
-    14.0
-  )
-  password_text:init(
-    Vec2{ x = 260.0, y = 280.0 },
-    Color{ r=0.90, g=0.90, b=0.92, a=1.0 },
-    14.0
-  )
+  email_text:init(TextVisual{
+    pos          = Vec2{ x = 260.0, y = 212.0 },
+    size         = Vec2{ x = 0.0, y = 0.0 },
+    pixel_height = 14.0,
+    default_text_color = Color{ r=0.90, g=0.90, b=0.92, a=1.0 },
+  })
+  password_text:init(TextVisual{
+    pos          = Vec2{ x = 260.0, y = 280.0 },
+    size         = Vec2{ x = 0.0, y = 0.0 },
+    pixel_height = 14.0,
+    default_text_color = Color{ r=0.90, g=0.90, b=0.92, a=1.0 },
+  })
 
   -- 初始占位符文本
-  email_text:set_text("email")
-  password_text:set_text("password")
+  if not email_text:set_text(&renderer, "email") then return 1 end
+  if not password_text:set_text(&renderer, "password") then return 1 end
 
   -- ---- 统一输入状态 ----
   local input: NebulaInputState
@@ -261,9 +285,9 @@ local function main(): int32
     -- Phase 3.4.4: 处理文本输入，文本变化时重建网格
     if email_input:process_text_input(&input) then
       if email_input.visual.text_len > 0 then
-        email_text:set_text(email_input:get_text())
+        email_text:set_text(&renderer, email_input:get_text())
       else
-        email_text:set_text("email")
+        email_text:set_text(&renderer, "email")
       end
     end
 
@@ -277,9 +301,9 @@ local function main(): int32
           mi = mi + 1
         end
         mask[password_input.visual.text_len] = 0
-        password_text:set_text((@cstring)(&mask[0]))
+        password_text:set_text(&renderer, (@cstring)(&mask[0]))
       else
-        password_text:set_text("password")
+        password_text:set_text(&renderer, "password")
       end
     end
 
@@ -317,9 +341,7 @@ local function main(): int32
     pipe_password:update_uniforms(&renderer, &u_pwd)
     pipe_button:update_uniforms(&renderer, &u_btn)
 
-    -- 上传文本顶点
-    pipe_email_text:upload_vertices(&renderer, &email_text)
-    pipe_password_text:upload_vertices(&renderer, &password_text)
+    -- 文本顶点已由 set_text 在调用时上传，此处无需额外 upload
 
     -- 提交渲染
     local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, nilptr)
@@ -340,8 +362,8 @@ local function main(): int32
     pipe_email:draw(pass)
     pipe_password:draw(pass)
     pipe_button:draw(pass)
-    pipe_email_text:draw(pass)
-    pipe_password_text:draw(pass)
+    pipe_email_text:draw_buffer(pass, email_text.mesh.vertex_buffer, email_text.mesh.vertex_buffer_size, email_text.mesh.vertex_count)
+    pipe_password_text:draw_buffer(pass, password_text.mesh.vertex_buffer, password_text.mesh.vertex_buffer_size, password_text.mesh.vertex_count)
     wgpuRenderPassEncoderEnd(pass)
     wgpuRenderPassEncoderRelease(pass)
 

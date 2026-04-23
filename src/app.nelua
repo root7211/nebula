@@ -41,6 +41,15 @@ global _nebula_key_head:    uint8 = 0
 global _nebula_key_tail:    uint8 = 0
 
 -- =============================================================================
+-- GLFW 回调：鼠标滚动
+-- =============================================================================
+global _nebula_scroll_dy: float32 = 0.0
+
+global function _nebula_scroll_callback(window: GLFWwindow, xoffset: float64, yoffset: float64): void
+  _nebula_scroll_dy = _nebula_scroll_dy + (@float32)(yoffset)
+end
+
+-- =============================================================================
 -- GLFW 回调：字符输入（Unicode 可打印字符）
 -- =============================================================================
 global function _nebula_char_callback(window: GLFWwindow, codepoint: uint32): void
@@ -94,6 +103,7 @@ end
 global function nebula_input_install_callbacks(window: GLFWwindow): void
   glfwSetCharCallback(window, _nebula_char_callback)
   glfwSetKeyCallback(window,  _nebula_key_callback)
+  glfwSetScrollCallback(window, _nebula_scroll_callback)
 end
 
 -- =============================================================================
@@ -143,4 +153,8 @@ global function nebula_collect_input(
   else
     input.key_pressed = NebulaKey.None
   end
+
+  -- ---- 滚动 ----
+  input.scroll_dy = _nebula_scroll_dy
+  _nebula_scroll_dy = 0.0
 end

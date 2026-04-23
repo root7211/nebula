@@ -515,7 +515,7 @@ local function gen_pipeline_instanced(base, uniforms_record, wgsl_source, instan
   local function emit(s) table.insert(L, s) end
 
   emit(("-- === Derived instanced pipeline: %s (instance_record=%s, max=%d) ==="):format(
-    pipe, instance_record, max_instances))
+    tostring(pipe), tostring(instance_record), tonumber(max_instances) or 0))
 
   -- record 定义
   emit(("global %s = @record{"):format(pipe))

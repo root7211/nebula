@@ -1,4 +1,3 @@
--- =============================================================================
 -- smoke_phase3_4_2.lua
 -- Phase 3.4.2 冒烟测试：interaction_factory editable 原语与文本缓冲区逻辑
 -- =============================================================================
@@ -15,8 +14,7 @@ local function check(name, cond)
   end
 end
 
--- 加载 interaction_factory（需要先加载 nebula_core 中的辅助函数）
--- 由于测试环境无法 require nelua 模块，直接读取源码做静态断言
+-- 加载 interaction_factory
 local f = io.open("src/derive/interaction_factory.lua", "r")
 assert(f, "interaction_factory.lua not found")
 local src = f:read("*a")
@@ -40,13 +38,13 @@ check("char_count loop",
 check("ASCII range guard (0x20..0x7E)",
   src:find("cp >= 0x20 and cp <= 0x7E") ~= nil)
 check("cursor insert: memmove-style shift",
-  src:find("self%.text_buf%[j%] = self%.text_buf%[j %- 1%]") ~= nil)
+  src:find("self%.visual%.text_buf%[j%] = self%.visual%.text_buf%[j %- 1%]") ~= nil)
 check("text_len increment on insert",
-  src:find("self%.text_len = self%.text_len %+ 1") ~= nil)
+  src:find("self%.visual%.text_len = self%.visual%.text_len %+ 1") ~= nil)
 check("cursor_pos increment on insert",
-  src:find("self%.cursor_pos = self%.cursor_pos %+ 1") ~= nil)
+  src:find("self%.visual%.cursor_pos = self%.visual%.cursor_pos %+ 1") ~= nil)
 check("null terminator maintained",
-  src:find("self%.text_buf%[self%.text_len%] = 0") ~= nil)
+  src:find("self%.visual%.text_buf%[self%.visual%.text_len%] = 0") ~= nil)
 
 -- ---- 4. 控制键处理 ----
 check("Backspace handled",
@@ -62,7 +60,7 @@ check("Home key handled",
 check("End key handled",
   src:find("NebulaKey%.End") ~= nil)
 check("Backspace decrements cursor_pos",
-  src:find("self%.cursor_pos = self%.cursor_pos %- 1") ~= nil)
+  src:find("self%.visual%.cursor_pos = self%.visual%.cursor_pos %- 1") ~= nil)
 check("changed flag returned",
   src:find("return changed") ~= nil)
 
@@ -70,10 +68,9 @@ check("changed flag returned",
 check("get_text method generated",
   src:find("function.*get_text") ~= nil)
 check("get_text returns cstring from text_buf",
-  src:find("@cstring.*&self%.text_buf%[0%]") ~= nil)
+  src:find("@cstring.*&self%.visual%.text_buf%[0%]") ~= nil)
 
 -- ---- 6. 逻辑正确性：模拟文本缓冲区操作 ----
--- 用纯 Lua 模拟 process_text_input 的核心逻辑，验证插入/删除/移动的正确性
 local buf = {}
 local text_len = 0
 local cursor_pos = 0

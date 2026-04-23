@@ -63,14 +63,10 @@ check("TextPipeline for email declared",
   src:find("pipe_email_text%s*:%s*TextPipeline") ~= nil)
 check("TextPipeline for password declared",
   src:find("pipe_password_text%s*:%s*TextPipeline") ~= nil)
-check("upload_vertices called for email text",
-  src:find("pipe_email_text:upload_vertices") ~= nil)
-check("upload_vertices called for password text",
-  src:find("pipe_password_text:upload_vertices") ~= nil)
-check("pipe_email_text:draw called",
-  src:find("pipe_email_text:draw%(pass%)") ~= nil)
-check("pipe_password_text:draw called",
-  src:find("pipe_password_text:draw%(pass%)") ~= nil)
+check("draw_buffer called for email text",
+  src:find("pipe_email_text:draw_buffer") ~= nil)
+check("draw_buffer called for password text",
+  src:find("pipe_password_text:draw_buffer") ~= nil)
 
 -- ---- 7. 向后兼容性：Phase 2.4 焦点管理仍然存在 ----
 check("component_id = 1 for email",

@@ -64,3 +64,7 @@ global GLFWcharfun   <cimport, nodecl> = @function(window: GLFWwindow, codepoint
 -- 注册回调
 global function glfwSetKeyCallback(window: GLFWwindow, callback: GLFWkeyfun): GLFWkeyfun <cimport, nodecl> end
 global function glfwSetCharCallback(window: GLFWwindow, callback: GLFWcharfun): GLFWcharfun <cimport, nodecl> end
+
+-- 滚动回调
+global GLFWscrollfun <cimport, nodecl> = @function(window: GLFWwindow, xoffset: float64, yoffset: float64): void
+global function glfwSetScrollCallback(window: GLFWwindow, callback: GLFWscrollfun): GLFWscrollfun <cimport, nodecl> end

@@ -41,8 +41,8 @@ end
 
 -- 1. NebulaArena record 包含必要字段
 check("arena_record_has_base",
-  src:find("base:%s*%*uint8") ~= nil,
-  "NebulaArena 缺少 base: *uint8 字段")
+  src:find("base:%s*%*%[0%]uint8") ~= nil,
+  "NebulaArena 缺少 base: *[0]uint8 字段")
 
 check("arena_record_has_capacity",
   src:find("capacity:%s*csize") ~= nil,

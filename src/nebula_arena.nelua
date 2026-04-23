@@ -32,10 +32,10 @@ global function memset(ptr: pointer, val: cint, n: csize): pointer <cimport, nod
 -- NebulaArena：线性分配器状态
 -- =============================================================================
 global NebulaArena = @record{
-  base:     *uint8,   -- 后备内存起始地址
-  capacity: csize,    -- 后备内存总字节数
-  offset:   csize,    -- 当前分配游标（已用字节数）
-  peak:     csize,    -- 本帧峰值使用量（用于调试/调优）
+  base:     *[0]uint8, -- 后备内存起始地址（使用 [0] 指针支持下标索引）
+  capacity: csize,     -- 后备内存总字节数
+  offset:   csize,     -- 当前分配游标（已用字节数）
+  peak:     csize,     -- 本帧峰值使用量（用于调试/调优）
 }
 
 -- =============================================================================
@@ -49,7 +49,7 @@ global NebulaArena = @record{
 --   backing  — 后备内存起始地址
 --   capacity — 后备内存字节数
 -- =============================================================================
-global function nebula_arena_init(arena: *NebulaArena, backing: *uint8, capacity: csize): void
+global function nebula_arena_init(arena: *NebulaArena, backing: *[0]uint8, capacity: csize): void
   arena.base     = backing
   arena.capacity = capacity
   arena.offset   = 0
@@ -119,7 +119,7 @@ global function nebula_arena_alloc(arena: *NebulaArena, size: csize, align: csiz
     return nilptr
   end
 
-  local ptr = (@pointer)(arena.base + aligned)
+  local ptr = (@pointer)(&arena.base[aligned])
   arena.offset = aligned + size
   return ptr
 end

@@ -61,6 +61,7 @@ global NebulaInputState = @record{
   char_input:         [16]uint32, -- 本帧输入的 Unicode 码位数组（最多 16 个字符）
   char_count:         uint8,     -- char_input 中有效字符数量
   key_pressed:        NebulaKey, -- 本帧按下的控制键；不存在控制键时为 None
+  scroll_dy:          float32,   -- 本帧鼠标滚轮 Y 轴偏移量（Phase 3.3.5 新增）
 }
 
 -- =============================================================================
@@ -463,17 +464,17 @@ end
 
 -- 加载着色器组合器模块
 local shader_compose_mod = require "derive.shader_compose"
-assert(shader_compose_mod == "nebula_shader_compose_v0.3_phase3.2.3",
+assert(shader_compose_mod == "nebula_shader_compose_v0.4_phase3.3.3",
   "nebula: failed to load derive/shader_compose.lua")
 
 -- ★ Phase 2.3.2: 加载管线工厂模块
 local pipeline_factory_mod = require "derive.pipeline_factory"
-assert(pipeline_factory_mod == "nebula_pipeline_factory_v0.4_phase3.2.4",
+assert(pipeline_factory_mod == "nebula_pipeline_factory_v0.5_phase3.3",
   "nebula: failed to load derive/pipeline_factory.lua")
 
 -- ★ Phase 2.4: 加载交互原语工厂模块
 local interaction_factory_mod = require "derive.interaction_factory"
-assert(interaction_factory_mod == "nebula_interaction_factory_v0.1",
+assert(interaction_factory_mod == "nebula_interaction_factory_v0.2_phase3.4",
   "nebula: failed to load derive/interaction_factory.lua")
 
 -- ★ Phase 3.1: 加载编译期布局引擎模块

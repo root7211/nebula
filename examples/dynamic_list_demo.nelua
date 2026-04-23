@@ -88,9 +88,12 @@ local pipeline_code = nebula_gen_pipeline_source({
   max_instances    = LIST_VISIBLE_COUNT,
 })
 
--- 注入生成的管线代码
-EMIT_NELUA(pipeline_code)
-]]
+	-- 注入生成的管线代码
+	local ast = aster.parse(pipeline_code, "ListItemInstancedPipeline")
+	for _, stat in ipairs(ast) do
+	  inject_statement(stat)
+	end
+	]]
 
 -- =============================================================================
 -- 主程序
@@ -119,7 +122,7 @@ local function main(): int32
   -- 后备内存：栈上分配，避免堆分配
   local arena_backing: [ARENA_SIZE]uint8
   local arena: NebulaArena
-  nebula_arena_init(&arena, &arena_backing[0], ARENA_SIZE)
+  nebula_arena_init(&arena, (@*[0]uint8)(&arena_backing[0]), ARENA_SIZE)
 
   -- 运行时状态
   local scroll_y:    float32 = 0.0   -- 当前滚动偏移（像素）
@@ -180,7 +183,7 @@ local function main(): int32
     local visible_count: uint32 = 0
     local instances: *[0]ListItemInstanceData =
       (@*[0]ListItemInstanceData)(nebula_arena_alloc_array(
-        &arena, #ListItemInstanceData, LIST_VISIBLE_COUNT))
+        &arena, LIST_VISIBLE_COUNT, #ListItemInstanceData, 8))
 
     if instances ~= nilptr then
       local i: int32 = 0

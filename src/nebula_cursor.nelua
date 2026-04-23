@@ -33,7 +33,7 @@ require "glfw_bindings"
 -- 返回：光标相对于文本起始点的 X 像素偏移（float32）
 -- =============================================================================
 global function nebula_cursor_x_offset(
-  advances:   *float32,
+  advances:   *[0]float32,
   cursor_pos: uint32,
   count:      uint32
 ): float32
