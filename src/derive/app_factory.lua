@@ -1,23 +1,8 @@
 -- =============================================================================
--- derive/app_factory.lua
--- Nebula GUI Compiler — Phase 3.5.2
+-- derive/app_factory.lua — Nebula GUI Compiler Phase 3.8
 --
 -- 编译期显式编排工厂（App Factory）
---
--- 职责：
---   · 维护应用组件树注册表（nebula_app_registry）
---   · 提供 nebula_app_begin / nebula_app_register_component /
---     nebula_app_register_slot / nebula_app_end API
---   · 提供 nebula_derive_app(app_name) 主入口，生成：
---       global <App> = @record{ ... }          -- 包含所有 Context + Pipeline
---       function <App>:init(renderer, vw, vh)  -- 初始化所有管线和组件
---       function <App>:update(input, dt)        -- 显式调用序列（编译期展开）
---       function <App>:draw(pass)               -- 收集 + upload + draw_instanced
---
--- 设计哲学：
---   · 零运行时开销：所有编排逻辑在编译期展开为等价于手写的静态代码
---   · 形状即渲染：同类型组件共享专属 Pipeline，通过 Instancing 批量绘制
---   · 声明意图派生代码：开发者只需声明组件树，框架生成显式执行代码
+-- 生成 <App> record + init + update + draw，★ Phase 3.8 新增 Arena 内嵌。
 -- =============================================================================
 
 -- 全局应用注册表
@@ -31,10 +16,13 @@ local _current_app = nil
 -- =============================================================================
 
 -- 开始声明一个新的 App
-function nebula_app_begin(app_name)
+-- opts（可选）：
+--   arena_size : number — FrameArena 后备内存字节数（默认 2 * 1024 * 1024 = 2MB）
+function nebula_app_begin(app_name, opts)
   assert(app_name, "nebula_app_begin: app_name required")
   assert(not nebula_app_registry[app_name],
     ("nebula_app_begin: app '%s' already registered"):format(app_name))
+  opts = opts or {}
   _current_app = app_name
   nebula_app_registry[app_name] = {
     name       = app_name,
@@ -42,6 +30,8 @@ function nebula_app_begin(app_name)
     slots      = {},  -- 动态插槽列表：{name, visual_type, base, max_instances}
     -- 按 visual_type 分组，用于生成共享 Pipeline
     type_groups = {},  -- {visual_type -> {pipeline_name, base, members=[{name, is_slot}]}}
+    -- ★ Phase 3.8: FrameArena 配置
+    arena_size  = opts.arena_size or (2 * 1024 * 1024),  -- 默认 2MB
   }
 end
 
@@ -133,7 +123,7 @@ end
 -- 代码生成：nebula_derive_app(app_name)
 -- =============================================================================
 
--- 生成 <App> record 定义
+-- 生成 <App> record（★ Phase 3.8: 注入 arena + _arena_backing）
 local function gen_app_record(app_name, reg)
   local L = {}
   local function emit(s) table.insert(L, s) end
@@ -157,12 +147,16 @@ local function gen_app_record(app_name, reg)
       emitted_pipes[group.pipeline_name] = true
     end
   end
+  emit("")
+  emit("  -- ★ Phase 3.8: FrameArena（内嵌后备内存，无堆分配）")
+  emit("  arena: NebulaArena,")
+  emit(("  _arena_backing: [%d]uint8,"):format(reg.arena_size))
   emit("}")
 
   return table.concat(L, "\n")
 end
 
--- 生成 <App>:init(renderer, vw, vh) 方法
+-- 生成 <App>:init（★ Phase 3.8: 注入 nebula_arena_init）
 local function gen_app_init(app_name, reg)
   local L = {}
   local function emit(s) table.insert(L, s) end
@@ -195,19 +189,23 @@ local function gen_app_init(app_name, reg)
       inited_pipes[group.pipeline_name] = true
     end
   end
+  emit("")
+  emit("  -- ★ Phase 3.8: 初始化 FrameArena（绑定内嵌后备内存）")
+  emit(("  nebula_arena_init(&self.arena, &self._arena_backing[0], %d)"):format(reg.arena_size))
   emit("  return true")
   emit("end")
 
   return table.concat(L, "\n")
 end
 
--- 生成 <App>:update(input, dt) 方法
--- 按注册顺序显式调用每个组件的 update，并处理 text_buf 组件
+-- 生成 <App>:update（★ Phase 3.8: 自动调用 nebula_arena_reset）
 local function gen_app_update(app_name, reg)
   local L = {}
   local function emit(s) table.insert(L, s) end
 
   emit(("function %s:update(input: *NebulaInputState, dt: float32): void"):format(app_name))
+  emit("  -- ★ Phase 3.8: 每帧开始时重置 Arena（O(1)，仅移动游标）")
+  emit("  nebula_arena_reset(&self.arena)")
   emit("  -- 按注册顺序显式更新所有静态组件")
   for _, comp in ipairs(reg.components) do
     emit(("  self.%s:update(input, dt)"):format(comp.name))
@@ -217,8 +215,7 @@ local function gen_app_update(app_name, reg)
   return table.concat(L, "\n")
 end
 
--- 生成 <App>:draw(pass) 方法
--- 按类型分组，收集所有同类型组件的 Uniforms 到临时数组，然后 upload + draw_instanced
+-- 生成 <App>:draw（按类型分组 upload + draw_instanced）
 local function gen_app_draw(app_name, reg)
   local L = {}
   local function emit(s) table.insert(L, s) end
@@ -329,7 +326,7 @@ function nebula_app_generate(app_name)
 
   local source = table.concat(parts, "\n\n")
 
-  print(("[derive-app] %s: emit App record + init + update + draw (%d components, %d slots, %d type_groups)"):format(
+  print(("[derive-app] %s: emit App record + init + update + draw (%d components, %d slots, %d type_groups, arena=%dB)"):format(
     app_name,
     #reg.components,
     #reg.slots,
@@ -337,10 +334,11 @@ function nebula_app_generate(app_name)
       local n = 0
       for _ in pairs(reg.type_groups) do n = n + 1 end
       return n
-    end)()
+    end)(),
+    reg.arena_size
   ))
 
   return source
 end
 
-return "nebula_app_factory_v0.1_phase3.5.2"
+return "nebula_app_factory_v0.2_phase3.8"

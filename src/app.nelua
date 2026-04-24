@@ -1,30 +1,11 @@
 -- =============================================================================
--- app.nelua
--- Nebula GUI Compiler — Phase 3.6.3
+-- app.nelua — Nebula GUI Compiler Phase 3.8
 --
--- 统一输入收集层（Unified Input Collection Layer）
---
--- 提供 nebula_collect_input()，在每帧主循环开头调用，将 GLFW 的原始事件
--- 映射到 NebulaInputState 结构。
---
--- Phase 3.4.1 新增：
---   · 键盘字符输入（glfwSetCharCallback → char_input / char_count）
---   · 控制键输入（glfwSetKeyCallback → key_pressed）
---   · nebula_input_install_callbacks(window) — 一次性注册所有回调
---
--- ★ Phase 3.6.3 新增：
---   · _nebula_key_callback 识别 Shift+方向键/Home/End，映射为 ShiftLeft 等变体
---   · nebula_collect_input 末尾通过 glfwGetKey 实时采样修饰键状态
---     （mod_shift / mod_ctrl / mod_alt），供选区交互原语使用
---
--- 用法：
---   local input: NebulaInputState
---   nebula_input_install_callbacks(window)   -- 在主循环前调用一次
---   while glfwWindowShouldClose(window) == 0 do
---     glfwPollEvents()
---     nebula_collect_input(window, &input, dt)
---     -- 之后直接把 &input 传给各组件的 process_input()
---   end
+-- 统一输入收集层 + 帧渲染封装
+--   · nebula_input_install_callbacks(window) — 注册 GLFW 回调
+--   · nebula_collect_input(window, input, dt) — 每帧输入快照
+--   · ★ Phase 3.8: nebula_frame_render(renderer, app, input, dt, r, g, b)
+--     泛型帧渲染函数，封装全部 WGPU 渲染样板（Surface/RenderPass/submit/present）
 -- =============================================================================
 
 ## cinclude "<stdio.h>"
@@ -118,21 +99,8 @@ global function nebula_input_install_callbacks(window: GLFWwindow): void
   glfwSetScrollCallback(window, _nebula_scroll_callback)
 end
 
--- =============================================================================
--- nebula_collect_input(window, input, dt)
---
--- 参数：
---   window : GLFWwindow*       — 当前窗口句柄
---   input  : *NebulaInputState — 输出：本帧的输入快照（原地更新）
---   dt     : float32           — 本帧时长（秒）
---
--- 行为：
---   · 读取鼠标坐标与左键状态（同 Phase 2.4）
---   · 将字符队列中的码位提取到 input.char_input / char_count
---   · 将控制键队列中第一个键提取到 input.key_pressed（每帧最多一个控制键）
---   · 不修改 focused_id：焦点由 process_input() 内部管理
---   · ★ Phase 3.6.3: 实时采样修饰键状态（mod_shift / mod_ctrl / mod_alt）
--- =============================================================================
+-- nebula_collect_input: 每帧输入快照
+-- 读取鼠标/字符队列/控制键队列/修饰键状态，写入 *NebulaInputState。
 global function nebula_collect_input(
   window:  GLFWwindow,
   input:   *NebulaInputState,
@@ -179,4 +147,82 @@ global function nebula_collect_input(
                    (glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS)
   input.mod_alt   = (glfwGetKey(window, GLFW_KEY_LEFT_ALT)     == GLFW_PRESS) or
                    (glfwGetKey(window, GLFW_KEY_RIGHT_ALT)    == GLFW_PRESS)
+end
+
+-- ★ Phase 3.8: nebula_frame_render
+-- 泛型帧渲染函数：Surface 获取 → RenderPass 创建 → app:update+draw → submit+present
+-- 公理 C（形即渲染）：渲染循环不持有帧间状态；泛型展开后等价于手写静态代码。
+require "wgpu_bindings"
+require "renderer"
+
+global function nebula_frame_render(
+  renderer:  *NebulaRenderer,
+  app:       auto,
+  input:     *NebulaInputState,
+  dt:        float32,
+  clear_r:   float64,
+  clear_g:   float64,
+  clear_b:   float64
+): void
+  -- 1. 获取 Surface 当前纹理
+  local surface_tex: WGPUSurfaceTexture
+  wgpuSurfaceGetCurrentTexture(renderer.surface, &surface_tex)
+  local status = surface_tex.status
+  if status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal and
+     status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal then
+    return  -- 跳帧：Surface 暂时不可用（最小化、resize 等）
+  end
+
+  -- 2. 创建 TextureView
+  local view_desc = WGPUTextureViewDescriptor{
+    nextInChain     = nilptr,
+    label           = wgpu_str_null(),
+    format          = renderer.format,
+    dimension       = 2,
+    baseMipLevel    = 0,
+    mipLevelCount   = 1,
+    baseArrayLayer  = 0,
+    arrayLayerCount = 1,
+    aspect          = WGPUTextureAspect_All,
+  }
+  local view = wgpuTextureCreateView(surface_tex.texture, &view_desc)
+
+  -- 3. 创建 CommandEncoder 和 RenderPass
+  local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, nilptr)
+  local clear_color = WGPURenderPassColorAttachment{
+    nextInChain   = nilptr,
+    view          = view,
+    depthSlice    = 0xFFFFFFFF,
+    resolveTarget = nilptr,
+    loadOp        = WGPULoadOp_Clear,
+    storeOp       = WGPUStoreOp_Store,
+    clearValue    = WGPUColor{ r = clear_r, g = clear_g, b = clear_b, a = 1.0 },
+  }
+  local pass_desc = WGPURenderPassDescriptor{
+    nextInChain             = nilptr,
+    label                   = wgpu_str_null(),
+    colorAttachmentCount    = 1,
+    colorAttachments        = &clear_color,
+    depthStencilAttachment  = nilptr,
+    occlusionQuerySet       = nilptr,
+    timestampWrites         = nilptr,
+  }
+  local pass = wgpuCommandEncoderBeginRenderPass(encoder, &pass_desc)
+
+  -- 4. App Update + Draw（泛型展开，零虚函数开销）
+  app:update(input, dt)
+  app:draw(pass)
+
+  -- 5. 结束 RenderPass，提交并呈现
+  wgpuRenderPassEncoderEnd(pass)
+  wgpuRenderPassEncoderRelease(pass)
+
+  local cmd = wgpuCommandEncoderFinish(encoder, nilptr)
+  wgpuCommandEncoderRelease(encoder)
+  wgpuQueueSubmit(renderer.queue, 1, &cmd)
+  wgpuCommandBufferRelease(cmd)
+
+  wgpuSurfacePresent(renderer.surface)
+  wgpuTextureViewRelease(view)
+  wgpuTextureRelease(surface_tex.texture)
 end
