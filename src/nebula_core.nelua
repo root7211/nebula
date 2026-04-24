@@ -43,11 +43,17 @@ global NebulaKey = @enum(uint8){
   Right     = 7,
   Home      = 8,
   End       = 9,
+  -- ★ Phase 3.6.3: Shift 组合键变体（选区扩展）
+  ShiftLeft  = 10,
+  ShiftRight = 11,
+  ShiftHome  = 12,
+  ShiftEnd   = 13,
 }
 
 -- =============================================================================
 -- ★ Phase 2.4: 统一输入状态（Unified Input State）
 -- ★ Phase 3.4.1: 新增键盘事件字段
+-- ★ Phase 3.6.3: 新增修饰键状态字段（mod_shift / mod_ctrl / mod_alt）
 -- =============================================================================
 global NebulaInputState = @record{
   -- 鼠标状态（Phase 2.4）
@@ -62,6 +68,10 @@ global NebulaInputState = @record{
   char_count:         uint8,     -- char_input 中有效字符数量
   key_pressed:        NebulaKey, -- 本帧按下的控制键；不存在控制键时为 None
   scroll_dy:          float32,   -- 本帧鼠标滚轮 Y 轴偏移量（Phase 3.3.5 新增）
+  -- ★ Phase 3.6.3: 修饰键实时状态（每帧直接采样，非队列化）
+  mod_shift:          boolean,   -- Shift 键当前是否按下
+  mod_ctrl:           boolean,   -- Ctrl 键当前是否按下
+  mod_alt:            boolean,   -- Alt 键当前是否按下
 }
 
 -- =============================================================================

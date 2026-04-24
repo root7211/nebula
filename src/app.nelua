@@ -1,6 +1,6 @@
 -- =============================================================================
 -- app.nelua
--- Nebula GUI Compiler — Phase 3.4.1
+-- Nebula GUI Compiler — Phase 3.6.3
 --
 -- 统一输入收集层（Unified Input Collection Layer）
 --
@@ -11,6 +11,11 @@
 --   · 键盘字符输入（glfwSetCharCallback → char_input / char_count）
 --   · 控制键输入（glfwSetKeyCallback → key_pressed）
 --   · nebula_input_install_callbacks(window) — 一次性注册所有回调
+--
+-- ★ Phase 3.6.3 新增：
+--   · _nebula_key_callback 识别 Shift+方向键/Home/End，映射为 ShiftLeft 等变体
+--   · nebula_collect_input 末尾通过 glfwGetKey 实时采样修饰键状态
+--     （mod_shift / mod_ctrl / mod_alt），供选区交互原语使用
 --
 -- 用法：
 --   local input: NebulaInputState
@@ -62,6 +67,9 @@ end
 
 -- =============================================================================
 -- GLFW 回调：控制键（Backspace / Delete / Enter / Tab / 方向键 / Home / End）
+--
+-- ★ Phase 3.6.3: 识别 Shift+方向键/Home/End，映射为 ShiftLeft/ShiftRight/
+--   ShiftHome/ShiftEnd 变体，供选区扩展交互原语使用。
 -- =============================================================================
 global function _nebula_key_callback(
   window:   GLFWwindow,
@@ -74,16 +82,20 @@ global function _nebula_key_callback(
   if action == GLFW_RELEASE then return end
 
   local nk: NebulaKey = NebulaKey.None
+  -- ★ Phase 3.6.3: 在回调中直接读取 mods 判断 Shift，避免额外的全局状态
+  local shift_down = (mods & GLFW_MOD_SHIFT) ~= 0
+
   if     key == GLFW_KEY_BACKSPACE then nk = NebulaKey.Backspace
   elseif key == GLFW_KEY_DELETE    then nk = NebulaKey.Delete
   elseif key == GLFW_KEY_ENTER     then nk = NebulaKey.Enter
   elseif key == GLFW_KEY_KP_ENTER  then nk = NebulaKey.Enter
   elseif key == GLFW_KEY_TAB       then nk = NebulaKey.Tab
   elseif key == GLFW_KEY_ESCAPE    then nk = NebulaKey.Escape
-  elseif key == GLFW_KEY_LEFT      then nk = NebulaKey.Left
-  elseif key == GLFW_KEY_RIGHT     then nk = NebulaKey.Right
-  elseif key == GLFW_KEY_HOME      then nk = NebulaKey.Home
-  elseif key == GLFW_KEY_END       then nk = NebulaKey.End
+  -- ★ Phase 3.6.3: Shift 组合键变体——选区扩展
+  elseif key == GLFW_KEY_LEFT  then nk = shift_down and NebulaKey.ShiftLeft  or NebulaKey.Left
+  elseif key == GLFW_KEY_RIGHT then nk = shift_down and NebulaKey.ShiftRight or NebulaKey.Right
+  elseif key == GLFW_KEY_HOME  then nk = shift_down and NebulaKey.ShiftHome  or NebulaKey.Home
+  elseif key == GLFW_KEY_END   then nk = shift_down and NebulaKey.ShiftEnd   or NebulaKey.End
   end
 
   if nk ~= NebulaKey.None then
@@ -119,6 +131,7 @@ end
 --   · 将字符队列中的码位提取到 input.char_input / char_count
 --   · 将控制键队列中第一个键提取到 input.key_pressed（每帧最多一个控制键）
 --   · 不修改 focused_id：焦点由 process_input() 内部管理
+--   · ★ Phase 3.6.3: 实时采样修饰键状态（mod_shift / mod_ctrl / mod_alt）
 -- =============================================================================
 global function nebula_collect_input(
   window:  GLFWwindow,
@@ -157,4 +170,13 @@ global function nebula_collect_input(
   -- ---- 滚动 ----
   input.scroll_dy = _nebula_scroll_dy
   _nebula_scroll_dy = 0.0
+
+  -- ---- ★ Phase 3.6.3: 修饰键实时采样（非队列化，直接读取 GLFW 键状态） ----
+  -- 每帧直接采样而非通过回调队列，确保修饰键状态与当前帧的鼠标/键盘事件严格同步
+  input.mod_shift = (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT)   == GLFW_PRESS) or
+                   (glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT)  == GLFW_PRESS)
+  input.mod_ctrl  = (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS) or
+                   (glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS)
+  input.mod_alt   = (glfwGetKey(window, GLFW_KEY_LEFT_ALT)     == GLFW_PRESS) or
+                   (glfwGetKey(window, GLFW_KEY_RIGHT_ALT)    == GLFW_PRESS)
 end

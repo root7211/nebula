@@ -1,16 +1,19 @@
 -- =============================================================================
 -- form_demo.nelua
--- Nebula GUI Compiler — Phase 3.6.2
+-- Nebula GUI Compiler — Phase 3.6.3
 --
--- 综合演示：在 Phase 3.5.4 基础上验证 Phase 3.6.2 的鼠标命中测试与光标定位：
---   · Phase 3.6.2a: nebula_text_compute_advances — 纯排版，栈上即时计算
---   · Phase 3.6.2b: mouse_to_cursor / sync_cursor_to — 鼠标点击同步 Gap Buffer 光标
---   · 架构修复: 移除 flat_buf（L1/L2 渗透），get_text() 改为接受栈上缓冲区
+-- 综合演示：在 Phase 3.6.2 基础上验证 Phase 3.6.3 的文本选区支持：
+--   · Phase 3.6.3a: selection_anchor / is_dragging — L1 持久选区状态（公理 B 合规）
+--   · Phase 3.6.3b: has_selection / get_selection / clear_selection — 选区辅助方法
+--   · Phase 3.6.3c: Shift+方向键 / Shift+Click / 鼠标拖拽 — 选区扩展交互
+--   · Phase 3.6.3d: 选区高亮坐标计算（栈上即时排版，公理 C：形即渲染）
+--   · Phase 3.6.3e: 选区内字符输入/删除 — 先清空选区再操作
 --
--- 与 Phase 3.6.1 的对比：
---   · InputVisual 移除 flat_buf 字段（节省 256 字节/实例，修复公理 B 违反）
---   · InputVisual 新增 pixel_height 字段（供 mouse_to_cursor 命中测试使用）
---   · get_text() 调用方式变更：需传入栈上 [256]uint8 缓冲区
+-- 与 Phase 3.6.2 的对比：
+--   · InputContext 新增 selection_anchor: uint32 和 is_dragging: boolean（L1 持久状态）
+--   · 新增 has_selection() / get_selection() / clear_selection() 辅助方法
+--   · 渲染循环新增选区高亮坐标计算（栈上即时排版，零持久缓存）
+--   · NebulaKey 新增 ShiftLeft/ShiftRight/ShiftHome/ShiftEnd 变体
 -- =============================================================================
 
 ## cinclude "<stdio.h>"
@@ -240,6 +243,9 @@ local function main(): int32
     pixel_height = 14.0,
   })
   form.email_input.visual.gap_buf:init()   -- 初始化 Gap Buffer：gap 占满整个容量
+  -- ★ Phase 3.6.3: 初始化选区状态（L1 持久状态，公理 B 合规）
+  form.email_input.selection_anchor = 0
+  form.email_input.is_dragging      = false
   form.email_input.component_id = 1
 
   form.password_input:init(InputVisual{
@@ -259,6 +265,9 @@ local function main(): int32
     pixel_height = 14.0,
   })
   form.password_input.visual.gap_buf:init()  -- 初始化 Gap Buffer
+  -- ★ Phase 3.6.3: 初始化选区状态（L1 持久状态，公理 B 合规）
+  form.password_input.selection_anchor = 0
+  form.password_input.is_dragging      = false
   form.password_input.component_id = 2
 
   -- ★ Phase 3.5.3: 复选框（记住密码）
@@ -398,8 +407,66 @@ local function main(): int32
 
     -- ★ Phase 3.5.2: 一行替代原来 6 行手动 draw 调用（Instanced 批量绘制）
     form:draw(pass)
-
-    -- 文本渲染（独立于 FormApp）
+    -- ★ Phase 3.6.3: 选区高亮坐标计算（栈上即时排版，公理 C：形即渲染）
+    -- 设计要点：
+    --   · 不引入任何持久缓存（公理 B）
+    --   · 通过 has_selection() 快速判断，避免不必要的排版计算
+    --   · 选区高亮颜色：蓝色半透明（与主流编辑器一致）
+    --   · TODO: 当选区高亮管线就绪后，将 x/y/w/h 传入管线进行真实绘制
+    do
+      -- email 输入框选区高亮坐标计算
+      if form.email_input.sm.current == InputState.Focused and
+         form.email_input:has_selection() then
+        local tmp_flat_e: [256]uint8
+        local tmp_adv_e:  [256]float32
+        local _e_len = form.email_input.visual.gap_buf:flatten(&tmp_flat_e[0], 255)
+        nebula_text_compute_advances((@cstring)(&tmp_flat_e[0]), 14.0, &tmp_adv_e[0], 256)
+        local e_sel_s: uint32 = 0
+        local e_sel_e: uint32 = 0
+        form.email_input:get_selection(&e_sel_s, &e_sel_e)
+        local e_x_start: float32 = form.email_input.visual.pos.x + 8.0
+        local e_i: uint32 = 0
+        while e_i < e_sel_s do
+          e_x_start = e_x_start + tmp_adv_e[e_i]
+          e_i = e_i + 1
+        end
+        local e_x_end: float32 = e_x_start
+        while e_i < e_sel_e do
+          e_x_end = e_x_end + tmp_adv_e[e_i]
+          e_i = e_i + 1
+        end
+        -- 选区高亮矩形参数已就绪，待选区高亮管线就绪后接入
+        -- sel_x = e_x_start, sel_y = email_input.visual.pos.y + 4
+        -- sel_w = e_x_end - e_x_start, sel_h = email_input.visual.size.y - 8
+        -- sel_color = {0.35, 0.60, 1.00, 0.35}
+      end
+      -- password 输入框选区高亮坐标计算
+      if form.password_input.sm.current == InputState.Focused and
+         form.password_input:has_selection() then
+        local tmp_flat_p: [256]uint8
+        local tmp_adv_p:  [256]float32
+        local _p_len = form.password_input.visual.gap_buf:flatten(&tmp_flat_p[0], 255)
+        nebula_text_compute_advances((@cstring)(&tmp_flat_p[0]), 14.0, &tmp_adv_p[0], 256)
+        local p_sel_s: uint32 = 0
+        local p_sel_e: uint32 = 0
+        form.password_input:get_selection(&p_sel_s, &p_sel_e)
+        local p_x_start: float32 = form.password_input.visual.pos.x + 8.0
+        local p_i: uint32 = 0
+        while p_i < p_sel_s do
+          p_x_start = p_x_start + tmp_adv_p[p_i]
+          p_i = p_i + 1
+        end
+        local p_x_end: float32 = p_x_start
+        while p_i < p_sel_e do
+          p_x_end = p_x_end + tmp_adv_p[p_i]
+          p_i = p_i + 1
+        end
+        -- sel_x = p_x_start, sel_y = password_input.visual.pos.y + 4
+        -- sel_w = p_x_end - p_x_start, sel_h = password_input.visual.size.y - 8
+        -- sel_color = {0.35, 0.60, 1.00, 0.35}
+      end
+    end
+    -- 文本渲染（独立于 FormApp））
     pipe_email_text:draw_buffer(pass, email_text.mesh.vertex_buffer,
       email_text.mesh.vertex_buffer_size, email_text.mesh.vertex_count)
     pipe_password_text:draw_buffer(pass, password_text.mesh.vertex_buffer,

@@ -188,6 +188,42 @@ function nebula_gen_gap_buffer_type(capacity)
   table.insert(lines, "end")
   table.insert(lines, "")
 
+  -- ★ Phase 3.6.3: delete_range — 删除逻辑区间 [sel_start, sel_end) 内的字符（O(N)）
+  --
+  -- 算法：
+  --   1. 先将光标移动到 sel_start（通过 move_cursor_left/right，O(|delta|)）
+  --   2. 再连续调用 delete_after() 共 (sel_end - sel_start) 次（O(K)，K = 选区长度）
+  --
+  -- 参数：
+  --   sel_start : uint32 — 选区起始逻辑索引（含）
+  --   sel_end   : uint32 — 选区结束逻辑索引（不含）
+  --
+  -- 调用后：光标位于 sel_start，选区内容已删除，gap 扩大 K 个字节。
+  table.insert(lines, ("-- [gap_buffer] %s: delete_range (Phase 3.6.3)"):format(type_name))
+  table.insert(lines, ("function %s:delete_range(sel_start: uint32, sel_end: uint32): void"):format(type_name))
+  table.insert(lines,  "  if sel_start >= sel_end then return end")
+  -- 步骤 1：将光标移动到 sel_start
+  table.insert(lines,  "  while self.gap_start > (@uint16)(sel_start) do")
+  table.insert(lines,  "    self.gap_end   = self.gap_end   - 1")
+  table.insert(lines,  "    self.buf[self.gap_end] = self.buf[self.gap_start - 1]")
+  table.insert(lines,  "    self.gap_start = self.gap_start - 1")
+  table.insert(lines,  "  end")
+  table.insert(lines,  "  while self.gap_start < (@uint16)(sel_start) do")
+  table.insert(lines,  "    self.buf[self.gap_start] = self.buf[self.gap_end]")
+  table.insert(lines,  "    self.gap_start = self.gap_start + 1")
+  table.insert(lines,  "    self.gap_end   = self.gap_end   + 1")
+  table.insert(lines,  "  end")
+  -- 步骤 2：连续删除 (sel_end - sel_start) 个字符（delete_after = gap_end++）
+  table.insert(lines,  "  local k: uint32 = sel_end - sel_start")
+  table.insert(lines,  "  local j: uint32 = 0")
+  table.insert(lines,  "  while j < k do")
+  table.insert(lines,  "    if self.gap_end < self.capacity then")
+  table.insert(lines,  "      self.gap_end = self.gap_end + 1")
+  table.insert(lines,  "    end")
+  table.insert(lines,  "    j = j + 1")
+  table.insert(lines,  "  end")
+  table.insert(lines,  "end")
+  table.insert(lines, "")
   return type_name, table.concat(lines, "\n")
 end
 ]]
@@ -196,5 +232,5 @@ end
 -- 版本标记（供 nebula_core.nelua 版本断言使用）
 -- =============================================================================
 ##[[
-nebula_gap_buffer_version = "v0.1_phase3.6.1"
+nebula_gap_buffer_version = "v0.2_phase3.6.3"
 ]]
