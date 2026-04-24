@@ -275,3 +275,97 @@ global function nebula_ascii_text_build_vertices(
   $out_height = max_y - min_y
   return vertex_count
 end
+
+-- =============================================================================
+-- ★ Phase 3.6.2: nebula_text_compute_advances
+--
+-- 纯排版函数：计算文本中每个字符的累计 X 偏移（advance 数组）。
+--
+-- 设计哲学（公理 B）：
+--   · 此函数不写入任何持久状态（L1），不依赖 Arena 分配。
+--   · 调用方在栈上分配 [N+1]float32 临时数组，调用完毕即丢弃。
+--   · out_advances[i] = 字符 i 的左边缘相对于文本起始点的 X 像素偏移
+--   · out_advances[len] = 文本总宽度（末尾哨兵，用于最后一个字符的右边缘判定）
+--
+-- 参数：
+--   text         : cstring   — 要排版的 C 字符串（UTF-8 ASCII 子集）
+--   pixel_height : float32   — 目标像素高度（与渲染时一致）
+--   out_advances : *float32  — 输出数组，调用方提供，长度 >= strlen(text)+1
+--   max_chars    : uint32    — out_advances 的最大元素数（含末尾哨兵）
+--
+-- 返回：实际写入 out_advances 的有效字符数（不含末尾哨兵）
+-- =============================================================================
+global function nebula_text_compute_advances(
+  text:         cstring,
+  pixel_height: float32,
+  out_advances: *[0]float32,
+  max_chars:    uint32
+): uint32
+  if text == nilptr or max_chars == 0 then
+    return 0
+  end
+  local scale = pixel_height / NEBULA_ASCII_PIXEL_HEIGHT
+  local pen_x: float32 = 0.0
+  local i: csize = 0
+  local text_len = strlen(text)
+  local text_bytes = (@*[0]uint8)(text)
+  local count: uint32 = 0
+
+  while i < text_len and count + 1 < max_chars do
+    out_advances[count] = pen_x
+    local cp = (@cint)(text_bytes[i])
+    -- 忽略换行符（单行输入框不处理多行）
+    if cp ~= 10 and cp ~= 13 then
+      local glyph: NebulaGeneratedAsciiGlyph
+      if nebula_ascii_glyph_for_codepoint(cp, &glyph) then
+        pen_x = pen_x + glyph.advance * scale
+      end
+    end
+    count = count + 1
+    i = i + 1
+  end
+  -- 末尾哨兵：文本总宽度（最后一个字符的右边缘）
+  if count < max_chars then
+    out_advances[count] = pen_x
+  end
+  return count
+end
+
+-- =============================================================================
+-- ★ Phase 3.6.2: nebula_text_hit_test
+--
+-- 命中测试：将鼠标相对于文本起始点的 X 坐标映射到字符间隙索引（光标位置）。
+--
+-- 使用"过半判定"（Half-char Heuristic）：
+--   · 如果 local_x 落在字符 i 的左半区，光标置于 i 之前（索引 i）
+--   · 如果 local_x 落在字符 i 的右半区，光标置于 i 之后（索引 i+1）
+--
+-- 参数：
+--   local_x    : float32  — 鼠标 X 坐标相对于文本起始点的偏移（像素）
+--   advances   : *float32 — nebula_text_compute_advances 的输出数组（含末尾哨兵）
+--   char_count : uint32   — 文本字符数（不含哨兵）
+--
+-- 返回：光标应插入的位置（0 = 最左，char_count = 最右）
+-- =============================================================================
+global function nebula_text_hit_test(
+  local_x:    float32,
+  advances:   *[0]float32,
+  char_count: uint32
+): uint32
+  if char_count == 0 then return 0 end
+  -- 鼠标在文本左侧
+  if local_x <= 0.0 then return 0 end
+  -- 线性扫描（N <= 255，O(N) 完全可接受）
+  local i: uint32 = 0
+  while i < char_count do
+    local left  = advances[i]
+    local right = advances[i + 1]
+    local mid   = (left + right) * 0.5
+    if local_x < mid then
+      return i
+    end
+    i = i + 1
+  end
+  -- 鼠标在文本右侧
+  return char_count
+end

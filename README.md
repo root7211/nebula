@@ -1,16 +1,16 @@
-# Nebula GUI Compiler — Phase 3.6.1 已合入
+# Nebula GUI Compiler — Phase 3.6.2 已合入
 
-> 当前仓库的**主线能力**已完成到 **Phase 2.5**。与此同时，**Phase 3.1（静态布局）、Phase 3.2.x（文本渲染子系统）、Phase 3.3.x（运行时动态列表与实例渲染）、Phase 3.4.1–3.4.4（键盘输入与基础单行 Input 组件）、Phase 3.5.1–3.5.4（高层组件编排与渲染管线统一）与 Phase 3.6.1（编译期定容 Gap Buffer）已全部合入仓库**。Nebula 现已实现零堆分配、O(1) 插入/删除的编译期定容 Gap Buffer，并支持通过 `nebula_derive_app` 宏在编译期自动生成应用的 `init/update/draw` 代码序列，实现零样板代码的声明式 GUI 组装。
+> 当前仓库的**主线能力**已完成到 **Phase 2.5**。与此同时，**Phase 3.1（静态布局）、Phase 3.2.x（文本渲染子系统）、Phase 3.3.x（运行时动态列表与实例渲染）、Phase 3.4.1–3.4.4（键盘输入与基础单行 Input 组件）、Phase 3.5.1–3.5.4（高层组件编排与渲染管线统一）、Phase 3.6.1（编译期定容 Gap Buffer）与 **Phase 3.6.2（鼠标命中测试与光标定位）已全部合入仓库**。Nebula 现已实现零堆分配、O(1) 插入/删除的编译期定容 Gap Buffer，并支持通过鼠标点击定位光标、栈上即时排版、零持久缓存的完整文本编辑交互。
 
 ---
 
 ## 各阶段演进
 
-| 项目 | Phase 0–2.5 | Phase 3.1 | Phase 3.2.x | Phase 3.3.x | Phase 3.4.x | Phase 3.5.x |
-|---|---|---|---|---|---|---|
-| 核心推导 | 形状 → 状态机/管线 | 静态 Flexbox 布局 | SDF 文本子系统 | 运行时动态列表与实例渲染 | 键盘输入与单行 Input 组件 | **编译期显式编排与全面 Instancing 化** | **编译期定容 Gap Buffer** |
-| 渲染技术 | SDF 形状 + 多 Pass 阴影 | 布局对齐 | SDF 文本渲染 | Storage Buffer + Instanced 渲染 | 键盘事件流转 + 极简光标渲染 | **Standard Instanced Pipeline + 类型分组批量绘制** | **静态数组 Gap Buffer，零堆分配，O(1) 编辑** |
-| 质量保障 | 手动验证 | 同左 | 31 项 Lua 断言 + 11 项编译回归 | 111 项断言 | 12/12 测试套件，全量回归集成 | 16/16 测试套件，150+ 项断言 | **17/17 套件，200+ 项断言** |
+| 项目 | Phase 0–2.5 | Phase 3.1 | Phase 3.2.x | Phase 3.3.x | Phase 3.4.x | Phase 3.5.x | Phase 3.6.x |
+|---|---|---|---|---|---|---|---|
+| 核心推导 | 形状 → 状态机/管线 | 静态 Flexbox 布局 | SDF 文本子系统 | 运行时动态列表与实例渲染 | 键盘输入与单行 Input 组件 | 编译期显式编排与全面 Instancing 化 | **完整文本编辑交互：Gap Buffer + 鼠标命中测试** |
+| 渲染技术 | SDF 形状 + 多 Pass 阴影 | 布局对齐 | SDF 文本渲染 | Storage Buffer + Instanced 渲染 | 键盘事件流转 + 极简光标渲染 | Standard Instanced Pipeline + 类型分组批量绘制 | **栈上即时排版 + 过半判定命中测试，零持久缓存** |
+| 质量保障 | 手动验证 | 同左 | 31 项 Lua 断言 + 11 项编译回归 | 111 项断言 | 12/12 测试套件，全量回归集成 | 16/16 测试套件，150+ 项断言 | **18/18 套件，230+ 项断言** |
 
 ---
 
@@ -27,7 +27,7 @@ nebula/
 │   │   ├── layout_engine.lua       # Phase 3.1: 编译期静态 Flexbox 布局引擎
 │   │   ├── shader_compose.lua      # Phase 3.2.3 + 3.3.3 + 3.5.1: 着色器组合器（含 Standard Instanced）
 │   │   ├── pipeline_factory.lua    # Phase 3.2.4 + 3.3.4 + 3.5.1: 管线工厂（含 Standard Instanced 路径）
-│   │   ├── interaction_factory.lua # Phase 2.4 + 3.5.3: 交互原语工厂（含 Toggleable 正交原语）
+│   │   ├── interaction_factory.lua # Phase 2.4 + 3.5.3 + 3.6.2: 交互原语工厂（含鼠标命中测试）
 │   │   ├── app_factory.lua         # ★ Phase 3.5.2: 编译期应用编排工厂
 │   │   └── ... (其他派生模块)
 │   └── ...
@@ -39,7 +39,7 @@ nebula/
 │   ├── smoke_phase3_2_3.lua        # Phase 3.2.3: 文本着色器组合器冒烟测试
 │   ├── smoke_phase3_2_4.lua        # Phase 3.2.4: TextVisual 派生引擎冒烟测试
 │   ├── verify_p2_4.lua             # Phase 2.4: 交互原语工厂验证
-│   └── run_all_tests.sh            # ★ Phase 3.6.1: 全量回归测试运行器（16 项测试套件）
+│   └── run_all_tests.sh            # ★ Phase 3.6.2: 全量回归测试运行器（18 项测试套件）
 ├── tests/
 │   ├── smoke_arena.lua             # ★ Phase 3.3.1: Frame Arena 冒烟测试（27 项断言）
 │   ├── smoke_phase3_3_2.lua        # ★ Phase 3.3.2: Storage Buffer 冒烟测试（20 项断言）
@@ -52,20 +52,26 @@ nebula/
 │   ├── smoke_phase3_5_1.lua        # ★ Phase 3.5.1: Standard Instanced 管线冒烟测试（44 项断言）
 │   ├── smoke_phase3_5_2.lua        # ★ Phase 3.5.2: App factory 编排冒烟测试（48 项断言）
 │   ├── smoke_phase3_5_3.lua        # ★ Phase 3.5.3: Toggleable 原语冒烟测试（20 项断言）
-│   └── smoke_phase3_5_4.lua        # ★ Phase 3.6.1: form_demo 综合集成冒烟测试（38 项断言）
+│   ├── smoke_phase3_5_4.lua        # ★ Phase 3.5.4: form_demo 综合集成冒烟测试（38 项断言）
+│   ├── smoke_phase3_6_1.lua        # ★ Phase 3.6.1: 编译期定容 Gap Buffer 冒烟测试
+│   └── smoke_phase3_6_2.lua        # ★ Phase 3.6.2: 鼠标命中测试与光标同步冒烟测试（30 项断言）
 ├── examples/
 │   ├── layout_demo.nelua           # Phase 3.1: 布局演示
 │   ├── text_demo.nelua             # Phase 3.2.5: 文本渲染完整展示（7 个文本组件）
 │   ├── dynamic_list_demo.nelua     # ★ Phase 3.3.5: 动态列表演示（10,000 项，1 Draw Call）
 │   ├── login_demo.nelua            # ★ Phase 3.4.4: 登录框与键盘输入演示
-│   └── form_demo.nelua             # ★ Phase 3.6.1: 表单演示（nebula_derive_app + 复选框）
+│   └── form_demo.nelua             # ★ Phase 3.6.2: 表单演示（鼠标命中测试 + 光标定位）
 ├── docs/
 │   ├── PLAN_PHASE3.md              # Phase 3 完整规划
 │   ├── PLAN_PHASE3_5.md            # ★ Phase 3.5 详细规划（已更新为哲学驱动版本）
 │   ├── PHASE3_3_OVERVIEW.md        # Phase 3.3 技术规划概述
 │   ├── PHILOSOPHY_ANALYSIS_PHASE3_3.md # Phase 3.3 与核心哲学的兼容性分析
 │   ├── PHASE3_3_SUITABILITY_ASSESSMENT.md # Phase 3.3 适配性评估
-│   └── WASM_TARGET_ANALYSIS.md     # Nebula 编译到 WebAssembly 的可行性分析
+│   ├── WASM_TARGET_ANALYSIS.md     # Nebula 编译到 WebAssembly 的可行性分析
+│   ├── PLAN_PHASE3_6.md            # Phase 3.6 整体规划
+│   ├── PLAN_PHASE3_6_2.md          # Phase 3.6.2 初始方案（已废弃，保留作对照）
+│   ├── PLAN_PHASE3_6_2_REVISED.md  # Phase 3.6.2 最优方案（栈上即时排版）
+│   └── ARCHITECTURE_GRAND_PLAN.md  # ★ Nebula 架构总纲领（Phase 3.6.2 → 5.0 路线图）
 ├── build.sh                        # 一键构建脚本
 └── README.md
 ```
@@ -337,3 +343,52 @@ bash tools/run_all_tests.sh     # 运行全部 16 项测试套件（150+ 项断�
 - [x] **Phase 3.5.4** — `form_demo` 综合演示与全量回归测试集成（16/16 套件通过）。
 - [x] **Phase 3.6.1** — 编译期定容 Gap Buffer：`gap_buffer.nelua` 泛型模块，全面迁移 `InputContext` 底层存储，去除 memmove 式移位，实现 O(1) 插入/删除与方向键光标移动。
 - [ ] **Phase 3.6.2** — （待规划）鼠标命中测试与光标定位。
+
+---
+
+## ★ Phase 3.6.2 核心：鼠标命中测试与光标定位
+
+Phase 3.6.2 完成了文本编辑交互的最后一块拼图：**鼠标点击定位光标**。同时修复了 Phase 3.6.1 遗留的一处架构污染（`flat_buf` 的 L1/L2 渗透）。
+
+### 新增函数与方法
+
+| 函数/方法 | 所在文件 | 说明 |
+|---|---|---|
+| `nebula_text_compute_advances(text, px_h, out, max)` | `text_runtime.nelua` | 纯排版函数，输出每字符累计 X 偏移数组（含末尾哨兵） |
+| `nebula_text_hit_test(local_x, advances, count)` | `text_runtime.nelua` | 过半判定命中测试，返回目标光标索引 |
+| `<T>Context:mouse_to_cursor(mouse_x, pixel_height)` | 生成代码 | 栈上即时排版 + 命中测试，返回 Gap Buffer 目标光标位置 |
+| `<T>Context:sync_cursor_to(target_pos)` | 生成代码 | 将 Gap Buffer 光标移动到目标位置，O(\|delta\|) |
+| `<T>Context:get_text(out, max)` | 生成代码 | **接口变更**：接受调用方栈上缓冲区，修复 L1/L2 渗透 |
+
+### 架构修复：移除 `flat_buf`（公理 B 合规）
+
+Phase 3.6.1 的 `get_text()` 将展平结果写入 `visual.flat_buf`（持久 L1 字段），违反了"状态层与渲染层严格隔离"的公理 B。
+
+Phase 3.6.2 将其修复为：
+
+```nelua
+-- 调用方在栈上分配临时缓冲区，帧结束自动回收
+local flat: [256]uint8
+local text = ctx:get_text(&flat[0], 255)
+email_text:set_text(&renderer, text)
+```
+
+`InputVisual` 同步移除 `flat_buf: [256]uint8` 字段，每个输入框实例节省 **256 字节**持久内存。
+
+### 命中测试算法：过半判定（Half-char Heuristic）
+
+```
+advances = [0.0, 9.3, 18.6, 27.9, ...]  ← 含末尾哨兵，由 nebula_text_compute_advances 填充
+
+对于每个字符 i：
+  mid = (advances[i] + advances[i+1]) / 2
+  if local_x < mid → 光标落在字符 i 左侧（cursor = i）
+  else             → 继续检查下一字符
+```
+
+此算法与 macOS、Windows 主流文本编辑器的交互习惯完全一致，且对 ≤256 字符的输入框，O(N) 线性扫描的实际性能优于二分查找（缓存友好，分支预测友好）。
+
+### 测试覆盖
+
+- `tests/smoke_phase3_6_2.lua`：**30 项断言**，覆盖代码生成结构、算法正确性、架构合规性
+- 全量回归套件升级至 **18 项测试套件，230+ 项断言**
