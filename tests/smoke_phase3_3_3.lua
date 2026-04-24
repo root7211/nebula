@@ -1,24 +1,22 @@
 -- =============================================================================
 -- tests/smoke_phase3_3_3.lua
--- Nebula GUI Compiler — Phase 3.3.3
+-- Nebula GUI Compiler — Phase 3.3.3（Phase 3.7 更新）
 --
--- Instanced 着色器组合器冒烟测试
---
--- 验证 shader_compose.lua 中新增的 nebula_compose_instanced_shader：
---   · 函数存在且可调用
---   · 生成的 WGSL 包含正确的 Storage Buffer 绑定声明
---   · 包含 @builtin(instance_index) 使用
---   · 包含 InstanceData struct 定义
---   · 包含 Viewport uniform 绑定
---   · SDF 逻辑按 has_radius 选项正确切换
---   · has_border 选项正确控制边框逻辑
---   · 返回对象包含 instanced=true 标志
---   · 模块版本号已更新至 phase3.3.3
---   · 现有 nebula_compose_shader 和 nebula_compose_text_shader 未被破坏
+-- Phase 3.7 变更说明：
+--   · nebula_compose_instanced_shader 已在 Phase 3.7 中删除（死代码清理）
+--   · nebula_compose_shader 已在 Phase 3.7 中删除（主着色器是红色占位符，违反公理 C）
+--   · 本测试已更新为验证 Phase 3.7 的新 API：
+--     - nebula_compose_shader_instanced（标准 Visual 默认路径）
+--     - nebula_compose_shadow_shaders（阴影路径）
+--     - nebula_compose_text_shader（文本 SDF 路径）
 -- =============================================================================
 
--- 加载 shader_compose.lua（通过 Nelua 编译期 Lua 环境）
-local compose = dofile("src/derive/shader_compose.lua")
+local script_dir = debug.getinfo(1, "S").source:match("^@(.+)/[^/]+$") or "."
+package.path = script_dir .. "/../src/?.lua;" ..
+               script_dir .. "/../src/derive/?.lua;" ..
+               package.path
+
+local compose_ver = require "derive.shader_compose"
 
 local pass = 0
 local fail = 0
@@ -33,171 +31,83 @@ local function check(name, cond, msg)
   end
 end
 
--- ===== 模块版本检查 =====
-check("module_version_updated",
-  compose == "nebula_shader_compose_v0.5_phase3.5.1",
-  "模块版本号未更新至 phase3.3.3，当前: " .. tostring(compose))
+-- ===== 模块版本检查（Phase 3.7）=====
+check("module_version_phase3_7",
+  compose_ver == "nebula_shader_compose_v0.6_phase3.7",
+  "模块版本号未更新至 phase3.7，当前: " .. tostring(compose_ver))
 
--- ===== 函数存在性检查 =====
-check("func_nebula_compose_instanced_shader_exists",
-  type(nebula_compose_instanced_shader) == "function",
-  "nebula_compose_instanced_shader 函数不存在")
+-- ===== Phase 3.7: 已删除函数不应存在 =====
+check("nebula_compose_instanced_shader_deleted",
+  nebula_compose_instanced_shader == nil,
+  "nebula_compose_instanced_shader 应已在 Phase 3.7 中删除")
 
-check("func_nebula_compose_shader_intact",
-  type(nebula_compose_shader) == "function",
-  "现有 nebula_compose_shader 函数被破坏")
+check("nebula_compose_shader_deleted",
+  nebula_compose_shader == nil,
+  "nebula_compose_shader 应已在 Phase 3.7 中删除（主着色器是红色占位符）")
 
-check("func_nebula_compose_text_shader_intact",
+-- ===== Phase 3.7: 三个公开函数均存在 =====
+check("nebula_compose_shader_instanced_exists",
+  type(nebula_compose_shader_instanced) == "function",
+  "nebula_compose_shader_instanced 函数不存在")
+
+check("nebula_compose_text_shader_intact",
   type(nebula_compose_text_shader) == "function",
-  "现有 nebula_compose_text_shader 函数被破坏")
+  "nebula_compose_text_shader 函数不存在")
 
--- ===== 基础调用（无选项）=====
-local result_basic = nebula_compose_instanced_shader({})
-check("basic_call_returns_table",
-  type(result_basic) == "table",
-  "nebula_compose_instanced_shader({}) 未返回 table")
+check("nebula_compose_shadow_shaders_exists",
+  type(nebula_compose_shadow_shaders) == "function",
+  "nebula_compose_shadow_shaders 函数不存在")
 
-check("basic_result_has_source",
-  type(result_basic.source) == "string" and #result_basic.source > 0,
-  "返回对象缺少 source 字段")
+-- ===== nebula_compose_shader_instanced 基础功能（替代原 nebula_compose_instanced_shader）=====
+local mock_struct = [[
+struct TestUniforms {
+  pos:      vec2<f32>,
+  size:     vec2<f32>,
+  bg_color: vec4<f32>,
+  radius:   f32,
+  _pad0:    f32,
+  viewport: vec2<f32>,
+}]]
 
-check("basic_result_has_features",
-  type(result_basic.features) == "table",
-  "返回对象缺少 features 字段")
+local result = nebula_compose_shader_instanced({
+  wgsl_struct = mock_struct,
+  struct_name = "TestUniforms",
+  has_radius  = true,
+  has_border  = true,
+})
 
-check("basic_result_instanced_flag",
-  result_basic.instanced == true,
-  "返回对象缺少 instanced=true 标志")
+check("shader_instanced_returns_table",
+  type(result) == "table",
+  "nebula_compose_shader_instanced 应返回 table")
 
-check("basic_result_required_passes",
-  type(result_basic.required_passes) == "table" and result_basic.required_passes[1] == "main",
-  "required_passes 应为 {\"main\"}")
+check("shader_instanced_has_source",
+  type(result.source) == "string" and #result.source > 100,
+  "source 字段不存在或为空")
 
--- ===== WGSL 结构断言（基础模式）=====
-local src = result_basic.source
+check("shader_instanced_has_storage_binding",
+  result.source:find("var<storage, read>", 1, true) ~= nil,
+  "WGSL 应包含 Storage Buffer 绑定")
 
-check("wgsl_has_instance_data_struct",
-  src:find("struct InstanceData") ~= nil,
-  "生成的 WGSL 缺少 InstanceData struct 定义")
+check("shader_instanced_has_instance_index",
+  result.source:find("@builtin(instance_index)", 1, true) ~= nil,
+  "WGSL 应包含 @builtin(instance_index)")
 
-check("wgsl_has_pos_field",
-  src:find("pos:%s*vec2<f32>") ~= nil,
-  "InstanceData 缺少 pos 字段")
+check("shader_instanced_has_sdf_rounded_rect",
+  result.source:find("sdf_rounded_rect", 1, true) ~= nil,
+  "WGSL 应包含 sdf_rounded_rect（has_radius=true）")
 
-check("wgsl_has_size_field",
-  src:find("size:%s*vec2<f32>") ~= nil,
-  "InstanceData 缺少 size 字段")
+check("shader_instanced_has_border_logic",
+  result.source:find("border_width", 1, true) ~= nil,
+  "WGSL 应包含 border_width（has_border=true）")
 
-check("wgsl_has_bg_color_field",
-  src:find("bg_color:%s*vec4<f32>") ~= nil,
-  "InstanceData 缺少 bg_color 字段")
+check("shader_instanced_no_red_placeholder",
+  result.source:find("vec4<f32>(1.0, 0.0, 0.0, 1.0)", 1, true) == nil,
+  "WGSL 不应包含红色占位符（违反公理 C）")
 
-check("wgsl_has_border_color_field",
-  src:find("border_color:%s*vec4<f32>") ~= nil,
-  "InstanceData 缺少 border_color 字段")
-
-check("wgsl_has_radius_field",
-  src:find("radius:%s*f32") ~= nil,
-  "InstanceData 缺少 radius 字段")
-
-check("wgsl_has_viewport_uniform",
-  src:find("var<uniform>") ~= nil and src:find("Viewport") ~= nil,
-  "生成的 WGSL 缺少 Viewport uniform 绑定")
-
-check("wgsl_has_storage_binding",
-  src:find("var<storage, read>") ~= nil,
-  "生成的 WGSL 缺少 var<storage, read> 绑定")
-
-check("wgsl_has_instance_array",
-  src:find("array<InstanceData>") ~= nil,
-  "生成的 WGSL 缺少 array<InstanceData> 声明")
-
-check("wgsl_binding0_is_uniform",
-  src:find("@binding%(0%)") ~= nil,
-  "生成的 WGSL 缺少 @binding(0)")
-
-check("wgsl_binding1_is_storage",
-  src:find("@binding%(1%)") ~= nil,
-  "生成的 WGSL 缺少 @binding(1)")
-
-check("wgsl_has_instance_index_builtin",
-  src:find("@builtin%(instance_index%)") ~= nil,
-  "生成的 WGSL 缺少 @builtin(instance_index)")
-
-check("wgsl_has_vertex_index_builtin",
-  src:find("@builtin%(vertex_index%)") ~= nil,
-  "生成的 WGSL 缺少 @builtin(vertex_index)")
-
-check("wgsl_has_vs_main",
-  src:find("fn vs_main") ~= nil,
-  "生成的 WGSL 缺少 vs_main 函数")
-
-check("wgsl_has_fs_main",
-  src:find("fn fs_main") ~= nil,
-  "生成的 WGSL 缺少 fs_main 函数")
-
-check("wgsl_has_discard",
-  src:find("discard;") ~= nil,
-  "生成的 WGSL 缺少透明像素 discard 逻辑")
-
-check("wgsl_no_radius_by_default",
-  src:find("sdf_rounded_rect") == nil,
-  "未启用 has_radius 时不应包含 sdf_rounded_rect")
-
-check("wgsl_uses_sdf_rect_by_default",
-  src:find("sdf_rect") ~= nil,
-  "默认模式应使用 sdf_rect")
-
--- ===== has_radius=true 模式 =====
-local result_radius = nebula_compose_instanced_shader({ has_radius = true })
-local src_r = result_radius.source
-
-check("radius_mode_uses_sdf_rounded_rect",
-  src_r:find("sdf_rounded_rect") ~= nil,
-  "has_radius=true 时应使用 sdf_rounded_rect")
-
-check("radius_mode_feature_flag",
-  (function()
-    for _, f in ipairs(result_radius.features) do
-      if f == "radius" then return true end
-    end
-    return false
-  end)(),
-  "has_radius=true 时 features 应包含 \"radius\"")
-
--- ===== has_border=true 模式 =====
-local result_border = nebula_compose_instanced_shader({ has_border = true })
-local src_b = result_border.source
-
-check("border_mode_has_border_alpha",
-  src_b:find("border_alpha") ~= nil,
-  "has_border=true 时应包含 border_alpha 计算")
-
-check("border_mode_uses_border_color",
-  src_b:find("border_color") ~= nil,
-  "has_border=true 时应使用 border_color")
-
-check("border_mode_feature_flag",
-  (function()
-    for _, f in ipairs(result_border.features) do
-      if f == "border" then return true end
-    end
-    return false
-  end)(),
-  "has_border=true 时 features 应包含 \"border\"")
-
--- ===== 无边框模式不含 border_alpha =====
-check("no_border_mode_no_border_alpha",
-  result_basic.source:find("border_alpha") == nil,
-  "未启用 has_border 时不应包含 border_alpha")
-
--- ===== 6 顶点矩形（非全屏三角形）=====
-check("wgsl_uses_6_vertices_per_instance",
-  src:find("array<vec2<f32>, 6>") ~= nil,
-  "实例渲染应使用 6 顶点（两个三角形）覆盖矩形区域")
+check("shader_instanced_flag_true",
+  result.instanced == true,
+  "instanced 标志应为 true")
 
 -- ===== 汇总 =====
-print(("\n--- smoke_phase3_3_3 结果: %d 通过, %d 失败 ---"):format(pass, fail))
-if fail > 0 then
-  os.exit(1)
-end
+print(("\n=== smoke_phase3_3_3（Phase 3.7 更新）：%d 通过，%d 失败 ==="):format(pass, fail))
+if fail > 0 then os.exit(1) end

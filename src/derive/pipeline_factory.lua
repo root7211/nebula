@@ -1,33 +1,30 @@
 -- =============================================================================
 -- derive/pipeline_factory.lua
--- Nebula GUI Compiler — Phase 2.5
+-- Nebula GUI Compiler — Phase 3.7
 --
 -- 管线代码生成器（Pipeline Factory）
 --
--- 根据给定的 Visual 规格，在编译期生成以下 Nelua 源码字符串：
---   · global <T>Pipeline = @record{ ... }
---   · function <T>Pipeline:init(renderer)
---   · function <T>Pipeline:update_uniforms(renderer, uniforms)
---   · function <T>Pipeline:draw(pass)
+-- Phase 3.7: 收敛为三条显式路径（删除死代码）：
+--   · gen_pipeline_standard_instanced  — 所有标准 Visual 的默认路径
+--   · gen_pipeline_textured_vertex     — 文本 SDF 路径
+--   · gen_pipeline_shadow              — 阴影多 Pass 路径
 --
--- Phase 2.5 扩展：
---   当 has_shadow=true 时，<T>Pipeline 额外包含：
---     · shadow_mask_pipeline / blur_h_pipeline / blur_v_pipeline（子管线）
---     · 两张离屏纹理（shadow_tex_a/b）及其视图
---     · 采样器和模糊 BindGroup
---     · init() 中初始化全部子管线和离屏资源
---     · draw_shadow(encoder, main_view) 编排多 Pass 渲染
+-- 已删除（Phase 3.7 死代码清理）：
+--   · gen_pipeline_simple              — Phase 2.3 占位符路径
+--   · gen_pipeline_instanced           — Phase 3.3 遗留路径
 --
 -- 公开 API：
 --   nebula_gen_pipeline_source(spec)       -> string  (Nelua 源码)
 --   nebula_gen_to_uniforms_typed(spec)     -> string  (仅 to_uniforms 方法)
 --
--- spec 新增字段（Phase 2.5）：
---   has_shadow           : boolean
---   shadow_mask_source   : string  — 阴影遮罩 WGSL
---   blur_h_source        : string  — 水平模糊 WGSL
---   blur_v_source        : string  — 垂直模糊 WGSL
---   composite_source     : string  — 最终阴影合成 WGSL
+-- spec 字段：
+--   has_shadow           : boolean  — 选择 shadow_multipass 路径
+--   standard_instanced   : boolean  — 选择 standard_instanced 路径（默认）
+--   textured             : boolean  — 选择 textured_vertex 路径
+--   shadow_mask_source   : string   — 阴影遮罩 WGSL
+--   blur_h_source        : string   — 水平模糊 WGSL
+--   blur_v_source        : string   — 垂直模糊 WGSL
+--   composite_source     : string   — 最终阴影合成 WGSL
 -- =============================================================================
 
 -- ===== 小工具：转义 WGSL 源码到 Nelua 字符串字面量 =====
@@ -41,60 +38,6 @@ local function escape_to_long_bracket(src)
   return open .. src .. close
 end
 
--- =============================================================================
--- 生成无阴影的简单 <T>Pipeline（与 Phase 2.3 一致）
--- =============================================================================
-local function gen_pipeline_simple(base, uniforms_record, wgsl_source)
-  local pipe = base .. "Pipeline"
-  local lines = {}
-
-  table.insert(lines, ("-- === Derived pipeline: %s (uniforms=%s, shadow=false) ==="):format(pipe, uniforms_record))
-
-  -- record 定义
-  table.insert(lines, ("global %s = @record{"):format(pipe))
-  table.insert(lines,  "  pipeline:    WGPURenderPipeline,")
-  table.insert(lines,  "  bind_layout: WGPUBindGroupLayout,")
-  table.insert(lines,  "  uniform_buf: WGPUBuffer,")
-  table.insert(lines,  "  bind_group:  WGPUBindGroup,")
-  table.insert(lines,  "}")
-
-  -- WGSL 源码常量
-  local wgsl_const = "NEBULA_WGSL_" .. base:upper()
-  table.insert(lines, ("local %s <comptime> = %s"):format(
-    wgsl_const, escape_to_long_bracket(wgsl_source)))
-
-  -- init
-  table.insert(lines, ("function %s:init(renderer: *NebulaRenderer): boolean"):format(pipe))
-  table.insert(lines,  "  local ok = nebula_pipeline_base_init(")
-  table.insert(lines,  "    &self.pipeline,")
-  table.insert(lines,  "    &self.bind_layout,")
-  table.insert(lines,  "    &self.uniform_buf,")
-  table.insert(lines,  "    &self.bind_group,")
-  table.insert(lines,  "    renderer,")
-  table.insert(lines, ("    %s,"):format(wgsl_const))
-  table.insert(lines, ("    (@csize)(#%s),"):format(uniforms_record))
-  table.insert(lines, ("    \"%s\""):format("nebula-" .. base:lower()))
-  table.insert(lines,  "  )")
-  table.insert(lines, ("  if ok then printf(\"wgpu: %s pipeline created\\n\") end"):format(base:lower()))
-  table.insert(lines,  "  return ok")
-  table.insert(lines,  "end")
-
-  -- update_uniforms
-  table.insert(lines, ("function %s:update_uniforms(renderer: *NebulaRenderer, uniforms: *%s): void"):format(
-    pipe, uniforms_record))
-  table.insert(lines, ("  wgpuQueueWriteBuffer(renderer.queue, self.uniform_buf, 0, uniforms, #%s)"):format(
-    uniforms_record))
-  table.insert(lines,  "end")
-
-  -- draw
-  table.insert(lines, ("function %s:draw(pass: WGPURenderPassEncoder): void"):format(pipe))
-  table.insert(lines,  "  wgpuRenderPassEncoderSetPipeline(pass, self.pipeline)")
-  table.insert(lines,  "  wgpuRenderPassEncoderSetBindGroup(pass, 0, self.bind_group, 0, nilptr)")
-  table.insert(lines,  "  wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0)  -- 全屏三角形")
-  table.insert(lines,  "end")
-
-  return table.concat(lines, "\n")
-end
 
 -- =============================================================================
 -- ★ Phase 3.2.2: 生成带 Position/UV 顶点布局的 textured <T>Pipeline
@@ -488,27 +431,6 @@ local function gen_pipeline_shadow(base, uniforms_record, wgsl_source,
 end
 
 
--- =============================================================================
--- ★ Phase 3.3.4: gen_pipeline_instanced
--- 生成基于 Storage Buffer 实例渲染的 <T>InstancedPipeline。
---
--- 核心思路（与 Phase 3.3.3 着色器配合）：
---   · 不再为每个组件创建独立的 Uniform Buffer + BindGroup + Draw Call。
---   · 所有同类组件的实例数据（位置、颜色、圆角等）打包进一个全局
---     Storage Buffer（binding 1），每帧通过 wgpuQueueWriteBuffer 整体更新。
---   · 着色器通过 @builtin(instance_index) 索引 Storage Buffer 中的对应条目。
---   · 一次 wgpuRenderPassEncoderDraw(pass, 6, instance_count, 0, 0) 渲染所有实例。
---
--- 生成的 API：
---   <T>InstancedPipeline:init(renderer, max_instances)  boolean
---   <T>InstancedPipeline:upload(renderer, data, count)  boolean
---   <T>InstancedPipeline:draw(pass, count)              void
---
--- spec 新增字段：
---   instanced        : boolean  — 触发此路径
---   instance_record  : string   — 实例数据 Nelua record 名称（如 "ButtonInstanceData"）
---   max_instances    : number   — 编译期最大实例数（决定 Storage Buffer 大小上界）
--- =============================================================================
 
 -- =============================================================================
 -- ★ Phase 3.5.1: 为标准 Visual 类型生成 Instanced Pipeline
@@ -722,237 +644,43 @@ local function gen_pipeline_standard_instanced(base, uniforms_record, wgsl_sourc
 end
 
 
-local function gen_pipeline_instanced(base, uniforms_record, wgsl_source, instance_record, max_instances)
-  local pipe = base .. "InstancedPipeline"
-  local L = {}
-  local function emit(s) table.insert(L, s) end
 
-  emit(("-- === Derived instanced pipeline: %s (instance_record=%s, max=%d) ==="):format(
-    tostring(pipe), tostring(instance_record), tonumber(max_instances) or 0))
-
-  -- record 定义
-  emit(("global %s = @record{"):format(pipe))
-  emit("  -- 全屏三角形管线（无顶点缓冲）")
-  emit("  pipeline:      WGPURenderPipeline,")
-  emit("  bind_layout:   WGPUBindGroupLayout,")
-  emit("  -- binding 0: viewport uniform（vec2<f32> 屏幕尺寸）")
-  emit("  uniform_buf:   WGPUBuffer,")
-  emit("  -- binding 1: Storage Buffer（所有实例的 InstanceData 数组）")
-  emit("  storage_buf:   WGPUBuffer,")
-  emit("  storage_size:  uint64,")
-  emit("  bind_group:    WGPUBindGroup,")
-  emit("  max_instances: uint32,")
-  emit("}")
-
-  -- WGSL 源码常量
-  local wgsl_const = "NEBULA_WGSL_" .. base:upper() .. "_INSTANCED"
-  emit(("local %s <comptime> = %s"):format(wgsl_const, escape_to_long_bracket(wgsl_source)))
-
-  -- ===== init =====
-  emit(("function %s:init(renderer: *NebulaRenderer, max_inst: uint32): boolean"):format(pipe))
-  emit("  self.max_instances = max_inst")
-  emit("")
-  emit("  -- 1. Viewport Uniform Buffer（16 字节：vec2<f32> + 8 bytes padding）")
-  emit("  local vp_desc = WGPUBufferDescriptor{")
-  emit("    nextInChain      = nilptr,")
-  emit(("    label            = wgpu_str(\"%s-vp\"),"):format("nebula-" .. base:lower() .. "-inst"))
-  emit("    usage            = (@uint32)(WGPUBufferUsage_Uniform) | (@uint32)(WGPUBufferUsage_CopyDst),")
-  emit("    size             = 16,  -- vec2<f32> + 8 bytes padding to satisfy min binding size")
-  emit("    mappedAtCreation = false,")
-  emit("  }")
-  emit("  self.uniform_buf = wgpuDeviceCreateBuffer(renderer.device, &vp_desc)")
-  emit("  if self.uniform_buf == nilptr then")
-  emit(("    printf(\"wgpu: %s instanced: failed to create vp uniform\\n\")\n    return false"):format(base:lower()))
-  emit("  end")
-  emit("")
-  emit("  -- 2. Storage Buffer（max_instances * sizeof(InstanceData)）")
-  emit(("  self.storage_size = (@uint64)(max_inst) * (@uint64)(#%s)"):format(instance_record))
-  emit("  local sb_desc = WGPUBufferDescriptor{")
-  emit("    nextInChain      = nilptr,")
-  emit(("    label            = wgpu_str(\"%s-sb\"),"):format("nebula-" .. base:lower() .. "-inst"))
-  emit("    usage            = (@uint32)(WGPUBufferUsage_Storage) | (@uint32)(WGPUBufferUsage_CopyDst),")
-  emit("    size             = self.storage_size,")
-  emit("    mappedAtCreation = false,")
-  emit("  }")
-  emit("  self.storage_buf = wgpuDeviceCreateBuffer(renderer.device, &sb_desc)")
-  emit("  if self.storage_buf == nilptr then")
-  emit(("    printf(\"wgpu: %s instanced: failed to create storage buffer\\n\")\n    return false"):format(base:lower()))
-  emit("  end")
-  emit("")
-  emit("  -- 3. BindGroupLayout（binding 0: uniform, binding 1: read-only storage）")
-  emit("  local entries: [2]WGPUBindGroupLayoutEntry")
-  emit("  entries[0] = WGPUBindGroupLayoutEntry{")
-  emit("    nextInChain = nilptr,")
-  emit("    binding     = 0,")
-  emit("    visibility  = (@uint64)(WGPUShaderStage_Vertex) | (@uint64)(WGPUShaderStage_Fragment),")
-  emit("    buffer      = { nextInChain = nilptr, type = (@uint32)(WGPUBufferBindingType_Uniform), hasDynamicOffset = 0, minBindingSize = 16 },")
-  emit("    sampler        = { nextInChain = nilptr, type = 0 },")
-  emit("    texture        = { nextInChain = nilptr, sampleType = 0, viewDimension = 0, multisampled = 0 },")
-  emit("    storageTexture = { nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0 },")
-  emit("  }")
-  emit("  entries[1] = WGPUBindGroupLayoutEntry{")
-  emit("    nextInChain = nilptr,")
-  emit("    binding     = 1,")
-  emit("    visibility  = (@uint64)(WGPUShaderStage_Fragment),")
-  emit("    buffer      = { nextInChain = nilptr, type = (@uint32)(WGPUBufferBindingType_ReadOnlyStorage), hasDynamicOffset = 0, minBindingSize = 0 },")
-  emit("    sampler        = { nextInChain = nilptr, type = 0 },")
-  emit("    texture        = { nextInChain = nilptr, sampleType = 0, viewDimension = 0, multisampled = 0 },")
-  emit("    storageTexture = { nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0 },")
-  emit("  }")
-  emit("  local bgl_desc = WGPUBindGroupLayoutDescriptor{")
-  emit("    nextInChain = nilptr,")
-  emit(("    label       = wgpu_str(\"%s-bgl\"),"):format("nebula-" .. base:lower() .. "-inst"))
-  emit("    entryCount  = 2,")
-  emit("    entries     = &entries[0],")
-  emit("  }")
-  emit("  self.bind_layout = wgpuDeviceCreateBindGroupLayout(renderer.device, &bgl_desc)")
-  emit("  if self.bind_layout == nilptr then")
-  emit(("    printf(\"wgpu: %s instanced: failed to create bgl\\n\")\n    return false"):format(base:lower()))
-  emit("  end")
-  emit("")
-  emit("  -- 4. BindGroup")
-  emit("  local bg_entries: [2]WGPUBindGroupEntry")
-  emit("  bg_entries[0] = WGPUBindGroupEntry{")
-  emit("    nextInChain = nilptr, binding = 0,")
-  emit("    buffer = self.uniform_buf, offset = 0, size = 16,")
-  emit("    sampler = nilptr, textureView = nilptr,")
-  emit("  }")
-  emit("  bg_entries[1] = WGPUBindGroupEntry{")
-  emit("    nextInChain = nilptr, binding = 1,")
-  emit("    buffer = self.storage_buf, offset = 0, size = self.storage_size,")
-  emit("    sampler = nilptr, textureView = nilptr,")
-  emit("  }")
-  emit("  local bg_desc = WGPUBindGroupDescriptor{")
-  emit("    nextInChain = nilptr,")
-  emit(("    label       = wgpu_str(\"%s-bg\"),"):format("nebula-" .. base:lower() .. "-inst"))
-  emit("    layout      = self.bind_layout,")
-  emit("    entryCount  = 2,")
-  emit("    entries     = &bg_entries[0],")
-  emit("  }")
-  emit("  self.bind_group = wgpuDeviceCreateBindGroup(renderer.device, &bg_desc)")
-  emit("  if self.bind_group == nilptr then")
-  emit(("    printf(\"wgpu: %s instanced: failed to create bind group\\n\")\n    return false"):format(base:lower()))
-  emit("  end")
-  emit("")
-  emit("  -- 5. 着色器模块")
-  emit("  local wgsl_src = WGPUShaderSourceWGSL{")
-  emit("    chain = WGPUChainedStruct{ next = nilptr, sType = WGPUSType_ShaderSourceWGSL },")
-  emit(("    code  = wgpu_str(%s),"):format(wgsl_const))
-  emit("  }")
-  emit("  local shader_desc = WGPUShaderModuleDescriptor{")
-  emit("    nextInChain = (@*WGPUChainedStruct)(&wgsl_src),")
-  emit(("    label       = wgpu_str(\"%s-inst-shader\"),"):format("nebula-" .. base:lower()))
-  emit("  }")
-  emit("  local shader = wgpuDeviceCreateShaderModule(renderer.device, &shader_desc)")
-  emit("  if shader == nilptr then")
-  emit(("    printf(\"wgpu: %s instanced: failed to create shader\\n\")\n    return false"):format(base:lower()))
-  emit("  end")
-  emit("")
-  emit("  -- 6. PipelineLayout")
-  emit("  local pl_desc = WGPUPipelineLayoutDescriptor{")
-  emit("    nextInChain          = nilptr,")
-  emit(("    label                = wgpu_str(\"%s-inst-pl\"),"):format("nebula-" .. base:lower()))
-  emit("    bindGroupLayoutCount = 1,")
-  emit("    bindGroupLayouts     = &self.bind_layout,")
-  emit("  }")
-  emit("  local pipeline_layout = wgpuDeviceCreatePipelineLayout(renderer.device, &pl_desc)")
-  emit("")
-  emit("  -- 7. Alpha 混合状态")
-  emit("  local blend_state = WGPUBlendState{")
-  emit("    color = WGPUBlendComponent{ operation = WGPUBlendOperation_Add, srcFactor = WGPUBlendFactor_SrcAlpha, dstFactor = WGPUBlendFactor_OneMinusSrcAlpha },")
-  emit("    alpha = WGPUBlendComponent{ operation = WGPUBlendOperation_Add, srcFactor = WGPUBlendFactor_One, dstFactor = WGPUBlendFactor_OneMinusSrcAlpha },")
-  emit("  }")
-  emit("  local color_target = WGPUColorTargetState{")
-  emit("    nextInChain = nilptr, format = renderer.format, blend = &blend_state,")
-  emit("    writeMask   = (@uint32)(WGPUColorWriteMask_All),")
-  emit("  }")
-  emit("  local frag_state = WGPUFragmentState{")
-  emit("    nextInChain = nilptr, module = shader, entryPoint = wgpu_str(\"fs_main\"),")
-  emit("    constantCount = 0, constants = nilptr, targetCount = 1, targets = &color_target,")
-  emit("  }")
-  emit("")
-  emit("  -- 8. RenderPipeline（无顶点缓冲，通过 instance_index 驱动）")
-  emit("  local rp_desc = WGPURenderPipelineDescriptor{")
-  emit("    nextInChain = nilptr,")
-  emit(("    label       = wgpu_str(\"%s-inst-rp\"),"):format("nebula-" .. base:lower()))
-  emit("    layout      = pipeline_layout,")
-  emit("    vertex      = { nextInChain = nilptr, module = shader, entryPoint = wgpu_str(\"vs_main\"),")
-  emit("                    constantCount = 0, constants = nilptr, bufferCount = 0, buffers = nilptr },")
-  emit("    primitive   = { nextInChain = nilptr, topology = WGPUPrimitiveTopology_TriangleList,")
-  emit("                    stripIndexFormat = 0, frontFace = 0, cullMode = 0, unclippedDepth = false },")
-  emit("    depthStencil = nilptr,")
-  emit("    multisample  = { nextInChain = nilptr, count = 1, mask = 0xFFFFFFFF, alphaToCoverageEnabled = false },")
-  emit("    fragment     = &frag_state,")
-  emit("  }")
-  emit("  self.pipeline = wgpuDeviceCreateRenderPipeline(renderer.device, &rp_desc)")
-  emit("  wgpuShaderModuleRelease(shader)")
-  emit("  if self.pipeline == nilptr then")
-  emit(("    printf(\"wgpu: %s instanced: failed to create pipeline\\n\")\n    return false"):format(base:lower()))
-  emit("  end")
-  emit("")
-  emit(("  printf(\"wgpu: %s instanced pipeline created (max_instances=%%u)\\n\", max_inst)"):format(base:lower()))
-  emit("  return true")
-  emit("end")
-
-  -- ===== update_viewport =====
-  emit(("function %s:update_viewport(renderer: *NebulaRenderer, vw: float32, vh: float32): void"):format(pipe))
-  emit("  local vp: [4]float32 = { vw, vh, 0.0, 0.0 }")
-  emit("  wgpuQueueWriteBuffer(renderer.queue, self.uniform_buf, 0, &vp[0], 16)")
-  emit("end")
-
-  -- ===== upload（将 CPU 端实例数组整体上传到 Storage Buffer） =====
-  emit(("function %s:upload(renderer: *NebulaRenderer, data: pointer, count: uint32): boolean"):format(pipe))
-  emit("  if count == 0 or data == nilptr then return true end")
-  emit("  if count > self.max_instances then")
-  emit(("    printf(\"nebula: %s instanced: count %%u exceeds max_instances %%u\\n\", count, self.max_instances)"):format(base:lower()))
-  emit("    count = self.max_instances")
-  emit("  end")
-  emit(("  local byte_size = (@uint64)(count) * (@uint64)(#%s)"):format(instance_record))
-  emit("  wgpuQueueWriteBuffer(renderer.queue, self.storage_buf, 0, data, (@csize)(byte_size))")
-  emit("  return true")
-  emit("end")
-
-  -- ===== draw =====
-  emit(("function %s:draw(pass: WGPURenderPassEncoder, count: uint32): void"):format(pipe))
-  emit("  if count == 0 then return end")
-  emit("  wgpuRenderPassEncoderSetPipeline(pass, self.pipeline)")
-  emit("  wgpuRenderPassEncoderSetBindGroup(pass, 0, self.bind_group, 0, nilptr)")
-  emit("  -- 每个实例渲染 6 顶点（两个三角形），通过 instance_index 定位数据")
-  emit("  wgpuRenderPassEncoderDraw(pass, 6, count, 0, 0)")
-  emit("end")
-
-  return table.concat(L, "\n")
-end
-
+-- [gen_pipeline_instanced 已在 Phase 3.7 中删除]
+-- 请使用 gen_pipeline_standard_instanced（通过 nebula_derive 自动派生）
 
 -- =============================================================================
 -- 主入口：生成完整的 <T>Pipeline 源码
+--
+-- Phase 3.7: 三条显式路径，无 else 兑底。任何未识别的 spec 触发 error()。
 -- =============================================================================
 function nebula_gen_pipeline_source(spec)
   assert(spec.base,            "nebula_gen_pipeline_source: spec.base required")
   assert(spec.uniforms_record, "nebula_gen_pipeline_source: spec.uniforms_record required")
-  assert(spec.wgsl_source,     "nebula_gen_pipeline_source: spec.wgsl_source required")
 
   if spec.has_shadow then
+    -- 阴影多 Pass 路径：需要四个子着色器源码
     assert(spec.shadow_mask_source, "nebula_gen_pipeline_source: shadow_mask_source required when has_shadow")
     assert(spec.blur_h_source,      "nebula_gen_pipeline_source: blur_h_source required when has_shadow")
     assert(spec.blur_v_source,      "nebula_gen_pipeline_source: blur_v_source required when has_shadow")
     assert(spec.composite_source,   "nebula_gen_pipeline_source: composite_source required when has_shadow")
+    -- Phase 3.7: 阴影路径的主着色器使用 nebula_compose_shadow_shaders 的 shadow_mask_source
+    -- 主管线的 WGSL 由 gen_pipeline_shadow 内部使用 shadow_mask_source 作为主着色器
     return gen_pipeline_shadow(
-      spec.base, spec.uniforms_record, spec.wgsl_source,
+      spec.base, spec.uniforms_record, spec.shadow_mask_source,
       spec.shadow_mask_source, spec.blur_h_source, spec.blur_v_source, spec.composite_source)
   elseif spec.standard_instanced then
-    -- ★ Phase 3.5.1: 标准 Visual 的 Instanced 路径（<T>Uniforms 即 InstanceData）
+    -- ★ Phase 3.5.1 / Phase 3.7: 标准 Visual 的默认路径
+    assert(spec.wgsl_source, "nebula_gen_pipeline_source: wgsl_source required for standard_instanced path")
     local max_inst = spec.max_instances or 128
     return gen_pipeline_standard_instanced(spec.base, spec.uniforms_record, spec.wgsl_source, max_inst)
-  elseif spec.instanced then
-    assert(spec.instance_record, "nebula_gen_pipeline_source: instance_record required when instanced")
-    local max_inst = spec.max_instances or 10000
-    return gen_pipeline_instanced(spec.base, spec.uniforms_record, spec.wgsl_source, spec.instance_record, max_inst)
-  elseif spec.textured and (spec.vertex_layout == "textured" or spec.vertex_layout == "pos_uv") then
+  elseif spec.textured then
+    -- 文本 SDF 路径
+    assert(spec.wgsl_source, "nebula_gen_pipeline_source: wgsl_source required for textured path")
     return gen_pipeline_textured_vertex(spec.base, spec.uniforms_record, spec.wgsl_source)
   else
-    return gen_pipeline_simple(spec.base, spec.uniforms_record, spec.wgsl_source)
+    error("nebula_gen_pipeline_source: unrecognized spec for '" .. tostring(spec.base) .. "'. " ..
+          "All standard Visuals must use standard_instanced path (set via nebula_derive). " ..
+          "Phase 3.7: gen_pipeline_simple and gen_pipeline_instanced have been removed.")
   end
 end
 
@@ -1008,4 +736,4 @@ end
 
 
 -- 返回模块标识
-return "nebula_pipeline_factory_v0.6_phase3.5.1"
+return "nebula_pipeline_factory_v0.7_phase3.7"

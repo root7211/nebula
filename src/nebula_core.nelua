@@ -483,12 +483,12 @@ end
 
 -- 加载着色器组合器模块
 local shader_compose_mod = require "derive.shader_compose"
-assert(shader_compose_mod == "nebula_shader_compose_v0.5_phase3.5.1",
+assert(shader_compose_mod == "nebula_shader_compose_v0.6_phase3.7",
   "nebula: failed to load derive/shader_compose.lua")
 
 -- ★ Phase 2.3.2: 加载管线工厂模块
 local pipeline_factory_mod = require "derive.pipeline_factory"
-assert(pipeline_factory_mod == "nebula_pipeline_factory_v0.6_phase3.5.1",
+assert(pipeline_factory_mod == "nebula_pipeline_factory_v0.7_phase3.7",
   "nebula: failed to load derive/pipeline_factory.lua")
 
 -- ★ Phase 2.4: 加载交互原语工厂模块
@@ -999,7 +999,9 @@ end
 --   (2) <T>Pipeline           —— 专属渲染管线，委托 nebula_pipeline_base_init
 --   (3) <T>Context:to_uniforms—— 强类型版本，返回 <T>Uniforms
 --
--- 相关 WGSL 着色器在编译期由 nebula_compose_shader 按字段组合。
+-- 相关 WGSL 着色器在编译期由 nebula_compose_shader_instanced（标准路径）或
+-- nebula_compose_shadow_shaders（阴影路径）按字段组合。
+-- Phase 3.7: standard_instanced 为默认路径，无需在 nebula_annotate 中声明 instanced=true。
 function nebula_derive(type_name)
   local reg = nebula_registry[type_name]
   assert(reg, "nebula_derive: type '" .. type_name .. "' must be annotated first via nebula_annotate")
@@ -1022,14 +1024,18 @@ function nebula_derive(type_name)
 
   -- 根据字段检测着色器特性
   local feats = detect_shader_features(base_fields, all_props)
-  local shader_result = nebula_compose_shader({
-    wgsl_struct  = layout.wgsl_struct,
-    struct_name  = layout.wgsl_struct_name,
-    has_radius   = feats.has_radius,
-    has_bg_color = feats.has_bg_color,
-    has_border   = feats.has_border,
-    has_shadow   = feats.has_shadow,
-  })
+  -- Phase 3.7: 阴影路径使用 nebula_compose_shadow_shaders 生成阴影子着色器
+  -- （原 nebula_compose_shader 已删除，其主着色器是红色占位符，违反公理 C）
+  local shadow_shaders = nil
+  if feats.has_shadow then
+    shadow_shaders = nebula_compose_shadow_shaders({
+      wgsl_struct  = layout.wgsl_struct,
+      struct_name  = layout.wgsl_struct_name,
+      has_radius   = feats.has_radius,
+      has_border   = feats.has_border,
+    })
+    print(("[derive-shadow] %s: shadow_multipass path"):format(type_name))
+  end
 
   -- Phase 2.4: 先生成 hit_test 和 process_input，必须在 Context:update() 之前注入
   -- （Nelua 要求方法在调用前已声明）
@@ -1060,8 +1066,10 @@ function nebula_derive(type_name)
     gen_update_for(base, reg, all_props),
   }
 
-  -- Phase 3.5.1: 若注解中声明了 instanced=true，则使用 standard_instanced 路径
-  local use_instanced = reg.instanced or false
+  -- Phase 3.7: standard_instanced 现在是所有非阴影 Visual 的默认路径。
+  -- reg.instanced 注解字段已废弃（保留兼容性但不再影响路径选择）。
+  -- 仅 has_shadow=true 的 Visual 仍走独立的 shadow_multipass 路径。
+  local use_instanced = not feats.has_shadow
   local max_instances = reg.max_instances or 128
   local instanced_shader_result = nil
   if use_instanced then
@@ -1079,22 +1087,23 @@ function nebula_derive(type_name)
     base            = base,
     visual_type     = type_name,
     uniforms_record = uniforms_record,
-    wgsl_source     = use_instanced and instanced_shader_result.source or shader_result.source,
+    -- Phase 3.7: 标准路径使用 instanced_shader_result.source，阴影路径暂时使用 nil（由 gen_pipeline_shadow 内部处理）
+    wgsl_source     = use_instanced and instanced_shader_result.source or nil,
     uniform_size    = layout.total_size,
     layout_fields   = layout.fields,
     base_fields     = base_fields,
     all_props       = all_props,
-    -- Phase 3.5.1: standard_instanced 路径
+    -- Phase 3.5.1 / Phase 3.7: standard_instanced 路径
     standard_instanced = use_instanced,
     max_instances      = max_instances,
-    -- Phase 2.5: 阴影多 Pass 着色器（仅在非 instanced 路径下生效）
-    has_shadow          = (not use_instanced) and feats.has_shadow,
-    shadow_mask_source  = shader_result.shadow_mask_source,
-    blur_h_source       = shader_result.blur_h_source,
-    blur_v_source       = shader_result.blur_v_source,
-    composite_source    = shader_result.composite_source,
-    textured            = shader_result.textured,
-    vertex_layout       = shader_result.vertex_layout,
+    -- Phase 2.5 / Phase 3.7: 阴影多 Pass 着色器（仅在 has_shadow=true 时生效，此时 use_instanced=false）
+    has_shadow          = feats.has_shadow,
+    shadow_mask_source  = shadow_shaders and shadow_shaders.shadow_mask_source or nil,
+    blur_h_source       = shadow_shaders and shadow_shaders.blur_h_source or nil,
+    blur_v_source       = shadow_shaders and shadow_shaders.blur_v_source or nil,
+    composite_source    = shadow_shaders and shadow_shaders.composite_source or nil,
+    textured            = false,
+    vertex_layout       = nil,  -- Phase 3.7: 标准路径不使用 vertex_layout（文本路径独立处理）
   }
   table.insert(parts, nebula_gen_to_uniforms_typed(pipeline_spec))
   table.insert(parts, nebula_gen_pipeline_source(pipeline_spec))

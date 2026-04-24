@@ -1,13 +1,13 @@
 -- =============================================================================
 -- tests/smoke_phase3_5_1.lua
--- Nebula GUI Compiler — Phase 3.5.1 回归测试
+-- Nebula GUI Compiler — Phase 3.5.1 回归测试（Phase 3.7 更新）
 --
 -- 验收目标：
---   1. shader_compose.lua 版本号更新为 v0.5_phase3.5.1
---   2. pipeline_factory.lua 版本号更新为 v0.6_phase3.5.1
+--   1. shader_compose.lua 版本号更新为 v0.6_phase3.7
+--   2. pipeline_factory.lua 版本号更新为 v0.7_phase3.7
 --   3. nebula_compose_shader_instanced 函数存在且返回正确的结构
 --   4. nebula_gen_pipeline_source 的 standard_instanced 路径生成正确的代码
---   5. 现有的 simple / instanced / textured 路径不受影响（向后兼容）
+--   5. Phase 3.7: gen_pipeline_simple 和 gen_pipeline_instanced 路径已删除
 -- =============================================================================
 
 local passed = 0
@@ -45,10 +45,20 @@ local function assert_not_contains(label, str, pattern)
   end
 end
 
+local function assert_error(label, fn)
+  local ok, err = pcall(fn)
+  if not ok then
+    passed = passed + 1
+    print(("[PASS] %s (error: %s)"):format(label, tostring(err):sub(1, 80)))
+  else
+    failed = failed + 1
+    print(("[FAIL] %s — expected error but none was raised"):format(label))
+  end
+end
+
 -- =============================================================================
 -- 加载模块
 -- =============================================================================
--- 设置正确的模块搜索路径
 local script_dir = debug.getinfo(1, "S").source:match("^@(.+)/[^/]+$") or "."
 package.path = script_dir .. "/../src/?.lua;" ..
                script_dir .. "/../src/derive/?.lua;" ..
@@ -58,10 +68,10 @@ local shader_ver = require "derive.shader_compose"
 local factory_ver = require "derive.pipeline_factory"
 
 -- =============================================================================
--- 1. 版本号验证
+-- 1. 版本号验证（Phase 3.7 更新）
 -- =============================================================================
-assert_eq("shader_compose 版本号", shader_ver, "nebula_shader_compose_v0.5_phase3.5.1")
-assert_eq("pipeline_factory 版本号", factory_ver, "nebula_pipeline_factory_v0.6_phase3.5.1")
+assert_eq("shader_compose 版本号", shader_ver, "nebula_shader_compose_v0.6_phase3.7")
+assert_eq("pipeline_factory 版本号", factory_ver, "nebula_pipeline_factory_v0.7_phase3.7")
 
 -- =============================================================================
 -- 2. nebula_compose_shader_instanced 基础功能
@@ -137,7 +147,7 @@ local pipe_code = nebula_gen_pipeline_source({
   max_instances    = 64,
 })
 
-assert_eq("standard_instanced 生成 table 或 string", type(pipe_code), "string")
+assert_eq("standard_instanced 生成 string", type(pipe_code), "string")
 assert_contains("生成 ButtonPipeline record", pipe_code, "global ButtonPipeline = @record{")
 assert_contains("包含 storage_buf 字段", pipe_code, "storage_buf:")
 assert_contains("包含 storage_size 字段", pipe_code, "storage_size:")
@@ -154,38 +164,57 @@ assert_contains("使用 ButtonUniforms 计算 storage_size", pipe_code, "#Button
 assert_contains("draw_instanced 使用 6 顶点", pipe_code, "wgpuRenderPassEncoderDraw(pass, 6, count, 0, 0)")
 
 -- =============================================================================
--- 4. 向后兼容：simple 路径不受影响
+-- 4. Phase 3.7: gen_pipeline_simple 路径已删除，应触发 error
 -- =============================================================================
-local simple_code = nebula_gen_pipeline_source({
-  base             = "Card",
-  uniforms_record  = "CardUniforms",
-  wgsl_source      = "// placeholder",
-  standard_instanced = false,
-})
-assert_contains("simple 路径生成 CardPipeline", simple_code, "global CardPipeline = @record{")
-assert_not_contains("simple 路径不含 storage_buf", simple_code, "storage_buf:")
-assert_contains("simple 路径含 uniform_buf", simple_code, "uniform_buf:")
-assert_contains("simple 路径含 update_uniforms", simple_code, "function CardPipeline:update_uniforms(")
-assert_contains("simple 路径含 draw", simple_code, "function CardPipeline:draw(pass: WGPURenderPassEncoder)")
+assert_error("simple 路径已删除（standard_instanced=false 且无 textured/has_shadow）", function()
+  nebula_gen_pipeline_source({
+    base             = "Card",
+    uniforms_record  = "CardUniforms",
+    wgsl_source      = "// placeholder",
+    standard_instanced = false,
+  })
+end)
 
 -- =============================================================================
--- 5. 向后兼容：instanced 路径（Phase 3.3）不受影响
+-- 5. Phase 3.7: gen_pipeline_instanced 路径已删除，应触发 error
 -- =============================================================================
-local inst_code = nebula_gen_pipeline_source({
-  base             = "ListItem",
-  uniforms_record  = "ListItemUniforms",
-  wgsl_source      = "// placeholder",
-  instanced        = true,
-  instance_record  = "ListItemInstanceData",
-  max_instances    = 10000,
+assert_error("instanced 路径已删除（spec.instanced=true 不再被识别）", function()
+  nebula_gen_pipeline_source({
+    base             = "ListItem",
+    uniforms_record  = "ListItemUniforms",
+    wgsl_source      = "// placeholder",
+    instanced        = true,
+    instance_record  = "ListItemInstanceData",
+    max_instances    = 10000,
+  })
+end)
+
+-- =============================================================================
+-- 6. Phase 3.7: nebula_compose_shadow_shaders 函数存在且返回正确结构
+-- =============================================================================
+local shadow_result = nebula_compose_shadow_shaders({
+  wgsl_struct  = mock_wgsl_struct,
+  struct_name  = "ButtonUniforms",
+  has_radius   = true,
 })
-assert_contains("Phase 3.3 instanced 路径生成 ListItemInstancedPipeline", inst_code, "global ListItemInstancedPipeline = @record{")
-assert_not_contains("Phase 3.3 instanced 路径不含 draw_single", inst_code, "draw_single")
+assert_eq("nebula_compose_shadow_shaders 返回 table", type(shadow_result), "table")
+assert_eq("shadow_mask_source 是 string", type(shadow_result.shadow_mask_source), "string")
+assert_eq("blur_h_source 是 string", type(shadow_result.blur_h_source), "string")
+assert_eq("blur_v_source 是 string", type(shadow_result.blur_v_source), "string")
+assert_eq("composite_source 是 string", type(shadow_result.composite_source), "string")
+assert_contains("shadow_mask_source 包含 SDF", shadow_result.shadow_mask_source, "sdf_rounded_rect")
+assert_contains("blur_h_source 包含高斯权重", shadow_result.blur_h_source, "0.227027")
+assert_contains("blur_v_source 包含垂直方向", shadow_result.blur_v_source, "1.0 / tex_size.y")
+
+-- Phase 3.7: nebula_compose_shader 已删除，不应存在
+assert_eq("nebula_compose_shader 已删除", nebula_compose_shader, nil)
+-- Phase 3.7: nebula_compose_instanced_shader 已删除，不应存在
+assert_eq("nebula_compose_instanced_shader 已删除", nebula_compose_instanced_shader, nil)
 
 -- =============================================================================
 -- 汇总
 -- =============================================================================
-print(("\n=== Phase 3.5.1 回归测试结果：%d 通过，%d 失败 ==="):format(passed, failed))
+print(("\n=== Phase 3.5.1 / Phase 3.7 回归测试结果：%d 通过，%d 失败 ==="):format(passed, failed))
 if failed > 0 then
   os.exit(1)
 end
