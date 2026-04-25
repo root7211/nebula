@@ -1,6 +1,13 @@
 -- =============================================================================
 -- shadow_demo.nelua
--- Nebula GUI Compiler — Phase 2.5 主线 Demo
+-- Nebula GUI Compiler — Phase 2.5（暂缓升级）
+--
+-- ⚠ 架构说明（Phase 3.9 审计）：
+--   本 Demo 使用 4-Pass 多 Pass 阴影渲染（3 个离屏 Pass + 1 个 Surface Pass）。
+--   当前的 nebula_frame_render 仅支持单 Surface Pass 模型，无法覆盖多 Pass 编排。
+--   因此本 Demo 暂时保留手动渲染循环，等待以下框架支持后再升级：
+--     · nebula_frame_render 扩展多 Pass 编排能力（规划于 Phase 4.x）
+--     · nebula_app_register_shadow_pass 原语（规划于 Phase 4.x）
 --
 -- 展示多 Pass 渲染（Shadow / Blur）效果：
 --   · 组件声明 shadow_color / shadow_offset / shadow_blur 字段

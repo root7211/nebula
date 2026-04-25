@@ -1,16 +1,19 @@
 -- =============================================================================
 -- button_demo.nelua
--- Nebula GUI Compiler — Phase 2.4 Demo
+-- Nebula GUI Compiler — Phase 3.9
 --
--- "形即"范式 Phase 2.4：开发者只写形状声明 + 注解，框架自动派生一切。
+-- ★ Phase 3.9 重写：从 Phase 2.4 手动渲染循环迁移到 App 编排体系
 --
--- Phase 2.4 升级：
---   · update() 签名改为 (input: *NebulaInputState, dt: float32)
---   · 碰撞检测与状态转换由 nebula_derive 自动生成的 hit_test / process_input 处理
---   · 输入收集统一由 nebula_collect_input() 完成
---   · 不再手写 glfwGetCursorPos / glfwGetMouseButton 调用
+-- 与 Phase 2.4 的对比：
+--   · 删除手动 ButtonPipeline 声明和初始化（由 nebula_derive_app 自动生成）
+--   · 删除手动 wgpuSurfaceGetCurrentTexture / wgpuDeviceCreateCommandEncoder 等
+--     约 50 行 WGPU 渲染样板代码（由 nebula_frame_render 封装）
+--   · 删除手动 button:update / button_pipeline:upload / draw_instanced 调用
+--     （由 nebula_derive_app 生成的 ButtonApp:update / ButtonApp:draw 自动处理）
+--   · 主循环收缩到 3 行（glfwPollEvents + nebula_collect_input + nebula_frame_render）
+--
+-- 演示能力：最简单的单按钮交互（hover + press 状态动画）
 -- =============================================================================
-
 ## cinclude "<stdio.h>"
 
 require "nebula_core"
@@ -18,184 +21,117 @@ require "glfw_bindings"
 require "wgpu_bindings"
 require "renderer"
 require "app"
+require "nebula_arena"
 
 global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
 
+local WIN_W <comptime> = 800
+local WIN_H <comptime> = 600
+
 -- =============================================================================
--- 第一步：定义 ButtonVisual 形状（开发者需要写的全部规格代码）
+-- 视觉规格 + 注解 + 派生
 -- =============================================================================
 global ButtonVisual = @record{
   pos:    Vec2,
   size:   Vec2,
   radius: float32,
 
-  default_bg_color:  Color,
-  hovered_bg_color:  Color,
-  pressed_bg_color:  Color,
-
+  default_bg_color:     Color,
   default_border_color: Color,
-  hovered_border_color: Color,
-  pressed_border_color: Color,
-
   default_border_width: float32,
+
+  hovered_bg_color:     Color,
+  hovered_border_color: Color,
   hovered_border_width: float32,
+
+  pressed_bg_color:     Color,
+  pressed_border_color: Color,
   pressed_border_width: float32,
 }
 
--- =============================================================================
--- 第二步：声明状态拓扑、交互原语、动画转换规则
--- =============================================================================
 ##[[
 nebula_annotate("ButtonVisual", {
   states     = {"default", "hovered", "pressed"},
   primitives = {"hoverable", "clickable"},
   transitions = {
-    {from="default", to="hovered", tween="ease_out", duration=0.15},
-    {from="hovered", to="default", tween="ease_out", duration=0.15},
-    {from="hovered", to="pressed", tween="none",     duration=0.0},
-    {from="pressed", to="hovered", tween="ease_out", duration=0.1},
+    {from="default", to="hovered", on="hover_enter"},
+    {from="hovered", to="default", on="hover_leave"},
+    {from="hovered", to="pressed", on="press"},
+    {from="pressed", to="hovered", on="release"},
   },
 })
-
--- 编译期诊断输出
-local wgsl  = nebula_gen_wgsl_uniform("ButtonVisual")
-local usize = nebula_calc_uniform_size("ButtonVisual")
-print("=== [编译期] 推导引擎输出 ===")
-print("派生的 WGSL Uniform 结构体：")
-print(wgsl)
-print("Uniform 字节大小（推导值）：" .. usize)
-print("===========================")
 ]]
+## nebula_derive("ButtonVisual")
 
 -- =============================================================================
--- 第三步：★ 一行代码自动派生 State + StateMachine + Context + Pipeline + Interaction
+-- ★ Phase 3.9: 使用 nebula_derive_app 宏声明并派生 ButtonApp
 -- =============================================================================
-## nebula_derive("ButtonVisual")
+##[[
+  nebula_app_begin("ButtonApp")
+    nebula_app_register_component("btn", "ButtonVisual")
+  nebula_app_end()
+]]
+## nebula_derive_app("ButtonApp")
 
 -- =============================================================================
 -- 主程序
 -- =============================================================================
-local WIN_W <comptime> = 800
-local WIN_H <comptime> = 600
-
 local function main(): int32
-  if glfwInit() == 0 then
-    printf("glfw: init failed\n")
-    return 1
-  end
+  if glfwInit() == 0 then printf("glfw: init failed\n") return 1 end
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
 
-  local window = glfwCreateWindow(WIN_W, WIN_H, "Nebula Phase 2.4 - Button Demo", nilptr, nilptr)
-  if window == nilptr then
-    printf("glfw: window creation failed\n")
-    return 1
-  end
+  local window = glfwCreateWindow(WIN_W, WIN_H, "Nebula Phase 3.9 — Button Demo", nilptr, nilptr)
+  if window == nilptr then printf("glfw: window creation failed\n") return 1 end
+
+  nebula_input_install_callbacks(window)
 
   local renderer: NebulaRenderer
   if not renderer:init(window, WIN_W, WIN_H) then return 1 end
 
-  local button_pipeline: ButtonPipeline
-  if not button_pipeline:init(&renderer) then return 1 end
+  -- ButtonApp:init 自动初始化 ButtonPipeline + 内嵌 FrameArena
+  local app: ButtonApp
+  if not app:init(&renderer, WIN_W, WIN_H) then return 1 end
 
-  local button_vis = ButtonVisual{
+  -- 初始化按钮视觉规格
+  app.btn:init(ButtonVisual{
     pos    = Vec2{ x = 300.0, y = 250.0 },
     size   = Vec2{ x = 200.0, y = 60.0 },
     radius = 12.0,
 
     default_bg_color     = Color{ r=0.22, g=0.22, b=0.24, a=1.0 },
-    default_border_color = Color{ r=0.4,  g=0.4,  b=0.45, a=1.0 },
+    default_border_color = Color{ r=0.40, g=0.40, b=0.45, a=1.0 },
     default_border_width = 1.0,
 
     hovered_bg_color     = Color{ r=0.28, g=0.28, b=0.32, a=1.0 },
-    hovered_border_color = Color{ r=0.4,  g=0.6,  b=1.0,  a=1.0 },
+    hovered_border_color = Color{ r=0.40, g=0.60, b=1.00, a=1.0 },
     hovered_border_width = 2.0,
 
     pressed_bg_color     = Color{ r=0.16, g=0.16, b=0.20, a=1.0 },
-    pressed_border_color = Color{ r=0.6,  g=0.8,  b=1.0,  a=1.0 },
+    pressed_border_color = Color{ r=0.60, g=0.80, b=1.00, a=1.0 },
     pressed_border_width = 2.5,
-  }
+  })
 
-  local button: ButtonContext
-  button:init(button_vis)
-
-  -- Phase 2.4: 统一输入状态，每帧由 nebula_collect_input 填充
   local input: NebulaInputState
   local prev_time = glfwGetTime()
 
+  -- =============================================================================
+  -- ★ Phase 3.9: 主循环收缩到 3 行
+  -- =============================================================================
   while glfwWindowShouldClose(window) == 0 do
     glfwPollEvents()
-
     local now = glfwGetTime()
     local dt  = (@float32)(now - prev_time)
     prev_time = now
-
-    -- Phase 2.4: 一行收集输入，不再手写 glfwGetCursorPos / glfwGetMouseButton
     nebula_collect_input(window, &input, dt)
 
-    -- Phase 2.4: update 内部自动调用 process_input 处理碰撞与状态转换
-    button:update(&input, dt)
-
-    -- Surface 渲染
-    local surface_tex: WGPUSurfaceTexture
-    wgpuSurfaceGetCurrentTexture(renderer.surface, &surface_tex)
-    local status = surface_tex.status
-    if status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal and
-       status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal then
-      continue
+    -- 业务逻辑：按钮点击响应（领域逻辑，保留在应用层）
+    if app.btn.click.just_clicked then
+      printf("nebula: button clicked!\n")
     end
 
-    local view_desc = WGPUTextureViewDescriptor{
-      nextInChain     = nilptr,
-      label           = wgpu_str_null(),
-      format          = renderer.format,
-      dimension       = 2,
-      baseMipLevel    = 0,
-      mipLevelCount   = 1,
-      baseArrayLayer  = 0,
-      arrayLayerCount = 1,
-      aspect          = 1,
-      usage           = 0,
-    }
-    local view = wgpuTextureCreateView(surface_tex.texture, &view_desc)
-
-    local u = button:to_uniforms(WIN_W, WIN_H)
-    button_pipeline:update_viewport(&renderer, WIN_W, WIN_H)
-
-    button_pipeline:upload(&renderer, &u, 1)
-
-    local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, nilptr)
-    local clear_color = WGPURenderPassColorAttachment{
-      nextInChain   = nilptr,
-      view          = view,
-      depthSlice    = 0xFFFFFFFF,
-      resolveTarget = nilptr,
-      loadOp        = WGPULoadOp_Clear,
-      storeOp       = WGPUStoreOp_Store,
-      clearValue    = WGPUColor{ r=0.09, g=0.09, b=0.10, a=1.0 },
-    }
-    local pass_desc = WGPURenderPassDescriptor{
-      nextInChain             = nilptr,
-      label                   = wgpu_str_null(),
-      colorAttachmentCount    = 1,
-      colorAttachments        = &clear_color,
-      depthStencilAttachment  = nilptr,
-      occlusionQuerySet       = nilptr,
-      timestampWrites         = nilptr,
-    }
-    local pass = wgpuCommandEncoderBeginRenderPass(encoder, &pass_desc)
-    button_pipeline:draw_instanced(pass, 1)
-    wgpuRenderPassEncoderEnd(pass)
-    wgpuRenderPassEncoderRelease(pass)
-
-    local cmd = wgpuCommandEncoderFinish(encoder, nilptr)
-    wgpuCommandEncoderRelease(encoder)
-    wgpuQueueSubmit(renderer.queue, 1, &cmd)
-    wgpuCommandBufferRelease(cmd)
-
-    wgpuSurfacePresent(renderer.surface)
-    wgpuTextureViewRelease(view)
-    wgpuTextureRelease(surface_tex.texture)
+    -- ★ Phase 3.9: nebula_frame_render 封装全部渲染
+    nebula_frame_render(&renderer, &app, &input, dt, 0.09, 0.09, 0.10)
   end
 
   wgpuSurfaceRelease(renderer.surface)

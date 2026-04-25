@@ -1,18 +1,22 @@
 -- =============================================================================
 -- layout_demo.nelua
--- Nebula GUI Compiler — Phase 3.1 子阶段 Demo
+-- Nebula GUI Compiler — Phase 3.9
 --
--- 演示已合入仓库的 Phase 3.1 编译期 Flexbox 布局系统：
---   · 使用 nebula_layout_node / nebula_layout_solve 在编译期声明布局树
---   · 编译期自动解算所有组件的绝对坐标和尺寸
---   · 解算结果直接注入到 Visual 初始化代码中
---   · 运行时零布局计算开销
+-- ★ Phase 3.9 重写：从 Phase 3.1 手动渲染循环迁移到 App 编排体系
+--
+-- 与 Phase 3.1 的对比：
+--   · 删除手动 7 个 Pipeline 声明和初始化（由 nebula_derive_app 自动生成）
+--   · 删除手动 7 个 Context:update 调用（由 LayoutApp:update 自动处理）
+--   · 删除手动 7 个 to_uniforms + upload + draw_instanced 调用
+--   · 删除约 60 行 WGPU 渲染样板代码（由 nebula_frame_render 封装）
+--   · 主循环收缩到 3 行（glfwPollEvents + nebula_collect_input + nebula_frame_render）
+--   · 保留编译期 Flexbox 布局解算（原语 7 的先行实践）
 --
 -- 布局结构：
 --   Root (column, center)
---   └── Card (column, center, padding=24, gap=12)
+--   └── Card (column, start, padding=24, gap=12)
 --       ├── Header Row (row, space_between)
---       │   ├── Title Rect (占位)
+--       │   ├── Title Rect（占位）
 --       │   └── Close Button
 --       ├── Email Input
 --       ├── Password Input
@@ -20,7 +24,6 @@
 --           ├── Cancel Button
 --           └── Login Button
 -- =============================================================================
-
 ## cinclude "<stdio.h>"
 
 require "nebula_core"
@@ -28,6 +31,7 @@ require "glfw_bindings"
 require "wgpu_bindings"
 require "renderer"
 require "app"
+require "nebula_arena"
 
 global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
 
@@ -35,10 +39,9 @@ local WIN_W <comptime> = 800
 local WIN_H <comptime> = 600
 
 -- =============================================================================
--- Phase 3.1: 编译期布局声明与解算
+-- Phase 3.1: 编译期 Flexbox 布局声明与解算
 -- =============================================================================
 ##[[
-  -- 声明布局树
   local root = nebula_layout_node({
     name      = "root",
     direction = "column",
@@ -57,7 +60,6 @@ local WIN_H <comptime> = 600
         gap       = 12,
         width     = 400,
         children  = {
-          -- Header row
           nebula_layout_node({
             name      = "header_row",
             direction = "row",
@@ -79,19 +81,16 @@ local WIN_H <comptime> = 600
               }),
             },
           }),
-          -- Email input
           nebula_layout_node({
             name      = "email_input",
             type_name = "InputVisual",
             height    = 44,
           }),
-          -- Password input
           nebula_layout_node({
             name      = "password_input",
             type_name = "InputVisual",
             height    = 44,
           }),
-          -- Button row
           nebula_layout_node({
             name      = "button_row",
             direction = "row",
@@ -119,17 +118,13 @@ local WIN_H <comptime> = 600
     },
   })
 
-  -- 编译期解算
   nebula_layout_solve(root, 800, 600)
 
-  -- 编译期调试输出
-  print("[layout] Phase 3.1 — Compile-time Flexbox layout solved:")
+  print("[layout] Phase 3.9 — Compile-time Flexbox layout solved:")
   nebula_layout_dump(root)
 
-  -- 收集结果
   local layout_results = nebula_layout_collect(root)
 
-  -- 辅助函数：从解算结果中获取 pos 和 size
   function get_layout_pos(name)
     local r = layout_results[name]
     assert(r, "layout: node '" .. name .. "' not found in results")
@@ -156,26 +151,24 @@ global CardVisual = @record{
   default_border_color: Color,
   default_border_width: float32,
 }
-##[[
-nebula_annotate("CardVisual", { states={"default"}, primitives={}, transitions={} })
-]]
+##[[ nebula_annotate("CardVisual", { states={"default"}, primitives={}, transitions={} }) ]]
 ## nebula_derive("CardVisual")
 
--- ---- 标题占位矩形（仅 default + hoverable） ----
+-- ---- 标题占位矩形 ----
 global SimpleRectVisual = @record{
   pos:    Vec2,
   size:   Vec2,
   radius: float32,
-  default_bg_color:  Color,
-  hovered_bg_color:  Color,
+  default_bg_color: Color,
+  hovered_bg_color: Color,
 }
 ##[[
 nebula_annotate("SimpleRectVisual", {
   states     = {"default", "hovered"},
   primitives = {"hoverable"},
   transitions = {
-    {from="default", to="hovered", tween="ease_out", duration=0.15},
-    {from="hovered", to="default", tween="ease_out", duration=0.15},
+    {from="default", to="hovered", on="hover_enter"},
+    {from="hovered", to="default", on="hover_leave"},
   },
 })
 ]]
@@ -201,11 +194,11 @@ nebula_annotate("InputVisual", {
   states     = {"default", "hovered", "focused"},
   primitives = {"hoverable", "clickable", "focusable"},
   transitions = {
-    {from="default", to="hovered", tween="ease_out", duration=0.12},
-    {from="hovered", to="default", tween="ease_out", duration=0.12},
-    {from="hovered", to="focused", tween="ease_out", duration=0.10},
-    {from="focused", to="hovered", tween="ease_out", duration=0.10},
-    {from="focused", to="default", tween="ease_out", duration=0.15},
+    {from="default", to="hovered",  on="hover_enter"},
+    {from="hovered", to="default",  on="hover_leave"},
+    {from="default", to="focused",  on="focus_gain"},
+    {from="hovered", to="focused",  on="focus_gain"},
+    {from="focused", to="default",  on="focus_lose"},
   },
 })
 ]]
@@ -231,14 +224,32 @@ nebula_annotate("ButtonVisual", {
   states     = {"default", "hovered", "pressed"},
   primitives = {"hoverable", "clickable"},
   transitions = {
-    {from="default", to="hovered", tween="ease_out", duration=0.15},
-    {from="hovered", to="default", tween="ease_out", duration=0.15},
-    {from="hovered", to="pressed", tween="none",     duration=0.0},
-    {from="pressed", to="hovered", tween="ease_out", duration=0.1},
+    {from="default", to="hovered", on="hover_enter"},
+    {from="hovered", to="default", on="hover_leave"},
+    {from="hovered", to="pressed", on="press"},
+    {from="pressed", to="hovered", on="release"},
   },
 })
 ]]
 ## nebula_derive("ButtonVisual")
+
+-- =============================================================================
+-- ★ Phase 3.9: 使用 nebula_derive_app 宏声明并派生 LayoutApp
+--   · 7 个组件全部纳入 App 编排，自动生成 Pipeline + update + draw
+--   · 编译期 Flexbox 布局解算结果将在 main() 中注入到各组件的 init 调用中
+-- =============================================================================
+##[[
+  nebula_app_begin("LayoutApp")
+    nebula_app_register_component("card",           "CardVisual")
+    nebula_app_register_component("title_rect",     "SimpleRectVisual")
+    nebula_app_register_component("close_btn",      "ButtonVisual")
+    nebula_app_register_component("email_input",    "InputVisual", {component_id=1})
+    nebula_app_register_component("password_input", "InputVisual", {component_id=2})
+    nebula_app_register_component("cancel_btn",     "ButtonVisual")
+    nebula_app_register_component("login_btn",      "ButtonVisual")
+  nebula_app_end()
+]]
+## nebula_derive_app("LayoutApp")
 
 -- =============================================================================
 -- 主程序
@@ -249,34 +260,21 @@ local function main(): int32
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
 
   local window = glfwCreateWindow(WIN_W, WIN_H,
-    "Nebula Phase 3.1 — Layout Demo (Compile-Time Flexbox)", nilptr, nilptr)
+    "Nebula Phase 3.9 — Layout Demo (Compile-Time Flexbox)", nilptr, nilptr)
   if window == nilptr then printf("glfw: window creation failed\n") return 1 end
+
+  nebula_input_install_callbacks(window)
 
   local renderer: NebulaRenderer
   if not renderer:init(window, WIN_W, WIN_H) then return 1 end
 
-  -- ★ Phase 3.1: 管线初始化（每种 Visual 类型一个管线）
-  local pipe_card:       CardPipeline
-  local pipe_title:      SimpleRectPipeline
-  local pipe_close:      ButtonPipeline
-  local pipe_email:      InputPipeline
-  local pipe_password:   InputPipeline
-  local pipe_cancel:     ButtonPipeline
-  local pipe_login:      ButtonPipeline
-  if not pipe_card:init(&renderer)     then return 1 end
-  if not pipe_title:init(&renderer)    then return 1 end
-  if not pipe_close:init(&renderer)    then return 1 end
-  if not pipe_email:init(&renderer)    then return 1 end
-  if not pipe_password:init(&renderer) then return 1 end
-  if not pipe_cancel:init(&renderer)   then return 1 end
-  if not pipe_login:init(&renderer)    then return 1 end
+  -- LayoutApp:init 自动初始化所有 7 个 Pipeline + 内嵌 FrameArena
+  local app: LayoutApp
+  if not app:init(&renderer, WIN_W, WIN_H) then return 1 end
 
-  -- ★ Phase 3.1: 使用编译期布局解算的坐标初始化组件
-  -- 坐标和尺寸由 nebula_layout_solve 在编译期计算完成
-
-  local card: CardContext
-  card:init(CardVisual{
-    pos    = Vec2{ x = #[get_layout_pos("card")]#, y = #[select(2, get_layout_pos("card"))]# },
+  -- ★ Phase 3.9 + Phase 3.1: 使用编译期 Flexbox 解算的坐标初始化各组件
+  app.card:init(CardVisual{
+    pos    = Vec2{ x = #[get_layout_pos("card")]#,  y = #[select(2, get_layout_pos("card"))]# },
     size   = Vec2{ x = #[get_layout_size("card")]#, y = #[select(2, get_layout_size("card"))]# },
     radius = 16.0,
     default_bg_color     = Color{ r=0.13, g=0.13, b=0.15, a=1.0 },
@@ -284,18 +282,16 @@ local function main(): int32
     default_border_width = 1.0,
   })
 
-  local title_rect: SimpleRectContext
-  title_rect:init(SimpleRectVisual{
-    pos    = Vec2{ x = #[get_layout_pos("title_rect")]#, y = #[select(2, get_layout_pos("title_rect"))]# },
+  app.title_rect:init(SimpleRectVisual{
+    pos    = Vec2{ x = #[get_layout_pos("title_rect")]#,  y = #[select(2, get_layout_pos("title_rect"))]# },
     size   = Vec2{ x = #[get_layout_size("title_rect")]#, y = #[select(2, get_layout_size("title_rect"))]# },
     radius = 6.0,
     default_bg_color = Color{ r=0.25, g=0.25, b=0.30, a=1.0 },
     hovered_bg_color = Color{ r=0.35, g=0.35, b=0.42, a=1.0 },
   })
 
-  local close_btn: ButtonContext
-  close_btn:init(ButtonVisual{
-    pos    = Vec2{ x = #[get_layout_pos("close_btn")]#, y = #[select(2, get_layout_pos("close_btn"))]# },
+  app.close_btn:init(ButtonVisual{
+    pos    = Vec2{ x = #[get_layout_pos("close_btn")]#,  y = #[select(2, get_layout_pos("close_btn"))]# },
     size   = Vec2{ x = #[get_layout_size("close_btn")]#, y = #[select(2, get_layout_size("close_btn"))]# },
     radius = 6.0,
     default_bg_color     = Color{ r=0.20, g=0.20, b=0.22, a=1.0 },
@@ -309,9 +305,8 @@ local function main(): int32
     pressed_border_width = 2.0,
   })
 
-  local email_input: InputContext
-  email_input:init(InputVisual{
-    pos    = Vec2{ x = #[get_layout_pos("email_input")]#, y = #[select(2, get_layout_pos("email_input"))]# },
+  app.email_input:init(InputVisual{
+    pos    = Vec2{ x = #[get_layout_pos("email_input")]#,  y = #[select(2, get_layout_pos("email_input"))]# },
     size   = Vec2{ x = #[get_layout_size("email_input")]#, y = #[select(2, get_layout_size("email_input"))]# },
     radius = 8.0,
     default_bg_color     = Color{ r=0.18, g=0.18, b=0.20, a=1.0 },
@@ -324,11 +319,10 @@ local function main(): int32
     focused_border_color = Color{ r=0.35, g=0.60, b=1.00, a=1.0 },
     focused_border_width = 2.0,
   })
-  email_input.component_id = 1
+  app.email_input.component_id = 1
 
-  local password_input: InputContext
-  password_input:init(InputVisual{
-    pos    = Vec2{ x = #[get_layout_pos("password_input")]#, y = #[select(2, get_layout_pos("password_input"))]# },
+  app.password_input:init(InputVisual{
+    pos    = Vec2{ x = #[get_layout_pos("password_input")]#,  y = #[select(2, get_layout_pos("password_input"))]# },
     size   = Vec2{ x = #[get_layout_size("password_input")]#, y = #[select(2, get_layout_size("password_input"))]# },
     radius = 8.0,
     default_bg_color     = Color{ r=0.18, g=0.18, b=0.20, a=1.0 },
@@ -341,11 +335,10 @@ local function main(): int32
     focused_border_color = Color{ r=0.35, g=0.60, b=1.00, a=1.0 },
     focused_border_width = 2.0,
   })
-  password_input.component_id = 2
+  app.password_input.component_id = 2
 
-  local cancel_btn: ButtonContext
-  cancel_btn:init(ButtonVisual{
-    pos    = Vec2{ x = #[get_layout_pos("cancel_btn")]#, y = #[select(2, get_layout_pos("cancel_btn"))]# },
+  app.cancel_btn:init(ButtonVisual{
+    pos    = Vec2{ x = #[get_layout_pos("cancel_btn")]#,  y = #[select(2, get_layout_pos("cancel_btn"))]# },
     size   = Vec2{ x = #[get_layout_size("cancel_btn")]#, y = #[select(2, get_layout_size("cancel_btn"))]# },
     radius = 10.0,
     default_bg_color     = Color{ r=0.22, g=0.22, b=0.25, a=1.0 },
@@ -359,9 +352,8 @@ local function main(): int32
     pressed_border_width = 2.0,
   })
 
-  local login_btn: ButtonContext
-  login_btn:init(ButtonVisual{
-    pos    = Vec2{ x = #[get_layout_pos("login_btn")]#, y = #[select(2, get_layout_pos("login_btn"))]# },
+  app.login_btn:init(ButtonVisual{
+    pos    = Vec2{ x = #[get_layout_pos("login_btn")]#,  y = #[select(2, get_layout_pos("login_btn"))]# },
     size   = Vec2{ x = #[get_layout_size("login_btn")]#, y = #[select(2, get_layout_size("login_btn"))]# },
     radius = 10.0,
     default_bg_color     = Color{ r=0.22, g=0.44, b=0.90, a=1.0 },
@@ -375,119 +367,43 @@ local function main(): int32
     pressed_border_width = 2.0,
   })
 
-  -- Phase 2.4: 统一输入状态
   local input: NebulaInputState
   local prev_time = glfwGetTime()
 
-  printf("=== Phase 3.1 Layout Demo: all components positioned by compile-time Flexbox ===\n")
+  printf("nebula: layout_demo started — 7 components positioned by compile-time Flexbox\n")
 
+  -- =============================================================================
+  -- ★ Phase 3.9: 主循环收缩到 3 行
+  -- =============================================================================
   while glfwWindowShouldClose(window) == 0 do
     glfwPollEvents()
     local now = glfwGetTime()
     local dt  = (@float32)(now - prev_time)
     prev_time = now
-
     nebula_collect_input(window, &input, dt)
 
-    -- 更新所有组件
-    card:update(&input, dt)
-    title_rect:update(&input, dt)
-    close_btn:update(&input, dt)
-    email_input:update(&input, dt)
-    password_input:update(&input, dt)
-    cancel_btn:update(&input, dt)
-    login_btn:update(&input, dt)
-
-    -- 渲染
-    local surface_tex: WGPUSurfaceTexture
-    wgpuSurfaceGetCurrentTexture(renderer.surface, &surface_tex)
-    local status = surface_tex.status
-    if status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal and
-       status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal then
-      continue
+    -- 业务逻辑：按钮点击响应
+    if app.close_btn.click.just_clicked then
+      printf("nebula: close button clicked\n")
     end
-    local view_desc = WGPUTextureViewDescriptor{
-      nextInChain     = nilptr, label = wgpu_str_null(),
-      format          = renderer.format,
-      dimension       = 2,
-      baseMipLevel    = 0, mipLevelCount = 1,
-      baseArrayLayer  = 0, arrayLayerCount = 1,
-      aspect          = 1, usage = 0,
-    }
-    local view = wgpuTextureCreateView(surface_tex.texture, &view_desc)
+    if app.login_btn.click.just_clicked then
+      printf("nebula: login button clicked\n")
+    end
+    if app.cancel_btn.click.just_clicked then
+      printf("nebula: cancel button clicked\n")
+    end
 
-    -- Uniforms
-    local u_card     = card:to_uniforms(WIN_W, WIN_H)
-    local u_title    = title_rect:to_uniforms(WIN_W, WIN_H)
-    local u_close    = close_btn:to_uniforms(WIN_W, WIN_H)
-    local u_email    = email_input:to_uniforms(WIN_W, WIN_H)
-    local u_pwd      = password_input:to_uniforms(WIN_W, WIN_H)
-    local u_cancel   = cancel_btn:to_uniforms(WIN_W, WIN_H)
-    local u_login    = login_btn:to_uniforms(WIN_W, WIN_H)
-    pipe_card:update_viewport(&renderer, WIN_W, WIN_H)
-
-    pipe_card:upload(&renderer, &u_card, 1)
-    pipe_title:update_viewport(&renderer, WIN_W, WIN_H)
-
-    pipe_title:upload(&renderer, &u_title, 1)
-    pipe_close:update_viewport(&renderer, WIN_W, WIN_H)
-
-    pipe_close:upload(&renderer, &u_close, 1)
-    pipe_email:update_viewport(&renderer, WIN_W, WIN_H)
-
-    pipe_email:upload(&renderer, &u_email, 1)
-    pipe_password:update_viewport(&renderer, WIN_W, WIN_H)
-
-    pipe_password:upload(&renderer, &u_pwd, 1)
-    pipe_cancel:update_viewport(&renderer, WIN_W, WIN_H)
-
-    pipe_cancel:upload(&renderer, &u_cancel, 1)
-    pipe_login:update_viewport(&renderer, WIN_W, WIN_H)
-
-    pipe_login:upload(&renderer, &u_login, 1)
-
-    local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, nilptr)
-    local clear_color = WGPURenderPassColorAttachment{
-      nextInChain = nilptr, view = view, depthSlice = 0xFFFFFFFF,
-      resolveTarget = nilptr,
-      loadOp  = WGPULoadOp_Clear,
-      storeOp = WGPUStoreOp_Store,
-      clearValue = WGPUColor{ r=0.08, g=0.08, b=0.10, a=1.0 },
-    }
-    local rp_desc = WGPURenderPassDescriptor{
-      nextInChain            = nilptr,
-      label                  = wgpu_str_null(),
-      colorAttachmentCount   = 1,
-      colorAttachments       = &clear_color,
-      depthStencilAttachment = nilptr,
-      occlusionQuerySet      = nilptr,
-      timestampWrites        = nilptr,
-    }
-    local pass = wgpuCommandEncoderBeginRenderPass(encoder, &rp_desc)
-
-    -- 按 Z 序绘制：卡片背景 → 标题 → 关闭按钮 → 输入框 → 按钮
-    pipe_card:draw_instanced(pass, 1)
-    pipe_title:draw_instanced(pass, 1)
-    pipe_close:draw_instanced(pass, 1)
-    pipe_email:draw_instanced(pass, 1)
-    pipe_password:draw_instanced(pass, 1)
-    pipe_cancel:draw_instanced(pass, 1)
-    pipe_login:draw_instanced(pass, 1)
-
-    wgpuRenderPassEncoderEnd(pass)
-    wgpuRenderPassEncoderRelease(pass)
-
-    local cmd = wgpuCommandEncoderFinish(encoder, nilptr)
-    wgpuQueueSubmit(renderer.queue, 1, &cmd)
-    wgpuCommandBufferRelease(cmd)
-    wgpuCommandEncoderRelease(encoder)
-
-    wgpuTextureViewRelease(view)
-    wgpuSurfacePresent(renderer.surface)
+    -- ★ Phase 3.9: nebula_frame_render 封装全部渲染
+    nebula_frame_render(&renderer, &app, &input, dt, 0.08, 0.08, 0.10)
   end
 
+  wgpuSurfaceRelease(renderer.surface)
+  wgpuDeviceRelease(renderer.device)
+  wgpuAdapterRelease(renderer.adapter)
+  wgpuInstanceRelease(renderer.instance)
   glfwDestroyWindow(window)
   glfwTerminate()
+  printf("nebula: clean exit\n")
   return 0
 end
 

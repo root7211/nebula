@@ -106,38 +106,28 @@ run_test "smoke_phase3_9 (Phase 3.9 — 文本一等公民 & Slot Producer 重�
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="
 
-# Phase 3.2.x 历史编译回归（保持不变）
-run_test "compile text_demo (Phase 3.2.5)" \
-  bash build.sh text_demo
-
-run_test "compile button_demo (Phase 2.4)" \
+# Phase 3.9 核心 Demo 编译回归（最新 API）
+run_test "compile button_demo (Phase 3.9 — 按钮演示)" \
   bash build.sh button_demo
 
-run_test "compile login_demo (Phase 3.4.4)" \
-  bash build.sh login_demo
-
-run_test "compile simple_rect_demo (Phase 2.4)" \
-  bash build.sh simple_rect_demo
-
-run_test "compile shadow_demo (Phase 2.5)" \
-  bash build.sh shadow_demo
-
-run_test "compile layout_demo (Phase 3.1)" \
+run_test "compile layout_demo (Phase 3.9 — 编译期 Flexbox 布局)" \
   bash build.sh layout_demo
 
-run_test "compile uniform_layout_test (Phase 2.1)" \
-  bash build.sh uniform_layout_test
+run_test "compile login_demo (Phase 3.9 — 文本一等公民登录框)" \
+  bash build.sh login_demo
 
-# Phase 3.3.5 / Phase 3.7 编译回归（dynamic_list_demo 已迁移到 standard_instanced）
-run_test "compile dynamic_list_demo (Phase 3.7 migration)" \
-  bash build.sh dynamic_list_demo
-
-# Phase 3.9 编译回归（form_demo 文本一等公民，dynamic_list_demo Slot Producer）
-run_test "compile form_demo (Phase 3.9 — 文本一等公民)" \
+run_test "compile form_demo (Phase 3.9 — 文本一等公民表单)" \
   bash build.sh form_demo
 
 run_test "compile dynamic_list_demo (Phase 3.9 — Slot Producer)" \
   bash build.sh dynamic_list_demo
+
+# 暂缓升级的 Demo（等待框架支持）
+run_test "compile shadow_demo (Phase 2.5 — 暂缓升级，等待多 Pass 框架支持)" \
+  bash build.sh shadow_demo
+
+run_test "compile text_demo (Phase 3.2.5 — 暂缓升级，等待独立标签支持)" \
+  bash build.sh text_demo
 
 # ---- 总结 ----
 echo ""

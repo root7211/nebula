@@ -1,6 +1,14 @@
 -- =============================================================================
 -- text_demo.nelua
--- Nebula GUI Compiler — Phase 3.2.5 Text Rendering Showcase
+-- Nebula GUI Compiler — Phase 3.2.5（暂缓升级）
+--
+-- ⚠ 架构说明（Phase 3.9 审计）：
+--   本 Demo 展示纯独立文本渲染（非绑定到 editable 组件）。
+--   当前的 nebula_app_register_text 要求文本组件必须绑定到一个 editable 组件，
+--   无法支持纯展示性的独立文本标签。
+--   因此本 Demo 暂时保留手动渲染循环，等待以下框架支持后再升级：
+--     · nebula_app_register_text 支持独立文本标签（bound_to=nil）（规划于 Phase 3.10）
+--     · nebula_app_register_label 原语（规划于 Phase 3.10）
 --
 -- Phase 3.2.5 升级：
 --   · 多字号展示：48px 标题 + 28px 副标题 + 20px 正文 + 16px 小字
