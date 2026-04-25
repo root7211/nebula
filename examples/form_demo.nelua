@@ -1,26 +1,22 @@
 -- =============================================================================
 -- form_demo.nelua
--- Nebula GUI Compiler — Phase 3.8
+-- Nebula GUI Compiler — Phase 3.9
 --
--- 综合演示：在 Phase 3.6.3 基础上验证 Phase 3.8 的渲染循环封装：
---   · Phase 3.8a: nebula_frame_render — 封装全部 WGPU 渲染样板（20 行 → 1 行）
---   · Phase 3.8b: FrameArena 内嵌于 FormApp — 无需手动声明 Arena
---   · Phase 3.8c: app_factory 自动注入 nebula_arena_reset 到 FormApp:update
+-- ★ Phase 3.9: 文本一等公民重构
+--   · 使用 nebula_app_register_text 将文本组件纳入 FormApp 编排
+--   · 消除 40 行独立文本渲染 Pass（Phase 3.8 遗留的最后一块样板代码）
+--   · 消除手动 process_text_input / set_text 调用（由 app_factory 自动生成）
+--   · 主循环收缩到 2 行（glfwPollEvents + collect_input + frame_render）
 --
--- 与 Phase 3.6.3 的对比：
---   · 主循环从 ~50 行 WGPU 样板收缩到 3 行（glfwPollEvents + collect_input + frame_render）
---   · 删除了手写的 surface_tex / encoder / pass_desc / submit / present 代码
---   · FormApp 自动持有 2MB FrameArena，无需开发者声明 _arena_backing
---
--- 注意（Phase 3.9 预留）：
---   · 文本渲染管线（pipe_email_text / pipe_password_text）目前仍独立于 FormApp
---   · 选区高亮坐标计算和文本绘制通过在 nebula_frame_render 之后的独立 pass 处理
---   · Phase 3.9 将文本纳入一等公民后，此限制将被彻底消除
+-- 与 Phase 3.8 的对比：
+--   · 删除 pipe_email_text / pipe_password_text 手动声明
+--   · 删除 email_text / password_text 手动声明和初始化
+--   · 删除主循环中的 process_text_input + set_text 业务逻辑（约 30 行）
+--   · 删除 nebula_frame_render 之后的 40 行独立文本 Render Pass
+--   · 文本组件现在通过 form.email_label / form.password_label 访问
 -- =============================================================================
-
 ## cinclude "<stdio.h>"
 ## cinclude "<string.h>"
-
 require "nebula_core"
 require "glfw_bindings"
 require "wgpu_bindings"
@@ -30,17 +26,13 @@ require "app"
 require "text_runtime"
 require "nebula_cursor"
 require "nebula_arena"
-
 global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
 global function memset(ptr: pointer, value: int32, size: usize): pointer <cimport, nodecl> end
-
 local WIN_W <comptime> = 800
 local WIN_H <comptime> = 600
-
 -- =============================================================================
 -- 视觉规格 + 注解 + 派生
 -- =============================================================================
-
 -- ---- 卡片背景 ----
 global CardVisual = @record{
   pos:    Vec2,
@@ -52,13 +44,7 @@ global CardVisual = @record{
 }
 ##[[ nebula_annotate("CardVisual", { states={"default"}, primitives={}, transitions={} }) ]]
 ## nebula_derive("CardVisual")
-
--- ---- 输入框：default + hovered + focused ----
-##[[
-  local _gb_type_name, _gb_src = nebula_gen_gap_buffer_type(255)
-  local _gb_ast = aster.parse(_gb_src, "<nebula_gen_gap_buffer_type:255>")
-  for _, stat in ipairs(_gb_ast) do inject_statement(stat) end
-]]
+-- ---- 输入框 ----
 global InputVisual = @record{
   pos:    Vec2,
   size:   Vec2,
@@ -72,31 +58,22 @@ global InputVisual = @record{
   focused_bg_color:     Color,
   focused_border_color: Color,
   focused_border_width: float32,
-  gap_buf:      NebulaBuf255,
   pixel_height: float32,
 }
 ##[[
 nebula_annotate("InputVisual", {
   states     = {"default", "hovered", "focused"},
-  primitives = {"hoverable", "clickable", "focusable"},
+  primitives = {"hoverable", "focusable", "editable"},
   transitions = {
-    {from="default", to="hovered", tween="ease_out", duration=0.12},
-    {from="hovered", to="default", tween="ease_out", duration=0.12},
-    {from="hovered", to="focused", tween="ease_out", duration=0.10},
-    {from="focused", to="hovered", tween="ease_out", duration=0.10},
-    {from="focused", to="default", tween="ease_out", duration=0.15},
+    {from="default", to="hovered",  on="hover_enter"},
+    {from="hovered", to="default",  on="hover_leave"},
+    {from="default", to="focused",  on="focus_gain"},
+    {from="hovered", to="focused",  on="focus_gain"},
+    {from="focused", to="default",  on="focus_lose"},
   },
-  max_text_len = 255,
 })
 ]]
 ## nebula_derive("InputVisual")
-
-##[[
-  local _tb_src = nebula_gen_text_buffer({ base = "Input", max_text_len = 255 })
-  local _tb_ast = aster.parse(_tb_src, "<nebula_gen_text_buffer:Input>")
-  for _, stat in ipairs(_tb_ast) do inject_statement(stat) end
-]]
-
 -- ---- 按钮 ----
 global ButtonVisual = @record{
   pos:    Vec2,
@@ -117,15 +94,14 @@ nebula_annotate("ButtonVisual", {
   states     = {"default", "hovered", "pressed"},
   primitives = {"hoverable", "clickable"},
   transitions = {
-    {from="default", to="hovered", tween="ease_out", duration=0.15},
-    {from="hovered", to="default", tween="ease_out", duration=0.15},
-    {from="hovered", to="pressed", tween="none",     duration=0.0},
-    {from="pressed", to="hovered", tween="ease_out", duration=0.1},
+    {from="default", to="hovered", on="hover_enter"},
+    {from="hovered", to="default", on="hover_leave"},
+    {from="hovered", to="pressed", on="press"},
+    {from="pressed", to="hovered", on="release"},
   },
 })
 ]]
 ## nebula_derive("ButtonVisual")
-
 -- ---- 复选框 ----
 global CheckboxVisual = @record{
   pos:    Vec2,
@@ -141,21 +117,16 @@ global CheckboxVisual = @record{
 ##[[
 nebula_annotate("CheckboxVisual", {
   states     = {"default", "hovered"},
-  primitives = {"hoverable", "clickable", "toggleable"},
+  primitives = {"hoverable", "toggleable"},
   transitions = {
-    {from="default", to="hovered", tween="ease_out", duration=0.10},
-    {from="hovered", to="default", tween="ease_out", duration=0.10},
+    {from="default", to="hovered", on="hover_enter"},
+    {from="hovered", to="default", on="hover_leave"},
   },
 })
+local _tgl_src = nebula_gen_toggle_state({ base = "Checkbox" })
+local _tgl_ast = aster.parse(_tgl_src, "<nebula_gen_toggle_state:Checkbox>")
+for _, stat in ipairs(_tgl_ast) do inject_statement(stat) end
 ]]
-## nebula_derive("CheckboxVisual")
-
-##[[
-  local _tgl_src = nebula_gen_toggle_state({ base = "Checkbox" })
-  local _tgl_ast = aster.parse(_tgl_src, "<nebula_gen_toggle_state:Checkbox>")
-  for _, stat in ipairs(_tgl_ast) do inject_statement(stat) end
-]]
-
 -- ---- 文本渲染 Visual ----
 global TextVisual = @record{
   pos:          Vec2,
@@ -173,22 +144,33 @@ nebula_annotate("TextVisual", {
 })
 ]]
 ## nebula_derive_text_visual("TextVisual")
-
 -- =============================================================================
--- ★ Phase 3.8: 使用 nebula_derive_app 宏声明并派生 FormApp
--- nebula_app_begin 支持 opts.arena_size（默认 2MB，此处使用默认值）
+-- ★ Phase 3.9: 使用 nebula_derive_app 宏声明并派生 FormApp
+--   · nebula_app_register_text 将文本组件纳入一等公民编排
+--   · email_label 绑定到 email_input（placeholder: "email"）
+--   · password_label 绑定到 password_input（placeholder: "password"，掩码显示）
 -- =============================================================================
 ##[[
   nebula_app_begin("FormApp")
-    nebula_app_register_component("card",          "CardVisual")
-    nebula_app_register_component("email_input",   "InputVisual", {component_id=1, has_text_buf=true})
-    nebula_app_register_component("password_input","InputVisual", {component_id=2, has_text_buf=true})
-    nebula_app_register_component("remember_me",   "CheckboxVisual")
-    nebula_app_register_component("login_btn",     "ButtonVisual")
+    nebula_app_register_component("card",           "CardVisual")
+    nebula_app_register_component("email_input",    "InputVisual", {component_id=1})
+    nebula_app_register_component("password_input", "InputVisual", {component_id=2})
+    nebula_app_register_component("remember_me",    "CheckboxVisual")
+    nebula_app_register_component("login_btn",      "ButtonVisual")
+    -- ★ Phase 3.9: 文本组件一等公民注册
+    nebula_app_register_text("email_label",    "TextVisual", {
+      bound_to      = "email_input",
+      placeholder   = "email",
+      mask_password = false,
+    })
+    nebula_app_register_text("password_label", "TextVisual", {
+      bound_to      = "password_input",
+      placeholder   = "password",
+      mask_password = true,
+    })
   nebula_app_end()
 ]]
 ## nebula_derive_app("FormApp")
-
 -- =============================================================================
 -- 主程序
 -- =============================================================================
@@ -196,19 +178,14 @@ local function main(): int32
   if glfwInit() == 0 then printf("glfw: init failed\n") return 1 end
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
-
-  local window = glfwCreateWindow(WIN_W, WIN_H, "Nebula Phase 3.8 — Form Demo", nilptr, nilptr)
+  local window = glfwCreateWindow(WIN_W, WIN_H, "Nebula Phase 3.9 — Form Demo", nilptr, nilptr)
   if window == nilptr then printf("glfw: window creation failed\n") return 1 end
-
   nebula_input_install_callbacks(window)
-
   local renderer: NebulaRenderer
   if not renderer:init(window, WIN_W, WIN_H) then return 1 end
-
-  -- ★ Phase 3.8: FormApp:init 自动初始化所有管线 + 内嵌 FrameArena（2MB）
+  -- FormApp:init 自动初始化所有管线 + 内嵌 FrameArena（2MB）+ 文本管线（Phase 3.9）
   local form: FormApp
   if not form:init(&renderer, WIN_W, WIN_H) then return 1 end
-
   -- 初始化各组件的视觉规格
   form.card:init(CardVisual{
     pos    = Vec2{ x = 220.0, y = 80.0 },
@@ -218,7 +195,6 @@ local function main(): int32
     default_border_color = Color{ r=0.25, g=0.25, b=0.28, a=1.0 },
     default_border_width = 1.0,
   })
-
   form.email_input:init(InputVisual{
     pos    = Vec2{ x = 252.0, y = 176.0 },
     size   = Vec2{ x = 296.0, y = 44.0 },
@@ -238,7 +214,6 @@ local function main(): int32
   form.email_input.selection_anchor = 0
   form.email_input.is_dragging      = false
   form.email_input.component_id = 1
-
   form.password_input:init(InputVisual{
     pos    = Vec2{ x = 252.0, y = 244.0 },
     size   = Vec2{ x = 296.0, y = 44.0 },
@@ -258,7 +233,6 @@ local function main(): int32
   form.password_input.selection_anchor = 0
   form.password_input.is_dragging      = false
   form.password_input.component_id = 2
-
   form.remember_me:init(CheckboxVisual{
     pos    = Vec2{ x = 252.0, y = 308.0 },
     size   = Vec2{ x = 20.0,  y = 20.0 },
@@ -270,7 +244,6 @@ local function main(): int32
     hovered_border_color = Color{ r=0.60, g=0.60, b=0.70, a=1.0 },
     hovered_border_width = 2.0,
   })
-
   form.login_btn:init(ButtonVisual{
     pos    = Vec2{ x = 252.0, y = 348.0 },
     size   = Vec2{ x = 296.0, y = 48.0 },
@@ -285,75 +258,40 @@ local function main(): int32
     pressed_border_color = Color{ r=0.60, g=0.80, b=1.00, a=1.0 },
     pressed_border_width = 2.0,
   })
-
-  -- 文本渲染管线（Phase 3.9 前暂独立于 FormApp）
-  local pipe_email_text:    TextPipeline
-  local pipe_password_text: TextPipeline
-  if not pipe_email_text:init(&renderer)    then return 1 end
-  if not pipe_password_text:init(&renderer) then return 1 end
-
-  local email_text:    TextContext
-  local password_text: TextContext
-  email_text:init(TextVisual{
+  -- ★ Phase 3.9: 初始化文本组件视觉规格（一等公民）
+  form.email_label:init(TextVisual{
     pos          = Vec2{ x = 260.0, y = 192.0 },
     size         = Vec2{ x = 0.0, y = 0.0 },
     pixel_height = 14.0,
     default_text_color = Color{ r=0.90, g=0.90, b=0.92, a=1.0 },
   })
-  password_text:init(TextVisual{
+  form.password_label:init(TextVisual{
     pos          = Vec2{ x = 260.0, y = 260.0 },
     size         = Vec2{ x = 0.0, y = 0.0 },
     pixel_height = 14.0,
     default_text_color = Color{ r=0.90, g=0.90, b=0.92, a=1.0 },
   })
-
-  if not email_text:set_text(&renderer, "email") then return 1 end
-  if not password_text:set_text(&renderer, "password") then return 1 end
+  -- 设置初始占位符文本（由 app_factory 生成的 update 会在输入变化时自动更新）
+  if not form.email_label:set_text(&renderer, "email") then return 1 end
+  if not form.password_label:set_text(&renderer, "password") then return 1 end
 
   local input: NebulaInputState
   local prev_time = glfwGetTime()
 
   -- =============================================================================
-  -- ★ Phase 3.8: 主循环收缩到 3 行
+  -- ★ Phase 3.9: 主循环收缩到 2 行
   --   · glfwPollEvents + nebula_collect_input：输入收集
-  --   · 业务逻辑（文本输入处理、Enter 键响应）：保留在应用层
-  --   · nebula_frame_render：封装全部 WGPU 渲染样板（原 20 行 → 1 行）
+  --   · nebula_frame_render：封装全部渲染（含文本，Phase 3.9 新增）
+  --   · 业务逻辑（Enter 键响应）：保留在应用层
   -- =============================================================================
   while glfwWindowShouldClose(window) == 0 do
-    -- 行 1：事件轮询 + 输入收集
     glfwPollEvents()
     local now = glfwGetTime()
     local dt  = (@float32)(now - prev_time)
     prev_time = now
     nebula_collect_input(window, &input, dt)
 
-    -- 业务逻辑：文本输入处理（保留在应用层，属于领域逻辑而非渲染样板）
-    if form.email_input:process_text_input(&input) then
-      if form.email_input:get_text_len() > 0 then
-        local flat_email: [256]uint8
-        email_text:set_text(&renderer, form.email_input:get_text(&flat_email[0], 255))
-      else
-        email_text:set_text(&renderer, "email")
-      end
-    end
-
-    if form.password_input:process_text_input(&input) then
-      local pwd_len = form.password_input:get_text_len()
-      if pwd_len > 0 then
-        local mask: [256]uint8
-        local mi: uint16 = 0
-        while mi < pwd_len do
-          mask[mi] = 0x2A  -- '*'
-          mi = mi + 1
-        end
-        mask[pwd_len] = 0
-        password_text:set_text(&renderer, (@cstring)(&mask[0]))
-      else
-        password_text:set_text(&renderer, "password")
-      end
-    end
-
-    -- Enter 键：打印表单内容
+    -- 业务逻辑：Enter 键打印表单内容（领域逻辑，保留在应用层）
     if input.key_pressed == NebulaKey.Enter then
       local flat_email: [256]uint8
       printf("email: %s\n", form.email_input:get_text(&flat_email[0], 255))
@@ -361,55 +299,9 @@ local function main(): int32
       printf("remember_me: %s\n", form.remember_me.toggle.is_on and "true" or "false")
     end
 
-    -- 行 2：★ Phase 3.8 核心 — 一行替代原来 20 行 WGPU 渲染样板
-    -- nebula_frame_render 内部执行：update → arena_reset → render_pass → draw → submit → present
+    -- ★ Phase 3.9: nebula_frame_render 现在包含文本渲染（一等公民）
+    -- 内部执行：update（含文本联动）→ arena_reset → render_pass → draw（含文本）→ submit → present
     nebula_frame_render(&renderer, &form, &input, dt, 0.09, 0.09, 0.10)
-
-    -- 行 3（Phase 3.9 预留）：文本渲染目前仍需独立 pass
-    -- TODO Phase 3.9: 将文本管线纳入 FormApp，消除此独立 pass
-    do
-      local surface_tex: WGPUSurfaceTexture
-      wgpuSurfaceGetCurrentTexture(renderer.surface, &surface_tex)
-      local status = surface_tex.status
-      if status == WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal or
-         status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal then
-        local view_desc = WGPUTextureViewDescriptor{
-          nextInChain = nilptr, label = wgpu_str_null(),
-          format = renderer.format, dimension = 2,
-          baseMipLevel = 0, mipLevelCount = 1,
-          baseArrayLayer = 0, arrayLayerCount = 1,
-          aspect = WGPUTextureAspect_All,
-        }
-        local view = wgpuTextureCreateView(surface_tex.texture, &view_desc)
-        local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, nilptr)
-        local load_color = WGPURenderPassColorAttachment{
-          nextInChain = nilptr, view = view, depthSlice = 0xFFFFFFFF,
-          resolveTarget = nilptr,
-          loadOp = WGPULoadOp_Load, storeOp = WGPUStoreOp_Store,
-          clearValue = WGPUColor{ r=0.0, g=0.0, b=0.0, a=0.0 },
-        }
-        local pass_desc = WGPURenderPassDescriptor{
-          nextInChain = nilptr, label = wgpu_str_null(),
-          colorAttachmentCount = 1, colorAttachments = &load_color,
-          depthStencilAttachment = nilptr,
-          occlusionQuerySet = nilptr, timestampWrites = nilptr,
-        }
-        local pass = wgpuCommandEncoderBeginRenderPass(encoder, &pass_desc)
-        pipe_email_text:draw_buffer(pass, email_text.mesh.vertex_buffer,
-          email_text.mesh.vertex_buffer_size, email_text.mesh.vertex_count)
-        pipe_password_text:draw_buffer(pass, password_text.mesh.vertex_buffer,
-          password_text.mesh.vertex_buffer_size, password_text.mesh.vertex_count)
-        wgpuRenderPassEncoderEnd(pass)
-        wgpuRenderPassEncoderRelease(pass)
-        local cmd = wgpuCommandEncoderFinish(encoder, nilptr)
-        wgpuCommandEncoderRelease(encoder)
-        wgpuQueueSubmit(renderer.queue, 1, &cmd)
-        wgpuCommandBufferRelease(cmd)
-        wgpuSurfacePresent(renderer.surface)
-        wgpuTextureViewRelease(view)
-        wgpuTextureRelease(surface_tex.texture)
-      end
-    end
   end
 
   wgpuSurfaceRelease(renderer.surface)
@@ -421,5 +313,4 @@ local function main(): int32
   printf("nebula: clean exit\n")
   return 0
 end
-
 main()

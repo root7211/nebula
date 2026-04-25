@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # run_all_tests.sh
-# Nebula GUI Compiler — Phase 3.8 Full Regression Test Suite
+# Nebula GUI Compiler — Phase 3.9 Full Regression Test Suite
 #
 # 运行所有 Lua 冒烟测试和编译回归测试。
 #
@@ -34,7 +34,7 @@ run_test() {
 }
 
 echo "============================================"
-echo " Nebula Phase 3.8 — Full Regression Suite"
+echo " Nebula Phase 3.9 — Full Regression Suite"
 echo "============================================"
 
 # ---- Part 1: Lua 冒烟测试（纯编译期逻辑验证） ----
@@ -108,6 +108,10 @@ run_test "smoke_phase3_7 (Phase 3.7 — 管线收敛 & 死代码清理专项验�
 run_test "smoke_phase3_8 (Phase 3.8 — nebula_frame_render & FrameArena 内嵌验证)" \
   nelua-lua tests/smoke_phase3_8.lua
 
+# Phase 3.9 专项测试（文本一等公民 & Slot Producer 重构）
+run_test "smoke_phase3_9 (Phase 3.9 — 文本一等公民 & Slot Producer 重构验证)" \
+  nelua-lua tests/smoke_phase3_9.lua
+
 # ---- Part 2: 编译回归测试（Nelua → C → 二进制） ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="
@@ -138,9 +142,12 @@ run_test "compile uniform_layout_test (Phase 2.1)" \
 run_test "compile dynamic_list_demo (Phase 3.7 migration)" \
   bash build.sh dynamic_list_demo
 
-# Phase 3.8 编译回归（form_demo 使用 nebula_frame_render）
-run_test "compile form_demo (Phase 3.8 — nebula_frame_render)" \
+# Phase 3.9 编译回归（form_demo 文本一等公民，dynamic_list_demo Slot Producer）
+run_test "compile form_demo (Phase 3.9 — 文本一等公民)" \
   bash build.sh form_demo
+
+run_test "compile dynamic_list_demo (Phase 3.9 — Slot Producer)" \
+  bash build.sh dynamic_list_demo
 
 # ---- 总结 ----
 echo ""
@@ -152,6 +159,6 @@ if [ "$FAIL" -gt 0 ]; then
   echo "[REGRESSION DETECTED] $FAIL test(s) failed!"
   exit 1
 else
-  echo "[ALL PASS] Phase 3.8 regression suite complete."
+  echo "[ALL PASS] Phase 3.9 regression suite complete."
   exit 0
 fi

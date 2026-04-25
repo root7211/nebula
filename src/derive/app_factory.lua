@@ -1,8 +1,14 @@
 -- =============================================================================
--- derive/app_factory.lua — Nebula GUI Compiler Phase 3.8
+-- derive/app_factory.lua — Nebula GUI Compiler Phase 3.9
 --
 -- 编译期显式编排工厂（App Factory）
--- 生成 <App> record + init + update + draw，★ Phase 3.8 新增 Arena 内嵌。
+-- 生成 <App> record + init + update + draw
+--
+-- ★ Phase 3.8 新增：Arena 内嵌，nebula_frame_render 封装
+-- ★ Phase 3.9 新增：
+--   · nebula_app_register_text  — 文本一等公民（原语 3）
+--   · nebula_app_register_slot  — Slot Producer 重构（原语 4，废弃外部全局变量）
+--   · NebulaSlotView            — 动态插槽视图 Record
 -- =============================================================================
 
 -- 全局应用注册表
@@ -25,9 +31,10 @@ function nebula_app_begin(app_name, opts)
   opts = opts or {}
   _current_app = app_name
   nebula_app_registry[app_name] = {
-    name       = app_name,
-    components = {},  -- 静态组件列表：{name, visual_type, base, component_id}
-    slots      = {},  -- 动态插槽列表：{name, visual_type, base, max_instances}
+    name        = app_name,
+    components  = {},  -- 静态组件列表：{name, visual_type, base, component_id}
+    slots       = {},  -- 动态插槽列表：{name, visual_type, base, max_instances, producer}
+    texts       = {},  -- ★ Phase 3.9: 文本组件列表：{name, visual_type, base, bound_to, placeholder, mask_password}
     -- 按 visual_type 分组，用于生成共享 Pipeline
     type_groups = {},  -- {visual_type -> {pipeline_name, base, members=[{name, is_slot}]}}
     -- ★ Phase 3.8: FrameArena 配置
@@ -53,8 +60,9 @@ function nebula_app_register_component(name, visual_type, opts)
     visual_type  = visual_type,
     base         = base,
     component_id = opts.component_id or 0,
-    has_text_buf = opts.has_text_buf or false,  -- 是否有 process_text_input
-    text_context = opts.text_context or nil,    -- 关联的 TextContext 名称
+    -- 以下字段为 Phase 3.8 遗留，Phase 3.9 由 nebula_app_register_text 接管
+    has_text_buf = opts.has_text_buf or false,
+    text_context = opts.text_context or nil,
   })
 
   -- 更新 type_groups
@@ -72,14 +80,47 @@ function nebula_app_register_component(name, visual_type, opts)
   })
 end
 
--- 注册一个动态插槽（对应 Arena 分配的动态列表）
+-- ★ Phase 3.9: 注册一个文本组件（原语 3：编译期 Text 一等公民）
+--
+-- 将文本标签绑定到某个 editable 组件，自动生成：
+--   · <App> record 中注入 TextContext 字段
+--   · <App>:update 中注入 process_text_input + set_text 联动逻辑
+--   · <App>:draw 中注入 TextPipeline:draw_buffer 调用
+--
 -- opts:
---   name          : string  — 插槽名（如 "list_items"）
---   visual_type   : string  — Visual 类型名
---   max_instances : number  — 最大实例数（决定 Storage Buffer 大小）
---   arena_var     : string  — 运行时 Arena 变量名（如 "item_arena"）
---   count_var     : string  — 运行时实例计数变量名（如 "item_count"）
---   data_var      : string  — 运行时实例数据数组变量名（如 "item_instances"）
+--   bound_to      : string  — 绑定的 editable 组件名（如 "email_input"）
+--   placeholder   : string  — 默认占位符文本（如 "email"）
+--   mask_password : boolean — 是否掩码显示（true 时将字符替换为 '*'）
+--   visual        : table   — TextVisual 初始化参数（pos, pixel_height, 颜色等）
+function nebula_app_register_text(name, visual_type, opts)
+  assert(_current_app, "nebula_app_register_text: must be called between nebula_app_begin and nebula_app_end")
+  opts = opts or {}
+  local reg = nebula_app_registry[_current_app]
+  local base = visual_type:sub(-#"Visual") == "Visual"
+    and visual_type:sub(1, #visual_type - #"Visual")
+    or visual_type
+
+  assert(opts.bound_to, ("nebula_app_register_text: '%s' requires opts.bound_to"):format(name))
+
+  table.insert(reg.texts, {
+    name          = name,
+    visual_type   = visual_type,
+    base          = base,
+    bound_to      = opts.bound_to,
+    placeholder   = opts.placeholder or "",
+    mask_password = opts.mask_password or false,
+  })
+end
+
+-- ★ Phase 3.9: 注册一个动态插槽（原语 4：插槽即 Arena Producer）
+--
+-- 废弃旧的 arena_var / count_var / data_var 外部全局变量模式，
+-- 改为声明一个 Producer 函数，由框架自动管理 Arena 生命周期。
+--
+-- opts:
+--   max_instances : number  — 最大实例数（决定 Arena 分配大小）
+--   producer      : string  — 用户实现的纯函数名
+--                             签名：function(app: *<App>, arena: *NebulaArena, slot: *NebulaSlotView(T)): void
 function nebula_app_register_slot(name, visual_type, opts)
   assert(_current_app, "nebula_app_register_slot: must be called between nebula_app_begin and nebula_app_end")
   opts = opts or {}
@@ -88,14 +129,21 @@ function nebula_app_register_slot(name, visual_type, opts)
     and visual_type:sub(1, #visual_type - #"Visual")
     or visual_type
 
+  -- ★ Phase 3.9: producer 模式（新 API）
+  local producer = opts.producer
+  -- 向后兼容：若仍使用旧的 count_var/data_var 模式，保留但标记为 legacy
+  local legacy_count_var = opts.count_var
+  local legacy_data_var  = opts.data_var
+
   table.insert(reg.slots, {
     name          = name,
     visual_type   = visual_type,
     base          = base,
     max_instances = opts.max_instances or 128,
-    arena_var     = opts.arena_var  or (name .. "_arena"),
-    count_var     = opts.count_var  or (name .. "_count"),
-    data_var      = opts.data_var   or (name .. "_instances"),
+    producer      = producer,
+    -- legacy 字段（Phase 3.9 前的旧 API，保留兼容性）
+    legacy_count_var = legacy_count_var,
+    legacy_data_var  = legacy_data_var,
   })
 
   -- 更新 type_groups
@@ -123,7 +171,9 @@ end
 -- 代码生成：nebula_derive_app(app_name)
 -- =============================================================================
 
--- 生成 <App> record（★ Phase 3.8: 注入 arena + _arena_backing）
+-- 生成 <App> record
+-- ★ Phase 3.8: 注入 arena + _arena_backing
+-- ★ Phase 3.9: 注入 TextContext 字段（文本一等公民）
 local function gen_app_record(app_name, reg)
   local L = {}
   local function emit(s) table.insert(L, s) end
@@ -138,6 +188,18 @@ local function gen_app_record(app_name, reg)
   for _, comp in ipairs(reg.components) do
     emit(("  %s: %sContext,"):format(comp.name, comp.base))
   end
+
+  -- ★ Phase 3.9: 注入 TextContext 字段
+  if #reg.texts > 0 then
+    emit("")
+    emit("  -- ★ Phase 3.9: 文本组件 Context（一等公民）")
+    -- 共享 TextPipeline（所有文本组件共用一个管线实例）
+    emit("  pipe_text: TextPipeline,")
+    for _, txt in ipairs(reg.texts) do
+      emit(("  %s: %sContext,"):format(txt.name, txt.base))
+    end
+  end
+
   emit("")
   emit("  -- 共享 Pipeline（每种 Visual 类型一个）")
   local emitted_pipes = {}
@@ -156,7 +218,9 @@ local function gen_app_record(app_name, reg)
   return table.concat(L, "\n")
 end
 
--- 生成 <App>:init（★ Phase 3.8: 注入 nebula_arena_init）
+-- 生成 <App>:init
+-- ★ Phase 3.8: 注入 nebula_arena_init
+-- ★ Phase 3.9: 注入 TextPipeline:init（文本一等公民）
 local function gen_app_init(app_name, reg)
   local L = {}
   local function emit(s) table.insert(L, s) end
@@ -189,6 +253,14 @@ local function gen_app_init(app_name, reg)
       inited_pipes[group.pipeline_name] = true
     end
   end
+
+  -- ★ Phase 3.9: 初始化 TextPipeline（文本一等公民）
+  if #reg.texts > 0 then
+    emit("")
+    emit("  -- ★ Phase 3.9: 初始化文本管线（一等公民）")
+    emit("  if not self.pipe_text:init(renderer) then return false end")
+  end
+
   emit("")
   emit("  -- ★ Phase 3.8: 初始化 FrameArena（绑定内嵌后备内存）")
   emit(("  nebula_arena_init(&self.arena, &self._arena_backing[0], %d)"):format(reg.arena_size))
@@ -198,7 +270,9 @@ local function gen_app_init(app_name, reg)
   return table.concat(L, "\n")
 end
 
--- 生成 <App>:update（★ Phase 3.8: 自动调用 nebula_arena_reset）
+-- 生成 <App>:update
+-- ★ Phase 3.8: 自动调用 nebula_arena_reset
+-- ★ Phase 3.9: 注入 process_text_input + set_text 联动逻辑（文本一等公民）
 local function gen_app_update(app_name, reg)
   local L = {}
   local function emit(s) table.insert(L, s) end
@@ -210,22 +284,60 @@ local function gen_app_update(app_name, reg)
   for _, comp in ipairs(reg.components) do
     emit(("  self.%s:update(input, dt)"):format(comp.name))
   end
+
+  -- ★ Phase 3.9: 文本组件联动逻辑
+  if #reg.texts > 0 then
+    emit("")
+    emit("  -- ★ Phase 3.9: 文本组件联动（一等公民）")
+    for _, txt in ipairs(reg.texts) do
+      emit(("  -- %s 绑定到 %s（placeholder: \"%s\", mask: %s）"):format(
+        txt.name, txt.bound_to, txt.placeholder, tostring(txt.mask_password)))
+      emit(("  if self.%s:process_text_input(input) then"):format(txt.bound_to))
+      emit(("    if self.%s:get_text_len() > 0 then"):format(txt.bound_to))
+      emit(("      local _%s_buf: [256]uint8"):format(txt.name))
+      emit(("      local _%s_raw = self.%s:get_text(&_%s_buf[0], 255)"):format(
+        txt.name, txt.bound_to, txt.name))
+      if txt.mask_password then
+        -- 掩码模式：将所有字符替换为 '*'
+        emit(("      local _%s_len = self.%s:get_text_len()"):format(txt.name, txt.bound_to))
+        emit(("      local _%s_mask: [256]uint8"):format(txt.name))
+        emit(("      local _%s_mi: uint16 = 0"):format(txt.name))
+        emit(("      while _%s_mi < _%s_len do"):format(txt.name, txt.name))
+        emit(("        _%s_mask[_%s_mi] = 0x2A"):format(txt.name, txt.name))
+        emit(("        _%s_mi = _%s_mi + 1"):format(txt.name, txt.name))
+        emit(("      end"):format())
+        emit(("      _%s_mask[_%s_len] = 0"):format(txt.name, txt.name))
+        emit(("      self.%s:set_text(self.renderer, (@cstring)(&_%s_mask[0]))"):format(
+          txt.name, txt.name))
+      else
+        emit(("      self.%s:set_text(self.renderer, _%s_raw)"):format(txt.name, txt.name))
+      end
+      emit(("    else"):format())
+      if txt.placeholder ~= "" then
+        emit(("      self.%s:set_text(self.renderer, \"%s\")"):format(txt.name, txt.placeholder))
+      else
+        emit(("      self.%s:set_text(self.renderer, \"\")"):format(txt.name))
+      end
+      emit(("    end"):format())
+      emit(("  end"):format())
+    end
+  end
+
   emit("end")
 
   return table.concat(L, "\n")
 end
 
 -- 生成 <App>:draw（按类型分组 upload + draw_instanced）
+-- ★ Phase 3.9: 文本管线在所有标准管线之后绘制（确保文本在最上层）
+-- ★ Phase 3.9: Slot Producer 模式（mark/rewind 局部内存管理）
 local function gen_app_draw(app_name, reg)
   local L = {}
   local function emit(s) table.insert(L, s) end
 
   emit(("function %s:draw(pass: WGPURenderPassEncoder): void"):format(app_name))
 
-  -- 按 type_groups 分组生成批量绘制代码
-  local processed_types = {}
-  -- 先处理静态组件，再处理插槽
-  -- 为了保持绘制顺序（先注册先绘制），按注册顺序遍历 type_groups
+  -- 按注册顺序遍历 type_groups
   local ordered_types = {}
   local seen_types = {}
   for _, comp in ipairs(reg.components) do
@@ -283,15 +395,40 @@ local function gen_app_draw(app_name, reg)
       emit(("    _count = _count + 1"):format())
     end
 
-    -- 收集动态插槽数据（直接引用外部变量）
+    -- ★ Phase 3.9: 收集动态插槽数据（Producer 模式）
     for _, slot in ipairs(slot_members) do
-      emit(("    -- 动态插槽：%s（运行时由 %s 提供）"):format(slot.name, slot.data_var))
-      emit(("    local _si: uint32 = 0"):format())
-      emit(("    while _si < %s and _count < %d do"):format(slot.count_var, max_inst))
-      emit(("      _batch[_count] = %s[_si]"):format(slot.data_var))
-      emit(("      _count = _count + 1"):format())
-      emit(("      _si = _si + 1"):format())
-      emit(("    end"):format())
+      if slot.producer then
+        -- 新 API：Producer 函数模式（原语 4）
+        emit(("    -- ★ Phase 3.9: 动态插槽 %s（Producer: %s）"):format(slot.name, slot.producer))
+        emit(("    do"):format())
+        emit(("      local _mark = nebula_arena_mark(&self.arena)"):format())
+        emit(("      local _slot_raw = nebula_arena_alloc_array(&self.arena, %d, #%s, 8)"):format(
+          slot.max_instances, uniforms_record))
+        emit(("      if _slot_raw ~= nilptr then"):format())
+        emit(("        local _slot_data = (@*[0]%s)(_slot_raw)"):format(uniforms_record))
+        emit(("        local _slot_count: uint32 = 0"):format())
+        emit(("        %s(&self, &self.arena, _slot_data, &_slot_count, %d)"):format(
+          slot.producer, slot.max_instances))
+        emit(("        local _si: uint32 = 0"):format())
+        emit(("        while _si < _slot_count and _count < %d do"):format(max_inst))
+        emit(("          _batch[_count] = _slot_data[_si]"):format())
+        emit(("          _count = _count + 1"):format())
+        emit(("          _si = _si + 1"):format())
+        emit(("        end"):format())
+        emit(("      end"):format())
+        emit(("      nebula_arena_rewind(&self.arena, _mark)"):format())
+        emit(("    end"):format())
+      elseif slot.legacy_count_var and slot.legacy_data_var then
+        -- 旧 API：外部全局变量模式（向后兼容）
+        emit(("    -- [legacy] 动态插槽 %s（外部变量: %s/%s）"):format(
+          slot.name, slot.legacy_count_var, slot.legacy_data_var))
+        emit(("    local _si: uint32 = 0"):format())
+        emit(("    while _si < %s and _count < %d do"):format(slot.legacy_count_var, max_inst))
+        emit(("      _batch[_count] = %s[_si]"):format(slot.legacy_data_var))
+        emit(("      _count = _count + 1"):format())
+        emit(("      _si = _si + 1"):format())
+        emit(("    end"):format())
+      end
     end
 
     -- upload + draw_instanced
@@ -304,6 +441,20 @@ local function gen_app_draw(app_name, reg)
     ::continue::
   end
 
+  -- ★ Phase 3.9: 文本管线在最后绘制（确保文本始终在最上层）
+  if #reg.texts > 0 then
+    emit("")
+    emit("  -- ★ Phase 3.9: 文本渲染（一等公民，最后绘制确保在最上层）")
+    for _, txt in ipairs(reg.texts) do
+      emit(("  if self.%s.mesh.vertex_count > 0 then"):format(txt.name))
+      emit(("    self.pipe_text:draw_buffer(pass,"):format())
+      emit(("      self.%s.mesh.vertex_buffer,"):format(txt.name))
+      emit(("      self.%s.mesh.vertex_buffer_size,"):format(txt.name))
+      emit(("      self.%s.mesh.vertex_count)"):format(txt.name))
+      emit(("  end"):format())
+    end
+  end
+
   emit("end")
 
   return table.concat(L, "\n")
@@ -311,7 +462,6 @@ end
 
 -- =============================================================================
 -- 主入口：nebula_app_generate(app_name)
--- 注意：此函数名不同于 nebula_derive_app，避免与 nebula_core.nelua 中的同名宏冲突
 -- =============================================================================
 function nebula_app_generate(app_name)
   local reg = nebula_app_registry[app_name]
@@ -326,10 +476,18 @@ function nebula_app_generate(app_name)
 
   local source = table.concat(parts, "\n\n")
 
-  print(("[derive-app] %s: emit App record + init + update + draw (%d components, %d slots, %d type_groups, arena=%dB)"):format(
+  local text_count = #reg.texts
+  local slot_producer_count = 0
+  for _, slot in ipairs(reg.slots) do
+    if slot.producer then slot_producer_count = slot_producer_count + 1 end
+  end
+
+  print(("[derive-app] %s: emit App record + init + update + draw (%d components, %d texts, %d slots [%d producer], %d type_groups, arena=%dB)"):format(
     app_name,
     #reg.components,
+    text_count,
     #reg.slots,
+    slot_producer_count,
     (function()
       local n = 0
       for _ in pairs(reg.type_groups) do n = n + 1 end
@@ -341,4 +499,4 @@ function nebula_app_generate(app_name)
   return source
 end
 
-return "nebula_app_factory_v0.2_phase3.8"
+return "nebula_app_factory_v0.3_phase3.9"

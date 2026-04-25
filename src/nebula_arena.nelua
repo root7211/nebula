@@ -162,3 +162,38 @@ global function nebula_arena_remaining(arena: *NebulaArena): csize
   if arena.offset >= arena.capacity then return 0 end
   return arena.capacity - arena.offset
 end
+
+-- =============================================================================
+-- ★ Phase 3.9: nebula_arena_mark
+--
+-- 保存当前分配游标，返回一个"检查点"（checkpoint）值。
+-- 与 nebula_arena_rewind 配合使用，实现帧内局部内存回收。
+--
+-- 使用场景：Slot Producer 在单次 Draw 调用内分配 L2 数据，
+--   Draw 结束后通过 rewind 回收，无需等待帧末 reset。
+--
+-- 返回：当前游标偏移量（作为检查点）
+-- =============================================================================
+global function nebula_arena_mark(arena: *NebulaArena): csize
+  return arena.offset
+end
+
+-- =============================================================================
+-- ★ Phase 3.9: nebula_arena_rewind
+--
+-- 将分配游标回滚到 mark 返回的检查点，"释放"该检查点之后的所有分配。
+-- 不清零内存内容，仅移动游标（O(1)）。
+--
+-- 参数：
+--   arena     — Arena 状态结构体指针
+--   checkpoint — nebula_arena_mark 返回的检查点值
+--
+-- 注意：
+--   · checkpoint 必须 <= arena.offset（只能向前回滚，不能越界）
+--   · 不更新 peak（peak 记录的是帧内历史峰值，回滚不影响峰值统计）
+-- =============================================================================
+global function nebula_arena_rewind(arena: *NebulaArena, checkpoint: csize): void
+  if checkpoint <= arena.offset then
+    arena.offset = checkpoint
+  end
+end
