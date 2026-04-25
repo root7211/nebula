@@ -8,7 +8,7 @@
 |---|---|---|---|---|---|---|---|---|---|---|
 | 核心推导 | 形状 → 状态机/管线 | 静态 Flexbox 布局 | SDF 文本子系统 | 运行时动态列表与实例渲染 | 键盘输入与单行 Input 组件 | 编译期显式编排与全面 Instancing 化 | **完整文本编辑交互：Gap Buffer + 选区支持** | **管线收敛：3 着色器 + 3 路径，~630 行死代码** | **渲染循环封装：nebula_frame_render + FrameArena 内嵌** | **文本一等公民（原语 3）+ Slot Producer 重构（原语 4）** |
 | 渲染技术 | SDF 形状 + 多 Pass 阴影 | 布局对齐 | SDF 文本渲染 | Storage Buffer + Instanced 渲染 | 键盘事件流转 + 极简光标渲染 | Standard Instanced Pipeline + 类型分组批量绘制 | **L1/L2 分层 + 栈上即时排版，选区双锤点同步** | **standard_instanced 默认路径，阴影着色器使用真实 SDF** | **20 行 WGPU 样板 → 1 行；FrameArena 内嵌，无堆分配** | **文本管线自动注入；Producer 函数驱动动态插槽，Arena mark/rewind 局部回收** |
-| 质量保障 | 手动验证 | 同左 | 31 项 Lua 断言 + 11 项编译回归 | 111 项断言 | 12/12 测试套件，全量回归集成 | 16/16 测试套件，150+ 项断言 | **19/19 套件，260+ 项断言** | **20/20 套件，smoke_phase3_7 专项** | **21/21 套件，smoke_phase3_8 专项验证** | **22/22 套件，smoke_phase3_9 专项（64 项），全部通过** |
+| 质量保障 | 手动验证 | 同左 | 31 项 Lua 断言 + 11 项编译回归 | 111 项断言 | 12/12 测试套件，全量回归集成 | 16/16 测试套件，150+ 项断言 | **19/19 套件，260+ 项断言** | **20/20 套件，smoke_phase3_7 专项** | **21/21 套件，smoke_phase3_8 专项验证** | **18/18 套件，全量回归 571/571 零失败（含 Phase 3.9 专项）** |
 
 ---
 
@@ -34,13 +34,13 @@ nebula/
 │   └── generated/                  # Phase 3.2.1: 自动生成的字体 SDF 图集与度量文件
 ├── tools/
 │   ├── font_preprocessor.nelua     # Phase 3.2.1: 字体预处理工具（TTF → SDF Atlas）
-│   ├── run_all_tests.sh            # ★ Phase 3.9: 全量回归测试运行器（22 项测试套件）
+│   ├── run_all_tests.sh            # ★ Phase 3.9: 全量回归测试运行器（18 项测试套件，571 项断言）
 │   └── ...
 ├── tests/
 │   ├── smoke_phase3_9.lua          # ★ Phase 3.9: 文本一等公民 & Slot Producer 专项（64 项）
 │   ├── smoke_phase3_8.lua          # Phase 3.8: nebula_frame_render & FrameArena 内嵌验证
 │   ├── smoke_phase3_7.lua          # Phase 3.7: 管线收敛 & 死代码清理专项测试
-│   ├── smoke_phase3_6_2.lua        # Phase 3.6.2: 鼠标命中测试冒烟测试
+│   ├── smoke_phase3_6_3.lua        # Phase 3.6.3: 文本选区专项回归测试（20 项）
 │   └── ... (其他测试套件)
 ├── examples/
 │   ├── form_demo.nelua             # ★ Phase 3.9: 文本一等公民（nebula_app_register_text，主循环 2 行）
@@ -49,8 +49,7 @@ nebula/
 ├── docs/
 │   ├── PLAN_PHASE3_9.md            # ★ Phase 3.9 详细任务计划
 │   ├── REPORT_PHASE3_9_COMPLIANCE.md # ★ Phase 3.9 架构合规性审查报告
-│   ├── PLAN_PHASE3_8.md            # Phase 3.8 详细任务计划
-│   ├── PLAN_PHASE3_7.md            # Phase 3.7 详细任务计划
+│   ├── REPORT_DEAD_CODE_AUDIT.md   # ★ 死代码审查与清理报告
 │   ├── ARCHITECTURE_GRAND_PLAN.md  # Nebula 架构总纲领
 │   └── ...
 ├── build.sh                        # 一键构建脚本
@@ -62,7 +61,6 @@ nebula/
 ## 构建与运行
 
 ### 环境要求
-
 - Linux x86_64 / WSL2
 - GCC 11+（`sudo apt-get update && sudo apt-get install -y gcc build-essential`）
 - Nelua 0.2.0-dev（含 `nelua-lua` Lua 5.4 解释器，源码编译安装）
@@ -70,7 +68,6 @@ nebula/
 - GLFW 3（`libglfw3-dev`）
 
 ### 编译与运行
-
 ```bash
 chmod +x build.sh
 ./build.sh form_demo            # ★ Phase 3.9: 文本一等公民表单演示
@@ -79,14 +76,12 @@ chmod +x build.sh
 ```
 
 ### 运行 Lua 冒烟测试（无需 GPU）
-
 ```bash
 nelua-lua tests/smoke_phase3_9.lua   # Phase 3.9 专项（64 项）
-nelua-lua tests/smoke_phase3_8.lua   # Phase 3.8 专项（21 项）
+nelua-lua tests/smoke_phase3_8.lua   # Phase 3.8 专项（30 项）
 ```
 
 ### 运行全量回归测试
-
 ```bash
-bash tools/run_all_tests.sh     # 运行全部 22 项测试套件（含 Phase 3.9 专项）
+bash tools/run_all_tests.sh     # 运行全部 18 项测试套件（571/571 零失败）
 ```
