@@ -75,6 +75,24 @@ global NebulaInputState = @record{
 }
 
 -- =============================================================================
+-- ★ 交互原语结构体（原 primitives.nelua，Phase 3.9 内聚至此）
+--
+-- HoverableState 和 ClickableState 是编译期 interaction_factory.lua 生成的
+-- process_input() 方法所依赖的运行时字段类型。
+-- 注意：:update() 方法已废弃（Phase 0 遗留），交互逻辑由 process_input() 统一处理。
+-- =============================================================================
+global HoverableState = @record{
+  is_hovered:   boolean,
+  just_entered: boolean,
+  just_left:    boolean,
+}
+
+global ClickableState = @record{
+  is_pressed:   boolean,
+  just_clicked: boolean,
+}
+
+-- =============================================================================
 -- 编译期推导引擎（Compile-Time Derivation Engine）
 -- =============================================================================
 ##[[

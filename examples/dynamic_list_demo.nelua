@@ -26,7 +26,6 @@
 require "nebula_core"
 require "glfw_bindings"
 require "wgpu_bindings"
-require "primitives"
 require "renderer"
 require "app"
 require "nebula_arena"

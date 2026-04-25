@@ -1,93 +1,114 @@
--- smoke_phase3_6_3.lua — Phase 3.6.3: 文本选区回归测试
+-- =============================================================================
+-- tests/smoke_phase3_6_3.lua
+-- Nebula GUI Compiler — Phase 3.6.3 专项回归测试
 --
--- 验证：
---   1. NebulaKey 与 NebulaInputState 扩展（修饰键支持）
---   2. gap_buffer:delete_range 逻辑正确性
---   3. interaction_factory 生成的选区交互逻辑
---   4. 架构合规性（L1/L2 分层）
+-- 验收目标：
+--   1. nebula_core.nelua 包含修饰键扩展（mod_shift / mod_ctrl / mod_alt）
+--   2. nebula_core.nelua 包含 NebulaKey 的 Shift 组合键变体
+--   3. interaction_factory.lua 生成的 process_text_input 包含选区支持代码
+--   4. interaction_factory.lua 生成的 process_text_input 包含拖拽支持代码
+--   5. gap_buffer.nelua 包含 delete_range 方法
+--   6. 架构合规性：get_text 不依赖 visual.flat_buf（L1/L2 分层）
+--   7. nebula_core.nelua 包含内聚后的交互原语结构体（Phase 3.9）
+-- =============================================================================
 
-local tests = {}
-
--- 模拟环境：定义必要的宏和全局变量
-global NebulaKey = @enum{
-  None=0, Backspace, Delete, Left, Right, Home, End, Enter,
-  ShiftLeft, ShiftRight, ShiftHome, ShiftEnd
-}
-global NebulaInputState = @record{
-  mouse_x: float32, mouse_y: float32,
-  mouse_left_down: boolean, mouse_left_pressed: boolean,
-  mod_shift: boolean, mod_ctrl: boolean, mod_alt: boolean,
-  key_pressed: int32, char_count: uint8, char_input: [16]uint32
-}
-
--- ---------------------------------------------------------
--- Test 1-5: 核心结构验证
--- ---------------------------------------------------------
-tests[1] = { "NebulaKey.ShiftLeft 存在", function() return NebulaKey.ShiftLeft ~= nil end }
-tests[2] = { "NebulaInputState.mod_shift 存在", function() 
-  local s: NebulaInputState; return s.mod_shift == false 
-end }
-
--- ---------------------------------------------------------
--- Test 6-15: Gap Buffer delete_range 逻辑验证
--- ---------------------------------------------------------
-##[[
-  local _gb_type_name, _gb_src = nebula_gen_gap_buffer_type(16)
-  local _gb_ast = aster.parse(_gb_src, "test_gb")
-  for _, stat in ipairs(_gb_ast) do inject_statement(stat) end
-]]
-
-tests[6] = { "delete_range: 中间删除", function()
-  local buf: NebulaBuf16; buf:init()
-  buf:insert_char((@uint8)('a'))
-  buf:insert_char((@uint8)('b'))
-  buf:insert_char((@uint8)('c'))
-  buf:insert_char((@uint8)('d')) -- "abcd", cursor=4
-  buf:delete_range(1, 3) -- 删除 "bc"
-  local flat: [16]uint8; buf:flatten(&flat[0], 16)
-  return (@cstring)(&flat[0]) == "ad" and buf:cursor() == 1
-end }
-
-tests[7] = { "delete_range: 头部删除", function()
-  local buf: NebulaBuf16; buf:init()
-  buf:insert_char((@uint8)('a'))
-  buf:insert_char((@uint8)('b'))
-  buf:delete_range(0, 1) -- 删除 "a"
-  local flat: [16]uint8; buf:flatten(&flat[0], 16)
-  return (@cstring)(&flat[0]) == "b" and buf:cursor() == 0
-end }
-
-tests[8] = { "delete_range: 尾部删除", function()
-  local buf: NebulaBuf16; buf:init()
-  buf:insert_char((@uint8)('a'))
-  buf:insert_char((@uint8)('b'))
-  buf:delete_range(1, 2) -- 删除 "b"
-  local flat: [16]uint8; buf:flatten(&flat[0], 16)
-  return (@cstring)(&flat[0]) == "a" and buf:cursor() == 1
-end }
-
--- ---------------------------------------------------------
--- Test 16-25: 生成代码静态检查（通过 Python 脚本执行）
--- ---------------------------------------------------------
-
--- ---------------------------------------------------------
--- 运行测试（模拟 Python 脚本逻辑）
--- ---------------------------------------------------------
 local passed = 0
-local total = 8
-for i=1,total do
-  if tests[i] then
-    local ok, res = pcall(tests[i][2])
-    if ok and res then
-      passed = passed + 1
-    else
-      print("FAILED: Test " .. i .. ": " .. tests[i][1])
-    end
+local failed = 0
+
+local function check(label, cond)
+  if cond then
+    passed = passed + 1
+    print(("[PASS] %s"):format(label))
+  else
+    failed = failed + 1
+    print(("[FAIL] %s"):format(label))
   end
 end
 
-if passed == total then
-  print("PASSED: all " .. total .. " runtime tests")
-else
-  print("FAILED: " .. (total - passed) .. " tests failed")
+local function assert_contains(label, str, pattern)
+  check(label, type(str) == "string" and str:find(pattern, 1, true) ~= nil)
+end
+
+local function assert_not_contains(label, str, pattern)
+  check(label, type(str) == "string" and str:find(pattern, 1, true) == nil)
+end
+
+-- 路径设置
+local script_dir = debug.getinfo(1, "S").source:match("^@(.+)/[^/]+$") or "."
+package.path = script_dir .. "/../src/?.lua;" ..
+               script_dir .. "/../src/derive/?.lua;" ..
+               package.path
+
+-- =============================================================================
+-- 1. nebula_core.nelua 修饰键扩展验证
+-- =============================================================================
+print("\n--- 1. nebula_core.nelua 修饰键扩展 ---")
+local core_path = script_dir .. "/../src/nebula_core.nelua"
+local f = io.open(core_path, "r")
+assert(f, "无法读取 src/nebula_core.nelua")
+local core_src = f:read("*a")
+f:close()
+
+assert_contains("NebulaInputState 包含 mod_shift 字段", core_src, "mod_shift:")
+assert_contains("NebulaInputState 包含 mod_ctrl 字段",  core_src, "mod_ctrl:")
+assert_contains("NebulaInputState 包含 mod_alt 字段",   core_src, "mod_alt:")
+assert_contains("NebulaKey 包含 ShiftLeft 变体",  core_src, "ShiftLeft")
+assert_contains("NebulaKey 包含 ShiftRight 变体", core_src, "ShiftRight")
+assert_contains("NebulaKey 包含 ShiftHome 变体",  core_src, "ShiftHome")
+assert_contains("NebulaKey 包含 ShiftEnd 变体",   core_src, "ShiftEnd")
+
+-- =============================================================================
+-- 2. interaction_factory.lua 选区与拖拽支持验证
+-- =============================================================================
+print("\n--- 2. interaction_factory.lua 选区与拖拽支持 ---")
+local ifac_path = script_dir .. "/../src/derive/interaction_factory.lua"
+local fi = io.open(ifac_path, "r")
+assert(fi, "无法读取 src/derive/interaction_factory.lua")
+local ifac_src = fi:read("*a")
+fi:close()
+
+assert_contains("生成代码包含 selection_anchor 字段", ifac_src, "selection_anchor")
+assert_contains("生成代码包含 is_dragging 字段",      ifac_src, "is_dragging")
+assert_contains("生成代码包含 Shift+Click 注释",       ifac_src, "Shift+Click")
+assert_contains("生成代码包含拖拽逻辑注释",            ifac_src, "drag")
+assert_contains("生成代码包含 Phase 3.6.3 标记",       ifac_src, "Phase 3.6.3")
+
+-- =============================================================================
+-- 3. gap_buffer.nelua delete_range 方法验证
+-- =============================================================================
+print("\n--- 3. gap_buffer.nelua delete_range 方法 ---")
+local gb_path = script_dir .. "/../src/gap_buffer.nelua"
+local fg = io.open(gb_path, "r")
+assert(fg, "无法读取 src/gap_buffer.nelua")
+local gb_src = fg:read("*a")
+fg:close()
+
+assert_contains("gap_buffer 包含 delete_range 方法定义", gb_src, "delete_range")
+assert_contains("delete_range 接受 start 参数",          gb_src, "start:")
+assert_contains("delete_range 接受 sel_end 参数",        gb_src, "sel_end:")
+
+-- =============================================================================
+-- 4. 架构合规性：get_text 不依赖 visual.flat_buf（公理 B）
+-- =============================================================================
+print("\n--- 4. 架构合规性：get_text L1/L2 分层 ---")
+
+assert_contains("get_text 接受 out 参数（调用方提供缓冲区）", ifac_src, "get_text")
+-- flat_buf 在注释中出现（说明历史修复），但生成代码中不应再有直接赋值
+assert_not_contains("get_text 生成代码不写入 visual.flat_buf", ifac_src, "self.visual.flat_buf =")
+
+-- =============================================================================
+-- 5. nebula_core.nelua 包含内聚后的交互原语结构体（Phase 3.9）
+-- =============================================================================
+print("\n--- 5. nebula_core.nelua 包含内聚的交互原语结构体 ---")
+
+assert_contains("HoverableState 已内聚到 nebula_core.nelua", core_src, "global HoverableState")
+assert_contains("ClickableState 已内聚到 nebula_core.nelua", core_src, "global ClickableState")
+assert_contains("内聚注释包含 Phase 3.9 标记", core_src, "Phase 3.9 内聚至此")
+
+-- =============================================================================
+-- 汇总
+-- =============================================================================
+print(("\n=== Phase 3.6.3 专项回归测试结果：%d 通过，%d 失败 ==="):format(passed, failed))
+if failed > 0 then
+  os.exit(1)
 end

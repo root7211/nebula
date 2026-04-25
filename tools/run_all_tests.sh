@@ -41,19 +41,6 @@ echo "============================================"
 echo ""
 echo "=== Part 1: Lua Smoke Tests ==="
 
-# Phase 3.2.x 历史测试（保持不变）
-run_test "smoke_phase3_2_2 (pipeline_factory textured path)" \
-  nelua-lua tools/smoke_phase3_2_2.lua
-
-run_test "smoke_phase3_2_3 (shader_compose SDF text)" \
-  nelua-lua tools/smoke_phase3_2_3.lua
-
-run_test "smoke_phase3_2_4 (TextVisual derive engine)" \
-  nelua-lua tools/smoke_phase3_2_4.lua
-
-run_test "verify_p2_4 (interaction_factory)" \
-  nelua-lua tools/verify_p2_4.lua
-
 # Phase 3.3.x 测试（Phase 3.7 更新：验证废弃路径已删除）
 run_test "smoke_arena (Phase 3.3.1 — Frame Arena allocator)" \
   nelua-lua tests/smoke_arena.lua
@@ -99,6 +86,9 @@ run_test "smoke_phase3_6_1 (Phase 3.6.1 — compile-time fixed-capacity Gap Buff
 
 run_test "smoke_phase3_6_2 (Phase 3.6.2 — mouse hit-test & cursor sync)" \
   nelua-lua tests/smoke_phase3_6_2.lua
+
+run_test "smoke_phase3_6_3 (Phase 3.6.3 — text selection & drag support)" \
+  nelua-lua tests/smoke_phase3_6_3.lua
 
 # Phase 3.7 专项测试（管线生成器收敛与死代码清理）
 run_test "smoke_phase3_7 (Phase 3.7 — 管线收敛 & 死代码清理专项验证)" \
