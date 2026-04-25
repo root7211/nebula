@@ -105,23 +105,23 @@ check("has_max_instances_field",
   "应包含 max_instances 字段")
 
 check("has_init_method",
-  code:find("function ListItemPipeline:init(renderer: *NebulaRenderer, max_inst: uint32)") ~= nil,
+  code:find("function ListItemPipeline:init(renderer: *NebulaRenderer, max_inst: uint32)", 1, true) ~= nil,
   "应包含 init(renderer, max_inst) 方法")
 
 check("has_upload_method",
-  code:find("function ListItemPipeline:upload(") ~= nil,
+  code:find("function ListItemPipeline:upload(", 1, true) ~= nil,
   "应包含 upload 方法")
 
 check("has_draw_instanced_method",
-  code:find("function ListItemPipeline:draw_instanced(") ~= nil,
+  code:find("function ListItemPipeline:draw_instanced(", 1, true) ~= nil,
   "应包含 draw_instanced 方法")
 
 check("has_update_viewport_method",
-  code:find("function ListItemPipeline:update_viewport(") ~= nil,
+  code:find("function ListItemPipeline:update_viewport(", 1, true) ~= nil,
   "应包含 update_viewport 方法")
 
 check("has_draw_single_method",
-  code:find("function ListItemPipeline:draw_single(") ~= nil,
+  code:find("function ListItemPipeline:draw_single(", 1, true) ~= nil,
   "应包含 draw_single 方法")
 
 check("uses_readonly_storage",
