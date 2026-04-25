@@ -160,7 +160,9 @@ local function main(): int32
     local view = wgpuTextureCreateView(surface_tex.texture, &view_desc)
 
     local u = button:to_uniforms(WIN_W, WIN_H)
-    button_pipeline:update_uniforms(&renderer, &u)
+    button_pipeline:update_viewport(&renderer, WIN_W, WIN_H)
+
+    button_pipeline:upload(&renderer, &u, 1)
 
     local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, nilptr)
     local clear_color = WGPURenderPassColorAttachment{
@@ -182,7 +184,7 @@ local function main(): int32
       timestampWrites         = nilptr,
     }
     local pass = wgpuCommandEncoderBeginRenderPass(encoder, &pass_desc)
-    button_pipeline:draw(pass)
+    button_pipeline:draw_instanced(pass, 1)
     wgpuRenderPassEncoderEnd(pass)
     wgpuRenderPassEncoderRelease(pass)
 

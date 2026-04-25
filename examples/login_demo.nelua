@@ -335,10 +335,18 @@ local function main(): int32
     local u_email = email_input:to_uniforms(WIN_W, WIN_H)
     local u_pwd   = password_input:to_uniforms(WIN_W, WIN_H)
     local u_btn   = login_btn:to_uniforms(WIN_W, WIN_H)
-    pipe_card:update_uniforms(&renderer, &u_card)
-    pipe_email:update_uniforms(&renderer, &u_email)
-    pipe_password:update_uniforms(&renderer, &u_pwd)
-    pipe_button:update_uniforms(&renderer, &u_btn)
+    pipe_card:update_viewport(&renderer, WIN_W, WIN_H)
+
+    pipe_card:upload(&renderer, &u_card, 1)
+    pipe_email:update_viewport(&renderer, WIN_W, WIN_H)
+
+    pipe_email:upload(&renderer, &u_email, 1)
+    pipe_password:update_viewport(&renderer, WIN_W, WIN_H)
+
+    pipe_password:upload(&renderer, &u_pwd, 1)
+    pipe_button:update_viewport(&renderer, WIN_W, WIN_H)
+
+    pipe_button:upload(&renderer, &u_btn, 1)
 
     -- 提交渲染
     local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, nilptr)
@@ -355,10 +363,10 @@ local function main(): int32
       occlusionQuerySet = nilptr, timestampWrites = nilptr,
     }
     local pass = wgpuCommandEncoderBeginRenderPass(encoder, &pass_desc)
-    pipe_card:draw(pass)
-    pipe_email:draw(pass)
-    pipe_password:draw(pass)
-    pipe_button:draw(pass)
+    pipe_card:draw_instanced(pass, 1)
+    pipe_email:draw_instanced(pass, 1)
+    pipe_password:draw_instanced(pass, 1)
+    pipe_button:draw_instanced(pass, 1)
     pipe_email_text:draw_buffer(pass, email_text.mesh.vertex_buffer, email_text.mesh.vertex_buffer_size, email_text.mesh.vertex_count)
     pipe_password_text:draw_buffer(pass, password_text.mesh.vertex_buffer, password_text.mesh.vertex_buffer_size, password_text.mesh.vertex_count)
     wgpuRenderPassEncoderEnd(pass)

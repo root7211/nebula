@@ -438,8 +438,8 @@ end
 -- 与 gen_pipeline_instanced 的区别：
 --   · 本函数的 instance_record 就是 <T>Uniforms（由 nebula_gen_uniform_layout 生成）
 --   · 这样 to_uniforms() 生成的数据可以直接上传到 Storage Buffer，实现零拷贝
---   · 生成的管线名称为 <T>Pipeline（与原 simple 路径一致），但新增 upload/draw_instanced
---   · 保留 update_uniforms/draw 方法以便单实例场景仍可使用
+--   · 生成的管线名称为 <T>Pipeline（与原 simple 路径一致），新增 upload/draw_instanced/draw_single
+--   · 单实例场景使用 update_viewport + upload + draw_instanced，或使用 draw_single 便捷方法
 -- =============================================================================
 local function gen_pipeline_standard_instanced(base, uniforms_record, wgsl_source, max_instances)
   local pipe = base .. "Pipeline"
@@ -638,19 +638,6 @@ local function gen_pipeline_standard_instanced(base, uniforms_record, wgsl_sourc
   emit("  if self:upload(renderer, uniforms, 1) then")
   emit("    self:draw_instanced(pass, 1)")
   emit("  end")
-  emit("end")
-
-  -- ===== update_uniforms（向后兼容 shim，供 Phase 3.7 之前的 demo 使用） =====
-  -- 旧调用模式：pipeline:update_uniforms(&renderer, &u)  →  pipeline:draw(pass)
-  -- 等价于：update_viewport(vw, vh) + upload(data, 1)，再由 draw() 调用 draw_instanced(1)
-  emit(("function %s:update_uniforms(renderer: *NebulaRenderer, uniforms: *%s): void"):format(pipe, uniforms_record))
-  emit("  self:update_viewport(renderer, uniforms.viewport.x, uniforms.viewport.y)")
-  emit("  self:upload(renderer, uniforms, 1)")
-  emit("end")
-
-  -- ===== draw（向后兼容 shim，绘制已上传的单实例） =====
-  emit(("function %s:draw(pass: WGPURenderPassEncoder): void"):format(pipe))
-  emit("  self:draw_instanced(pass, 1)")
   emit("end")
 
   return table.concat(L, "\n")

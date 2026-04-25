@@ -424,13 +424,27 @@ local function main(): int32
     local u_pwd      = password_input:to_uniforms(WIN_W, WIN_H)
     local u_cancel   = cancel_btn:to_uniforms(WIN_W, WIN_H)
     local u_login    = login_btn:to_uniforms(WIN_W, WIN_H)
-    pipe_card:update_uniforms(&renderer, &u_card)
-    pipe_title:update_uniforms(&renderer, &u_title)
-    pipe_close:update_uniforms(&renderer, &u_close)
-    pipe_email:update_uniforms(&renderer, &u_email)
-    pipe_password:update_uniforms(&renderer, &u_pwd)
-    pipe_cancel:update_uniforms(&renderer, &u_cancel)
-    pipe_login:update_uniforms(&renderer, &u_login)
+    pipe_card:update_viewport(&renderer, WIN_W, WIN_H)
+
+    pipe_card:upload(&renderer, &u_card, 1)
+    pipe_title:update_viewport(&renderer, WIN_W, WIN_H)
+
+    pipe_title:upload(&renderer, &u_title, 1)
+    pipe_close:update_viewport(&renderer, WIN_W, WIN_H)
+
+    pipe_close:upload(&renderer, &u_close, 1)
+    pipe_email:update_viewport(&renderer, WIN_W, WIN_H)
+
+    pipe_email:upload(&renderer, &u_email, 1)
+    pipe_password:update_viewport(&renderer, WIN_W, WIN_H)
+
+    pipe_password:upload(&renderer, &u_pwd, 1)
+    pipe_cancel:update_viewport(&renderer, WIN_W, WIN_H)
+
+    pipe_cancel:upload(&renderer, &u_cancel, 1)
+    pipe_login:update_viewport(&renderer, WIN_W, WIN_H)
+
+    pipe_login:upload(&renderer, &u_login, 1)
 
     local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, nilptr)
     local clear_color = WGPURenderPassColorAttachment{
@@ -452,13 +466,13 @@ local function main(): int32
     local pass = wgpuCommandEncoderBeginRenderPass(encoder, &rp_desc)
 
     -- 按 Z 序绘制：卡片背景 → 标题 → 关闭按钮 → 输入框 → 按钮
-    pipe_card:draw(pass)
-    pipe_title:draw(pass)
-    pipe_close:draw(pass)
-    pipe_email:draw(pass)
-    pipe_password:draw(pass)
-    pipe_cancel:draw(pass)
-    pipe_login:draw(pass)
+    pipe_card:draw_instanced(pass, 1)
+    pipe_title:draw_instanced(pass, 1)
+    pipe_close:draw_instanced(pass, 1)
+    pipe_email:draw_instanced(pass, 1)
+    pipe_password:draw_instanced(pass, 1)
+    pipe_cancel:draw_instanced(pass, 1)
+    pipe_login:draw_instanced(pass, 1)
 
     wgpuRenderPassEncoderEnd(pass)
     wgpuRenderPassEncoderRelease(pass)

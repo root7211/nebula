@@ -9,7 +9,7 @@
 --   4. nebula_compose_shadow_shaders 正确生成四个阴影子着色器
 --   5. nebula_gen_pipeline_source 的三条路径均可正常工作
 --   6. 死代码路径触发明确的 error（不是静默失败）
---   7. 代码行数收敛验证：shader_compose.lua ≤ 380 行，pipeline_factory.lua ≤ 750 行
+--   7. 代码行数收敛验证：shader_compose.lua ≤ 400 行，pipeline_factory.lua ≤ 740 行，合计 ≤ 1135 行
 -- =============================================================================
 
 local passed = 0
@@ -185,8 +185,7 @@ assert_contains("生成 CardPipeline", si_pipe, "global CardPipeline = @record{"
 assert_contains("包含 upload 方法", si_pipe, "function CardPipeline:upload(")
 assert_contains("包含 draw_instanced 方法", si_pipe, "function CardPipeline:draw_instanced(")
 assert_contains("包含 draw_single 方法", si_pipe, "function CardPipeline:draw_single(")
--- Phase 3.9: update_uniforms shim 保留用于向后兼容旧 demo
--- assert_not_contains("不含 update_uniforms（已废弃）", si_pipe, "function CardPipeline:update_uniforms(")
+assert_not_contains("不含 update_uniforms（shim 已在 Phase 3.9 删除）", si_pipe, "function CardPipeline:update_uniforms(")
 
 -- 路径 2: textured（文本 SDF 路径）
 local text_shader = nebula_compose_text_shader({
@@ -263,7 +262,7 @@ end
 
 if factory_lines then
   print(("  pipeline_factory.lua: %d 行"):format(factory_lines))
-  assert_le("pipeline_factory.lua ≤ 760 行", factory_lines, 760)
+  assert_le("pipeline_factory.lua ≤ 740 行", factory_lines, 740)
 else
   failed = failed + 1
   print("[FAIL] 无法读取 pipeline_factory.lua")
@@ -272,7 +271,7 @@ end
 if shader_lines and factory_lines then
   local total = shader_lines + factory_lines
   print(("  两文件合计: %d 行"):format(total))
-  assert_le("两文件合计 ≤ 1150 行", total, 1150)
+  assert_le("两文件合计 ≤ 1135 行", total, 1135)
 end
 
 -- =============================================================================
