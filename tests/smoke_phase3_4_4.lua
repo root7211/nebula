@@ -28,17 +28,17 @@ check("require app present",
 check("require nebula_cursor present",
   src:find('require "nebula_cursor"') ~= nil)
 
--- ---- 2. InputVisual 新增文本缓冲区字段 ----
-check("text_buf field in InputVisual",
-  src:find("text_buf%s*:%s*%[256%]uint8") ~= nil)
-check("text_len field in InputVisual",
-  src:find("text_len%s*:%s*uint32") ~= nil)
-check("cursor_pos field in InputVisual",
-  src:find("cursor_pos%s*:%s*uint32") ~= nil)
+-- ---- 2. Phase 3.6+: InputVisual 使用 editable 原语 + Gap Buffer ----
+check("editable primitive in InputVisual",
+  src:find('"editable"') ~= nil)
+check("gap_buf field in InputVisual",
+  src:find("gap_buf%s*:%s*NebulaBuf") ~= nil)
+check("NebulaBuf type injected",
+  src:find("nebula_gen_gap_buffer_type") ~= nil)
 
--- ---- 3. nebula_gen_text_buffer 调用 ----
-check("nebula_gen_text_buffer called for Input",
-  src:find('nebula_gen_text_buffer.*base.*=.*"Input"') ~= nil)
+-- ---- 3. Phase 3.6+: 通过 nebula_derive 自动生成文本方法 ----
+check("nebula_derive called for InputVisual",
+  src:find('nebula_derive%("InputVisual"%)') ~= nil)
 
 -- ---- 4. 主循环中的文本处理 ----
 check("process_text_input called for email",
@@ -50,7 +50,7 @@ check("email text rebuild on change",
 check("password mask rendering (* chars)",
   src:find("0x2A") ~= nil)
 check("get_text called",
-  src:find(":get_text%(%)") ~= nil)
+  src:find(":get_text%(") ~= nil)
 
 -- ---- 5. Enter 键处理 ----
 check("Enter key triggers print",

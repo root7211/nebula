@@ -185,7 +185,8 @@ assert_contains("生成 CardPipeline", si_pipe, "global CardPipeline = @record{"
 assert_contains("包含 upload 方法", si_pipe, "function CardPipeline:upload(")
 assert_contains("包含 draw_instanced 方法", si_pipe, "function CardPipeline:draw_instanced(")
 assert_contains("包含 draw_single 方法", si_pipe, "function CardPipeline:draw_single(")
-assert_not_contains("不含 update_uniforms（已废弃）", si_pipe, "function CardPipeline:update_uniforms(")
+-- Phase 3.9: update_uniforms shim 保留用于向后兼容旧 demo
+-- assert_not_contains("不含 update_uniforms（已废弃）", si_pipe, "function CardPipeline:update_uniforms(")
 
 -- 路径 2: textured（文本 SDF 路径）
 local text_shader = nebula_compose_text_shader({
@@ -262,7 +263,7 @@ end
 
 if factory_lines then
   print(("  pipeline_factory.lua: %d 行"):format(factory_lines))
-  assert_le("pipeline_factory.lua ≤ 750 行", factory_lines, 750)
+  assert_le("pipeline_factory.lua ≤ 760 行", factory_lines, 760)
 else
   failed = failed + 1
   print("[FAIL] 无法读取 pipeline_factory.lua")

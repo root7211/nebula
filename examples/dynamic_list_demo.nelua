@@ -68,35 +68,20 @@ global list_mouse_x:    float32 = 0.0
 global list_mouse_y:    float32 = 0.0
 global list_scroll_dy:  float32 = 0.0
 -- =============================================================================
--- ★ Phase 3.9: 使用 nebula_derive_app 宏声明并派生 ListApp
---   · 必须在 list_item_producer 定义之前调用，因为 Producer 函数签名引用了 *ListApp 类型
--- =============================================================================
-##[[
-  -- LIST_VISIBLE_COUNT=16, ListItemUniforms=64B, +256B overhead
-  nebula_app_begin("ListApp", { arena_size = 16 * 64 + 256 })
-    nebula_app_register_slot("list_items", "ListItemVisual", {
-      max_instances = 16,  -- LIST_VISIBLE_COUNT
-      producer      = "list_item_producer",
-    })
-  nebula_app_end()
-]]
--- 循环依赖解决方案：
---   1. 先声明 ListApp 前向声明（使 *ListApp 类型可用）
---   2. 再定义 list_item_producer（签名中引用 *ListApp）
---   3. 最后调用 nebula_derive_app（生成完整的 ListApp 定义，覆盖前向声明）
-global ListApp: type <forwarddecl> = @record{}
--- =============================================================================
 -- ★ Phase 3.9: Slot Producer 函数（原语 4）
 --
 -- 签名约定（由 app_factory.lua 生成的调用代码决定）：
---   function(app: *<App>, arena: *NebulaArena,
+--   function(arena: *NebulaArena,
 --            slot_data: *[0]<T>Uniforms, slot_count: *uint32, max: uint32): void
 --
 -- 此函数是纯函数：不修改 App 状态，仅写入 slot_data 和 slot_count。
--- Arena 由框架自动管理（mark/rewind），Producer 可从中分配临时 L2 数据。
+-- 通过全局变量（list_scroll_y 等）访问运行时状态。
+-- Arena 由框架自动管理（mark/rewind 局部回收）。
+--
+-- 注意：Producer 函数定义必须在 nebula_derive_app 之前，
+--       因为 nebula_derive_app 生成的 ListApp:update 会调用此函数。
 -- =============================================================================
 global function list_item_producer(
-    app:        *ListApp,
     arena:      *NebulaArena,
     slot_data:  *[0]ListItemUniforms,
     slot_count: *uint32,
@@ -157,7 +142,19 @@ global function list_item_producer(
   end
   $slot_count = count
 end
--- 此处 nebula_derive_app 生成完整的 ListApp 类型定义，覆盖上方的前向声明
+-- =============================================================================
+-- ★ Phase 3.9: 使用 nebula_derive_app 宏声明并派生 ListApp
+--   · 必须在 list_item_producer 定义之后调用，因为生成的 ListApp:update 会调用它
+-- =============================================================================
+##[[
+  -- LIST_VISIBLE_COUNT=16, ListItemUniforms=64B, +256B overhead
+  nebula_app_begin("ListApp", { arena_size = 16 * 64 + 256 })
+    nebula_app_register_slot("list_items", "ListItemVisual", {
+      max_instances = 16,  -- LIST_VISIBLE_COUNT
+      producer      = "list_item_producer",
+    })
+  nebula_app_end()
+]]
 ## nebula_derive_app("ListApp")
 -- =============================================================================
 -- 主程序

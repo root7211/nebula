@@ -1,0 +1,43 @@
+function nebula_derive_app(app_name)
+  local source = nebula_app_generate(app_name)
+  local block_ast = aster.parse(source, "<nebula_derive_app:" .. app_name .. ">")
+  for _, stat in ipairs(block_ast) do
+    inject_statement(stat)
+  end
+end
+]]
+
+-- =============================================================================
+-- 数学工具函数（运行时，完全内联）
+-- =============================================================================
+global function lerp_f32(a: float32, b: float32, t: float32): float32
+  return a + (b - a) * t
+end
+
+global function lerp_color(a: Color, b: Color, t: float32): Color
+  return Color{
+    r = lerp_f32(a.r, b.r, t),
+    g = lerp_f32(a.g, b.g, t),
+    b = lerp_f32(a.b, b.b, t),
+    a = lerp_f32(a.a, b.a, t),
+  }
+end
+
+global function lerp_vec2(a: Vec2, b: Vec2, t: float32): Vec2
+  return Vec2{
+    x = lerp_f32(a.x, b.x, t),
+    y = lerp_f32(a.y, b.y, t),
+  }
+end
+
+global function ease_out(t: float32): float32
+  if t <= 0.0 then return 0.0 end
+  if t >= 1.0 then return 1.0 end
+  return 1.0 - (1.0 - t) * (1.0 - t)
+end
+
+global function ease_in(t: float32): float32
+  if t <= 0.0 then return 0.0 end
+  if t >= 1.0 then return 1.0 end
+  return t * t
+end
