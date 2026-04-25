@@ -44,6 +44,9 @@ global CardVisual = @record{
 ##[[ nebula_annotate("CardVisual", { states={"default"}, primitives={}, transitions={} }) ]]
 ## nebula_derive("CardVisual")
 -- ---- 输入框 ----
+-- Phase 3.6: 在 InputVisual record 声明之前注入 NebulaBuf255 类型定义
+##[[ local _buf_type, _buf_src = nebula_gen_gap_buffer_type(255) ]]
+##[[ for _, _s in ipairs(aster.parse(_buf_src, "<gap_buffer:255>")) do inject_statement(_s) end ]]
 global InputVisual = @record{
   pos:    Vec2,
   size:   Vec2,
@@ -58,11 +61,12 @@ global InputVisual = @record{
   focused_border_color: Color,
   focused_border_width: float32,
   pixel_height: float32,
+  gap_buf:      NebulaBuf255,
 }
 ##[[
 nebula_annotate("InputVisual", {
   states     = {"default", "hovered", "focused"},
-  primitives = {"hoverable", "focusable", "editable"},
+  primitives = {"hoverable", "clickable", "focusable", "editable"},
   transitions = {
     {from="default", to="hovered",  on="hover_enter"},
     {from="hovered", to="default",  on="hover_leave"},
@@ -116,16 +120,15 @@ global CheckboxVisual = @record{
 ##[[
 nebula_annotate("CheckboxVisual", {
   states     = {"default", "hovered"},
-  primitives = {"hoverable", "toggleable"},
+  primitives = {"hoverable", "clickable", "toggleable"},
   transitions = {
     {from="default", to="hovered", on="hover_enter"},
     {from="hovered", to="default", on="hover_leave"},
   },
 })
-local _tgl_src = nebula_gen_toggle_state({ base = "Checkbox" })
-local _tgl_ast = aster.parse(_tgl_src, "<nebula_gen_toggle_state:Checkbox>")
-for _, stat in ipairs(_tgl_ast) do inject_statement(stat) end
 ]]
+## nebula_derive("CheckboxVisual")
+-- Phase 3.5.3: nebula_gen_toggle_state 已由 nebula_derive 自动调用，无需手动注入
 -- ---- 文本渲染 Visual ----
 global TextVisual = @record{
   pos:          Vec2,

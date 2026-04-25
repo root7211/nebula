@@ -36,6 +36,7 @@ global function glfwSetWindowShouldClose(window: GLFWwindow, value: int32): void
 global function glfwGetX11Display(): pointer <cimport, nodecl> end
 global function glfwGetX11Window(window: GLFWwindow): uint64 <cimport, nodecl> end
 global function glfwGetTime(): float64 <cimport, nodecl> end
+global function glfwGetKey(window: GLFWwindow, key: int32): int32 <cimport, nodecl> end
 
 -- =============================================================================
 -- ★ Phase 3.4.1: 键盘输入绑定
@@ -52,6 +53,12 @@ global GLFW_KEY_LEFT       <comptime> = 263
 global GLFW_KEY_RIGHT      <comptime> = 262
 global GLFW_KEY_HOME       <comptime> = 268
 global GLFW_KEY_END        <comptime> = 269
+global GLFW_KEY_LEFT_SHIFT <comptime> = 340
+global GLFW_KEY_RIGHT_SHIFT <comptime> = 344
+global GLFW_KEY_LEFT_CONTROL <comptime> = 341
+global GLFW_KEY_RIGHT_CONTROL <comptime> = 345
+global GLFW_KEY_LEFT_ALT   <comptime> = 342
+global GLFW_KEY_RIGHT_ALT  <comptime> = 346
 
 -- 修饰键 mods 位掩码
 global GLFW_MOD_SHIFT    <comptime> = 0x0001

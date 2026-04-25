@@ -1,13 +1,12 @@
 -- =============================================================================
 -- login_demo.nelua
--- Nebula GUI Compiler — Phase 3.4.4
+-- Nebula GUI Compiler — Phase 3.6 (升级自 Phase 3.4.4)
 --
--- Phase 3.4.4 升级：
---   · 接入 nebula_input_install_callbacks() 注册键盘回调
---   · InputContext 新增 text_buf / text_len / cursor_pos 字段
---   · 每帧调用 process_text_input() 消费键盘事件，文本变化时重建 TextContext 网格
---   · 使用 nebula_cursor_x_offset() + nebula_cursor_visible() 渲染闪烁光标
---   · 按 Enter 键时在控制台打印当前 email / password 内容
+-- Phase 3.6 升级（编译回归修复）：
+--   · InputVisual 迁移到 "editable" 原语（Gap Buffer 驱动）
+--   · 删除旧的 text_buf / text_len / cursor_pos 字段
+--   · 添加 pixel_height 字段（Phase 3.6.2 鼠标命中测试需要）
+--   · 主循环中的文本输入处理改为 process_text_input + get_text
 --   · 完全向后兼容 Phase 2.4 的视觉规格与焦点管理
 -- =============================================================================
 
@@ -44,11 +43,15 @@ global CardVisual = @record{
 ##[[ nebula_annotate("CardVisual", { states={"default"}, primitives={}, transitions={} }) ]]
 ## nebula_derive("CardVisual")
 
--- ---- 输入框：default + hovered + focused ----
+-- ---- 输入框：default + hovered + focused（Phase 3.6+ Gap Buffer 模式）----
+-- Phase 3.6: 在 InputVisual record 声明之前注入 NebulaBuf255 类型定义
+##[[ local _buf_type, _buf_src = nebula_gen_gap_buffer_type(255) ]]
+##[[ for _, _s in ipairs(aster.parse(_buf_src, "<gap_buffer:255>")) do inject_statement(_s) end ]]
 global InputVisual = @record{
   pos:    Vec2,
   size:   Vec2,
   radius: float32,
+  pixel_height: float32,  -- Phase 3.6.2: 鼠标命中测试需要
 
   default_bg_color:     Color,
   default_border_color: Color,
@@ -61,16 +64,12 @@ global InputVisual = @record{
   focused_bg_color:     Color,
   focused_border_color: Color,
   focused_border_width: float32,
-
-  -- Phase 3.4.4: 文本缓冲区字段（由 nebula_gen_text_buffer 生成的方法使用）
-  text_buf:   [256]uint8,
-  text_len:   uint32,
-  cursor_pos: uint32,
+  gap_buf:              NebulaBuf255,
 }
 ##[[
 nebula_annotate("InputVisual", {
   states     = {"default", "hovered", "focused"},
-  primitives = {"hoverable", "clickable", "focusable"},
+  primitives = {"hoverable", "clickable", "focusable", "editable"},
   transitions = {
     {from="default", to="hovered", tween="ease_out", duration=0.12},
     {from="hovered", to="default", tween="ease_out", duration=0.12},
@@ -81,13 +80,6 @@ nebula_annotate("InputVisual", {
 })
 ]]
 ## nebula_derive("InputVisual")
-
--- Phase 3.4.4: 为 InputContext 生成 process_text_input / get_text 方法
-##[[
-  local _tb_src = nebula_gen_text_buffer({ base = "Input" })
-  local _tb_ast = aster.parse(_tb_src, "<nebula_gen_text_buffer:Input>")
-  for _, stat in ipairs(_tb_ast) do inject_statement(stat) end
-]]
 
 -- ---- 按钮 ----
 global ButtonVisual = @record{
@@ -147,10 +139,10 @@ local function main(): int32
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
 
-  local window = glfwCreateWindow(WIN_W, WIN_H, "Nebula Phase 3.4 — Login Demo", nilptr, nilptr)
+  local window = glfwCreateWindow(WIN_W, WIN_H, "Nebula Phase 3.6 — Login Demo", nilptr, nilptr)
   if window == nilptr then printf("glfw: window creation failed\n") return 1 end
 
-  -- Phase 3.4.1: 注册键盘回调（在主循环前调用一次）
+  -- 注册键盘回调（在主循环前调用一次）
   nebula_input_install_callbacks(window)
 
   local renderer: NebulaRenderer
@@ -189,6 +181,7 @@ local function main(): int32
     pos    = Vec2{ x = 252.0, y = 196.0 },
     size   = Vec2{ x = 296.0, y = 44.0 },
     radius = 8.0,
+    pixel_height = 14.0,
     default_bg_color     = Color{ r=0.18, g=0.18, b=0.20, a=1.0 },
     default_border_color = Color{ r=0.32, g=0.32, b=0.36, a=1.0 },
     default_border_width = 1.0,
@@ -198,10 +191,10 @@ local function main(): int32
     focused_bg_color     = Color{ r=0.16, g=0.18, b=0.24, a=1.0 },
     focused_border_color = Color{ r=0.35, g=0.60, b=1.00, a=1.0 },
     focused_border_width = 2.0,
-    text_buf   = {},
-    text_len   = 0,
-    cursor_pos = 0,
   })
+  email_input.visual.gap_buf:init()
+  email_input.selection_anchor = 0
+  email_input.is_dragging      = false
   email_input.component_id = 1
 
   -- ---- Password 输入框（component_id = 2）----
@@ -210,6 +203,7 @@ local function main(): int32
     pos    = Vec2{ x = 252.0, y = 264.0 },
     size   = Vec2{ x = 296.0, y = 44.0 },
     radius = 8.0,
+    pixel_height = 14.0,
     default_bg_color     = Color{ r=0.18, g=0.18, b=0.20, a=1.0 },
     default_border_color = Color{ r=0.32, g=0.32, b=0.36, a=1.0 },
     default_border_width = 1.0,
@@ -219,10 +213,10 @@ local function main(): int32
     focused_bg_color     = Color{ r=0.16, g=0.18, b=0.24, a=1.0 },
     focused_border_color = Color{ r=0.35, g=0.60, b=1.00, a=1.0 },
     focused_border_width = 2.0,
-    text_buf   = {},
-    text_len   = 0,
-    cursor_pos = 0,
   })
+  password_input.visual.gap_buf:init()
+  password_input.selection_anchor = 0
+  password_input.is_dragging      = false
   password_input.component_id = 2
 
   -- ---- 登录按钮 ----
@@ -281,25 +275,30 @@ local function main(): int32
     password_input:update(&input, dt)
     login_btn:update(&input, dt)
 
-    -- Phase 3.4.4: 处理文本输入，文本变化时重建网格
+    -- Phase 3.6: 处理文本输入（Gap Buffer 驱动），文本变化时重建网格
     if email_input:process_text_input(&input) then
-      if email_input.visual.text_len > 0 then
-        email_text:set_text(&renderer, email_input:get_text())
+      local flat: [256]uint8
+      local txt = email_input:get_text(&flat[0], 255)
+      if email_input:get_text_len() > 0 then
+        email_text:set_text(&renderer, txt)
       else
         email_text:set_text(&renderer, "email")
       end
     end
 
     if password_input:process_text_input(&input) then
-      if password_input.visual.text_len > 0 then
+      local flat: [256]uint8
+      local txt = password_input:get_text(&flat[0], 255)
+      if password_input:get_text_len() > 0 then
         -- 密码框：显示 * 号
         local mask: [256]uint8
         local mi: uint32 = 0
-        while mi < password_input.visual.text_len do
+        local tlen = (@uint32)(password_input:get_text_len())
+        while mi < tlen do
           mask[mi] = 0x2A  -- '*'
           mi = mi + 1
         end
-        mask[password_input.visual.text_len] = 0
+        mask[tlen] = 0
         password_text:set_text(&renderer, (@cstring)(&mask[0]))
       else
         password_text:set_text(&renderer, "password")
@@ -308,8 +307,9 @@ local function main(): int32
 
     -- Enter 键：打印表单内容
     if input.key_pressed == NebulaKey.Enter then
-      printf("email: %s\n", email_input:get_text())
-      printf("password: [%d chars]\n", email_input.visual.text_len)
+      local flat_email: [256]uint8
+      printf("email: %s\n", email_input:get_text(&flat_email[0], 255))
+      printf("password: [%d chars]\n", (@uint32)(password_input:get_text_len()))
     end
 
     -- ---- 渲染 ----
@@ -339,8 +339,6 @@ local function main(): int32
     pipe_email:update_uniforms(&renderer, &u_email)
     pipe_password:update_uniforms(&renderer, &u_pwd)
     pipe_button:update_uniforms(&renderer, &u_btn)
-
-    -- 文本顶点已由 set_text 在调用时上传，此处无需额外 upload
 
     -- 提交渲染
     local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, nilptr)

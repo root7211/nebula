@@ -633,11 +633,24 @@ local function gen_pipeline_standard_instanced(base, uniforms_record, wgsl_sourc
   emit("  wgpuRenderPassEncoderDraw(pass, 6, count, 0, 0)")
   emit("end")
 
-  -- ===== draw（单实例快捷方法，上传 1 个 uniforms 并绘制） =====
+  -- ===== draw_single（单实例快捷方法，上传 1 个 uniforms 并绘制） =====
   emit(("function %s:draw_single(renderer: *NebulaRenderer, pass: WGPURenderPassEncoder, uniforms: pointer): void"):format(pipe))
   emit("  if self:upload(renderer, uniforms, 1) then")
   emit("    self:draw_instanced(pass, 1)")
   emit("  end")
+  emit("end")
+
+  -- ===== update_uniforms（向后兼容 shim，供 Phase 3.7 之前的 demo 使用） =====
+  -- 旧调用模式：pipeline:update_uniforms(&renderer, &u)  →  pipeline:draw(pass)
+  -- 等价于：update_viewport(vw, vh) + upload(data, 1)，再由 draw() 调用 draw_instanced(1)
+  emit(("function %s:update_uniforms(renderer: *NebulaRenderer, uniforms: *%s): void"):format(pipe, uniforms_record))
+  emit("  self:update_viewport(renderer, uniforms.viewport.x, uniforms.viewport.y)")
+  emit("  self:upload(renderer, uniforms, 1)")
+  emit("end")
+
+  -- ===== draw（向后兼容 shim，绘制已上传的单实例） =====
+  emit(("function %s:draw(pass: WGPURenderPassEncoder): void"):format(pipe))
+  emit("  self:draw_instanced(pass, 1)")
   emit("end")
 
   return table.concat(L, "\n")

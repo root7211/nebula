@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Nebula GUI Compiler — Current Build Script
+# Nebula GUI Compiler — Build Script
 #
-# 当前仓库状态：Phase 3.4.4 键盘输入与基础单行 Input 子系统已完成。
+# 当前仓库状态：Phase 3.9 — 文本一等公民 + Slot Producer 重构
 #
 # Usage:
 #   ./build.sh                     # 默认构建 button_demo
+#   ./build.sh form_demo           # 构建 Phase 3.9 表单演示（文本一等公民）
+#   ./build.sh dynamic_list_demo   # 构建 Phase 3.9 动态列表演示（Slot Producer）
 #   ./build.sh login_demo          # 构建 Phase 3.4.4 登录框演示
-#   ./build.sh dynamic_list_demo   # 构建 Phase 3.3.5 实例化列表演示
 #   ./build.sh text_demo           # 构建 Phase 3.2.5 文本渲染展示
+#   ./build.sh shadow_demo         # 构建 Phase 2.5 阴影演示
+#   ./build.sh layout_demo         # 构建 Phase 3.1 布局演示
+#   ./build.sh uniform_layout_test # 构建 Phase 2.1 Uniform 布局测试（无 GPU）
 #
 # 回归测试：
-#   bash tools/run_all_tests.sh   # 运行全部 12 项冒烟测试
+#   bash tools/run_all_tests.sh   # 运行全部 28 项回归测试
 # =============================================================================
 set -e
 
@@ -29,7 +33,7 @@ fi
 TARGET="${1:-button_demo}"
 
 case "$TARGET" in
-  button_demo|login_demo|simple_rect_demo|shadow_demo|layout_demo|text_demo|dynamic_list_demo)
+  button_demo|login_demo|simple_rect_demo|shadow_demo|layout_demo|text_demo|dynamic_list_demo|form_demo)
     NEEDS_GPU=1
     ;;
   uniform_layout_test)
@@ -37,7 +41,9 @@ case "$TARGET" in
     ;;
   *)
     echo "[nebula] Error: unknown target '$TARGET'"
-    echo "         Available targets: button_demo, login_demo, simple_rect_demo, shadow_demo, layout_demo, text_demo, dynamic_list_demo, uniform_layout_test"
+    echo "         Available targets: button_demo, login_demo, simple_rect_demo, shadow_demo,"
+    echo "                            layout_demo, text_demo, dynamic_list_demo, form_demo,"
+    echo "                            uniform_layout_test"
     exit 1
     ;;
 esac

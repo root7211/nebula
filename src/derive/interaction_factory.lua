@@ -201,6 +201,38 @@ function nebula_gen_text_buffer(spec)
   local lines    = {}
 
   -- -------------------------------------------------------------------------
+  -- ★ Phase 3.9 修复：生成顺序调整
+  --   Nelua 要求被调方法在调用方之前声明。
+  --   process_text_input 调用了 mouse_to_cursor 和 sync_cursor_to，
+  --   因此先生成这两个方法。
+  -- -------------------------------------------------------------------------
+  -- ★ Phase 3.6.2: mouse_to_cursor(mouse_x, pixel_height) -> uint32
+  table.insert(lines, ("-- [editable/gap_buffer] %s: mouse_to_cursor (Phase 3.6.2)"):format(ctx))
+  table.insert(lines, ("function %s:mouse_to_cursor(mouse_x: float32, pixel_height: float32): uint32"):format(ctx))
+  table.insert(lines, ("  local tmp_flat: [%d]uint8"):format(cap_val + 1))
+  table.insert(lines,  "  local text_len = self.visual.gap_buf:flatten(&tmp_flat[0], self.visual.gap_buf.capacity)")
+  table.insert(lines, ("  local tmp_adv: [%d]float32"):format(cap_val + 1))
+  table.insert(lines,  "  local char_count = nebula_text_compute_advances(")
+  table.insert(lines,  "    (@cstring)(&tmp_flat[0]),")
+  table.insert(lines,  "    pixel_height,")
+  table.insert(lines,  "    &tmp_adv[0],")
+  table.insert(lines, ("    %d"):format(cap_val + 1))
+  table.insert(lines,  "  )")
+  table.insert(lines,  "  local text_origin_x = self.visual.pos.x + 8.0  -- 8px 内边距")
+  table.insert(lines,  "  local local_x = mouse_x - text_origin_x")
+  table.insert(lines,  "  return nebula_text_hit_test(local_x, &tmp_adv[0], char_count)")
+  table.insert(lines,  "end")
+  -- ★ Phase 3.6.2: sync_cursor_to(target_pos) -> void
+  table.insert(lines, ("-- [editable/gap_buffer] %s: sync_cursor_to (Phase 3.6.2)"):format(ctx))
+  table.insert(lines, ("function %s:sync_cursor_to(target_pos: uint32): void"):format(ctx))
+  table.insert(lines,  "  while self.visual.gap_buf.gap_start > (@uint16)(target_pos) do")
+  table.insert(lines,  "    self.visual.gap_buf:move_cursor_left()")
+  table.insert(lines,  "  end")
+  table.insert(lines,  "  while self.visual.gap_buf.gap_start < (@uint16)(target_pos) do")
+  table.insert(lines,  "    self.visual.gap_buf:move_cursor_right()")
+  table.insert(lines,  "  end")
+  table.insert(lines,  "end")
+  -- -------------------------------------------------------------------------
   -- process_text_input：消费键盘事件，委托给 Gap Buffer 方法
   -- Phase 3.6.2: 在 just_clicked 时额外执行鼠标命中测试并同步光标
   -- -------------------------------------------------------------------------
@@ -363,56 +395,6 @@ function nebula_gen_text_buffer(spec)
   table.insert(lines, ("function %s:get_text(out: *[0]uint8, max_out: uint16): cstring"):format(ctx))
   table.insert(lines,  "  self.visual.gap_buf:flatten(out, max_out)")
   table.insert(lines,  "  return (@cstring)(out)")
-  table.insert(lines,  "end")
-
-  -- -------------------------------------------------------------------------
-  -- ★ Phase 3.6.2: mouse_to_cursor(mouse_x, pixel_height) -> uint32
-  --
-  -- 鼠标命中测试：将鼠标屏幕 X 坐标映射到 Gap Buffer 光标位置。
-  --
-  -- 实现：
-  --   1. 在栈上分配 [cap+1]float32 临时 advances 数组（零堆分配，公理 A+B）
-  --   2. 将 Gap Buffer 展平到栈上临时 [cap+1]uint8 缓冲区（不写入持久字段）
-  --   3. 调用 nebula_text_compute_advances 填充 advances
-  --   4. 调用 nebula_text_hit_test 返回目标光标索引
-  --   5. 所有临时数据在函数返回时自动回收
-  -- -------------------------------------------------------------------------
-  table.insert(lines, ("-- [editable/gap_buffer] %s: mouse_to_cursor (Phase 3.6.2)"):format(ctx))
-  table.insert(lines, ("function %s:mouse_to_cursor(mouse_x: float32, pixel_height: float32): uint32"):format(ctx))
-  -- 栈上临时展平缓冲区（不写入 visual 任何字段）
-  table.insert(lines, ("  local tmp_flat: [%d]uint8"):format(cap_val + 1))
-  table.insert(lines,  "  local text_len = self.visual.gap_buf:flatten(&tmp_flat[0], self.visual.gap_buf.capacity)")
-  -- 栈上临时 advances 数组（N+1 个元素，含末尾哨兵）
-  table.insert(lines, ("  local tmp_adv: [%d]float32"):format(cap_val + 1))
-  table.insert(lines,  "  local char_count = nebula_text_compute_advances(")
-  table.insert(lines,  "    (@cstring)(&tmp_flat[0]),")
-  table.insert(lines,  "    pixel_height,")
-  table.insert(lines,  "    &tmp_adv[0],")
-  table.insert(lines, ("    %d"):format(cap_val + 1))
-  table.insert(lines,  "  )")
-  -- 计算文本在输入框内的起始 X（相对于 visual.pos.x 加内边距）
-  table.insert(lines,  "  local text_origin_x = self.visual.pos.x + 8.0  -- 8px 内边距（与渲染一致）")
-  table.insert(lines,  "  local local_x = mouse_x - text_origin_x")
-  table.insert(lines,  "  return nebula_text_hit_test(local_x, &tmp_adv[0], char_count)")
-  table.insert(lines,  "end")
-
-  -- -------------------------------------------------------------------------
-  -- ★ Phase 3.6.2: sync_cursor_to(target_pos) -> void
-  --
-  -- 将 Gap Buffer 光标从当前位置（gap_start）移动到目标位置 target_pos。
-  -- 通过逐步调用 move_cursor_left / move_cursor_right 实现，O(|delta|)。
-  -- delta 通常极小（鼠标点击附近），实际性能接近 O(1)。
-  -- -------------------------------------------------------------------------
-  table.insert(lines, ("-- [editable/gap_buffer] %s: sync_cursor_to (Phase 3.6.2)"):format(ctx))
-  table.insert(lines, ("function %s:sync_cursor_to(target_pos: uint32): void"):format(ctx))
-  table.insert(lines,  "  -- 向左移动直到 gap_start == target_pos")
-  table.insert(lines,  "  while self.visual.gap_buf.gap_start > (@uint16)(target_pos) do")
-  table.insert(lines,  "    self.visual.gap_buf:move_cursor_left()")
-  table.insert(lines,  "  end")
-  table.insert(lines,  "  -- 向右移动直到 gap_start == target_pos")
-  table.insert(lines,  "  while self.visual.gap_buf.gap_start < (@uint16)(target_pos) do")
-  table.insert(lines,  "    self.visual.gap_buf:move_cursor_right()")
-  table.insert(lines,  "  end")
   table.insert(lines,  "end")
 
   return table.concat(lines, "\n")

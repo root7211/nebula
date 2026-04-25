@@ -407,7 +407,7 @@ local function gen_app_draw(app_name, reg)
         emit(("      if _slot_raw ~= nilptr then"):format())
         emit(("        local _slot_data = (@*[0]%s)(_slot_raw)"):format(uniforms_record))
         emit(("        local _slot_count: uint32 = 0"):format())
-        emit(("        %s(&self, &self.arena, _slot_data, &_slot_count, %d)"):format(
+        emit(("        %s(self, &self.arena, _slot_data, &_slot_count, %d)"):format(
           slot.producer, slot.max_instances))
         emit(("        local _si: uint32 = 0"):format())
         emit(("        while _si < _slot_count and _count < %d do"):format(max_inst))
