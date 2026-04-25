@@ -1,5 +1,5 @@
 -- =============================================================================
--- derive/app_factory.lua — Nebula GUI Compiler Phase 3.9
+-- derive/app_factory.lua — Nebula GUI Compiler Phase 3.10.5
 --
 -- 编译期显式编排工厂（App Factory）
 -- 生成 <App> record + init + update + draw
@@ -9,6 +9,11 @@
 --   · nebula_app_register_text  — 文本一等公民（原语 3）
 --   · nebula_app_register_slot  — Slot Producer 重构（原语 4，废弃外部全局变量）
 --   · NebulaSlotView            — 动态插槽视图 Record
+-- ★ Phase 3.10.5 新增：
+--   · nebula_app_register_text 扩展：支持独立文本标签（bound_to = nil）
+--     · mode = "static"  — 静态文本，初始化后不再更新
+--     · mode = "dynamic" — 动态文本，通过 updater 函数每帧更新
+--     · mode = "bound"   — 绑定到 editable 组件（原有行为）
 -- =============================================================================
 
 -- 全局应用注册表
@@ -34,7 +39,8 @@ function nebula_app_begin(app_name, opts)
     name        = app_name,
     components  = {},  -- 静态组件列表：{name, visual_type, base, component_id}
     slots       = {},  -- 动态插槽列表：{name, visual_type, base, max_instances, producer}
-    texts       = {},  -- ★ Phase 3.9: 文本组件列表：{name, visual_type, base, bound_to, placeholder, mask_password}
+    texts       = {},  -- ★ Phase 3.9: 文本组件列表：{name, visual_type, base, mode, bound_to, placeholder, mask_password, updater}
+    shadows     = {},  -- ★ Phase 3.10.5: 阴影组件列表：{name, visual_type, base, blur_radius}
     -- 按 visual_type 分组，用于生成共享 Pipeline
     type_groups = {},  -- {visual_type -> {pipeline_name, base, members=[{name, is_slot}]}}
     -- ★ Phase 3.8: FrameArena 配置
@@ -80,18 +86,20 @@ function nebula_app_register_component(name, visual_type, opts)
   })
 end
 
--- ★ Phase 3.9: 注册一个文本组件（原语 3：编译期 Text 一等公民）
+-- ★ Phase 3.9 / Phase 3.10.5: 注册一个文本组件（原语 3：编译期 Text 一等公民）
 --
--- 将文本标签绑定到某个 editable 组件，自动生成：
---   · <App> record 中注入 TextContext 字段
---   · <App>:update 中注入 process_text_input + set_text 联动逻辑
---   · <App>:draw 中注入 TextPipeline:draw_buffer 调用
+-- Phase 3.10.5 扩展：支持三种模式（mode 字段）：
+--   · "bound"   — 绑定到 editable 组件（原有行为，默认当 bound_to 存在时）
+--   · "static"  — 独立静态文本，初始化后不自动更新（适合标题、标签等）
+--   · "dynamic" — 独立动态文本，通过 updater 函数每帧更新（适合计数器等）
 --
 -- opts:
---   bound_to      : string  — 绑定的 editable 组件名（如 "email_input"）
---   placeholder   : string  — 默认占位符文本（如 "email"）
---   mask_password : boolean — 是否掩码显示（true 时将字符替换为 '*'）
---   visual        : table   — TextVisual 初始化参数（pos, pixel_height, 颜色等）
+--   bound_to      : string  — [bound 模式] 绑定的 editable 组件名（如 "email_input"）
+--   placeholder   : string  — [bound 模式] 默认占位符文本（如 "email"）
+--   mask_password : boolean — [bound 模式] 是否掩码显示（true 时将字符替换为 '*'）
+--   mode          : string  — 模式："bound"（默认）/ "static" / "dynamic"
+--   updater       : string  — [dynamic 模式] 用户实现的更新函数名
+--                             签名：function(app: *<App>, arena: *NebulaArena): cstring
 function nebula_app_register_text(name, visual_type, opts)
   assert(_current_app, "nebula_app_register_text: must be called between nebula_app_begin and nebula_app_end")
   opts = opts or {}
@@ -100,15 +108,38 @@ function nebula_app_register_text(name, visual_type, opts)
     and visual_type:sub(1, #visual_type - #"Visual")
     or visual_type
 
-  assert(opts.bound_to, ("nebula_app_register_text: '%s' requires opts.bound_to"):format(name))
+  -- ★ Phase 3.10.5: 自动推断模式
+  local mode = opts.mode
+  if not mode then
+    if opts.bound_to then
+      mode = "bound"
+    elseif opts.updater then
+      mode = "dynamic"
+    else
+      mode = "static"
+    end
+  end
+
+  -- bound 模式仍然要求 bound_to
+  if mode == "bound" then
+    assert(opts.bound_to, ("nebula_app_register_text: '%s' in bound mode requires opts.bound_to"):format(name))
+  end
+  -- dynamic 模式要求 updater
+  if mode == "dynamic" then
+    assert(opts.updater, ("nebula_app_register_text: '%s' in dynamic mode requires opts.updater"):format(name))
+  end
 
   table.insert(reg.texts, {
     name          = name,
     visual_type   = visual_type,
     base          = base,
+    mode          = mode,
+    -- bound 模式字段
     bound_to      = opts.bound_to,
     placeholder   = opts.placeholder or "",
     mask_password = opts.mask_password or false,
+    -- dynamic 模式字段
+    updater       = opts.updater,
   })
 end
 
@@ -161,6 +192,37 @@ function nebula_app_register_slot(name, visual_type, opts)
   })
 end
 
+-- ★ Phase 3.10.5: 注册一个阴影组件（多 Pass 渲染）
+--
+-- 将阴影组件纳入 App 编排系统，自动生成：
+--   · <App> record 中注入 <T>Pipeline 字段（多 Pass 版本）
+--   · <App>:init 中注入 shadow_pipeline:init 调用
+--   · <App>:update 中注入 shadow_pipeline:update_uniforms 调用
+--   · <App>:draw_pre_pass 中注入 shadow_pipeline:draw_shadow 调用（离屏 Pass 1-3）
+--   · <App>:draw_surface_pass 中注入 draw_composite + draw 调用（Surface Pass 4）
+--
+-- opts:
+--   blur_radius  : number  — 默认模糊半径（默认 8.0）
+--   win_w        : number  — 窗口宽度（用于离屏纹理尺寸，默认 800）
+--   win_h        : number  — 窗口高度（默认 600）
+function nebula_app_register_shadow(name, visual_type, opts)
+  assert(_current_app, "nebula_app_register_shadow: must be called between nebula_app_begin and nebula_app_end")
+  opts = opts or {}
+  local reg = nebula_app_registry[_current_app]
+  local base = visual_type:sub(-#"Visual") == "Visual"
+    and visual_type:sub(1, #visual_type - #"Visual")
+    or visual_type
+
+  table.insert(reg.shadows, {
+    name         = name,
+    visual_type  = visual_type,
+    base         = base,
+    blur_radius  = opts.blur_radius or 8.0,
+    win_w        = opts.win_w or 800,
+    win_h        = opts.win_h or 600,
+  })
+end
+
 -- 结束 App 声明
 function nebula_app_end()
   assert(_current_app, "nebula_app_end: no app currently being declared")
@@ -209,6 +271,16 @@ local function gen_app_record(app_name, reg)
       emitted_pipes[group.pipeline_name] = true
     end
   end
+  -- ★ Phase 3.10.5: 注入阴影组件的 Context + Pipeline
+  if #reg.shadows > 0 then
+    emit("")
+    emit("  -- ★ Phase 3.10.5: 阴影组件 Context + 多 Pass 管线")
+    for _, shd in ipairs(reg.shadows) do
+      emit(("  %s: %sContext,"):format(shd.name, shd.base))
+      emit(("  pipe_%s: %sPipeline,"):format(shd.base:lower(), shd.base))
+    end
+  end
+
   emit("")
   emit("  -- ★ Phase 3.8: FrameArena（内嵌后备内存，无堆分配）")
   emit("  arena: NebulaArena,")
@@ -261,6 +333,16 @@ local function gen_app_init(app_name, reg)
     emit("  if not self.pipe_text:init(renderer) then return false end")
   end
 
+  -- ★ Phase 3.10.5: 初始化阴影管线（多 Pass）
+  if #reg.shadows > 0 then
+    emit("")
+    emit("  -- ★ Phase 3.10.5: 初始化阴影管线（多 Pass）")
+    for _, shd in ipairs(reg.shadows) do
+      emit(("  if not self.pipe_%s:init(renderer, %d, %d) then return false end"):format(
+        shd.base:lower(), shd.win_w, shd.win_h))
+    end
+  end
+
   emit("")
   emit("  -- ★ Phase 3.8: 初始化 FrameArena（绑定内嵌后备内存）")
   emit(("  nebula_arena_init(&self.arena, &self._arena_backing[0], %d)"):format(reg.arena_size))
@@ -285,44 +367,106 @@ local function gen_app_update(app_name, reg)
     emit(("  self.%s:update(input, dt)"):format(comp.name))
   end
 
-  -- ★ Phase 3.9: 文本组件联动逻辑
+  -- ★ Phase 3.9 / Phase 3.10.5: 文本组件联动逻辑
   if #reg.texts > 0 then
     emit("")
-    emit("  -- ★ Phase 3.9: 文本组件联动（一等公民）")
+    emit("  -- ★ Phase 3.9 / Phase 3.10.5: 文本组件联动（一等公民）")
     for _, txt in ipairs(reg.texts) do
-      emit(("  -- %s 绑定到 %s（placeholder: \"%s\", mask: %s）"):format(
-        txt.name, txt.bound_to, txt.placeholder, tostring(txt.mask_password)))
-      emit(("  if self.%s:process_text_input(input) then"):format(txt.bound_to))
-      emit(("    if self.%s:get_text_len() > 0 then"):format(txt.bound_to))
-      emit(("      local _%s_buf: [256]uint8"):format(txt.name))
-      emit(("      local _%s_raw = self.%s:get_text(&_%s_buf[0], 255)"):format(
-        txt.name, txt.bound_to, txt.name))
-      if txt.mask_password then
-        -- 掩码模式：将所有字符替换为 '*'
-        emit(("      local _%s_len = self.%s:get_text_len()"):format(txt.name, txt.bound_to))
-        emit(("      local _%s_mask: [256]uint8"):format(txt.name))
-        emit(("      local _%s_mi: uint16 = 0"):format(txt.name))
-        emit(("      while _%s_mi < _%s_len do"):format(txt.name, txt.name))
-        emit(("        _%s_mask[_%s_mi] = 0x2A"):format(txt.name, txt.name))
-        emit(("        _%s_mi = _%s_mi + 1"):format(txt.name, txt.name))
-        emit(("      end"):format())
-        emit(("      _%s_mask[_%s_len] = 0"):format(txt.name, txt.name))
-        emit(("      self.%s:set_text(self.renderer, (@cstring)(&_%s_mask[0]))"):format(
-          txt.name, txt.name))
-      else
-        emit(("      self.%s:set_text(self.renderer, _%s_raw)"):format(txt.name, txt.name))
+      local mode = txt.mode or "bound"
+      if mode == "bound" then
+        -- 原有绑定模式：联动 editable 组件
+        emit(("  -- [bound] %s 绑定到 %s（placeholder: \"%s\", mask: %s）"):format(
+          txt.name, txt.bound_to, txt.placeholder, tostring(txt.mask_password)))
+        emit(("  if self.%s:process_text_input(input) then"):format(txt.bound_to))
+        emit(("    if self.%s:get_text_len() > 0 then"):format(txt.bound_to))
+        emit(("      local _%s_buf: [256]uint8"):format(txt.name))
+        emit(("      local _%s_raw = self.%s:get_text(&_%s_buf[0], 255)"):format(
+          txt.name, txt.bound_to, txt.name))
+        if txt.mask_password then
+          emit(("      local _%s_len = self.%s:get_text_len()"):format(txt.name, txt.bound_to))
+          emit(("      local _%s_mask: [256]uint8"):format(txt.name))
+          emit(("      local _%s_mi: uint16 = 0"):format(txt.name))
+          emit(("      while _%s_mi < _%s_len do"):format(txt.name, txt.name))
+          emit(("        _%s_mask[_%s_mi] = 0x2A"):format(txt.name, txt.name))
+          emit(("        _%s_mi = _%s_mi + 1"):format(txt.name, txt.name))
+          emit(("      end"):format())
+          emit(("      _%s_mask[_%s_len] = 0"):format(txt.name, txt.name))
+          emit(("      self.%s:set_text(self.renderer, (@cstring)(&_%s_mask[0]))"):format(
+            txt.name, txt.name))
+        else
+          emit(("      self.%s:set_text(self.renderer, _%s_raw)"):format(txt.name, txt.name))
+        end
+        emit(("    else"):format())
+        if txt.placeholder ~= "" then
+          emit(("      self.%s:set_text(self.renderer, \"%s\")"):format(txt.name, txt.placeholder))
+        else
+          emit(("      self.%s:set_text(self.renderer, \"\")"):format(txt.name))
+        end
+        emit(("    end"):format())
+        emit(("  end"):format())
+      elseif mode == "dynamic" then
+        -- ★ Phase 3.10.5: 动态模式：每帧调用 updater 函数
+        emit(("  -- [dynamic] %s 通过 %s 每帧更新"):format(txt.name, txt.updater))
+        emit(("  do"):format())
+        emit(("    local _%s_mark = nebula_arena_mark(&self.arena)"):format(txt.name))
+        emit(("    local _%s_str = %s(&self.arena)"):format(txt.name, txt.updater))
+        emit(("    if _%s_str ~= nilptr then"):format(txt.name))
+        emit(("      self.%s:set_text(self.renderer, _%s_str)"):format(txt.name, txt.name))
+        emit(("    end"):format())
+        emit(("    nebula_arena_rewind(&self.arena, _%s_mark)"):format(txt.name))
+        emit(("  end"):format())
       end
-      emit(("    else"):format())
-      if txt.placeholder ~= "" then
-        emit(("      self.%s:set_text(self.renderer, \"%s\")"):format(txt.name, txt.placeholder))
-      else
-        emit(("      self.%s:set_text(self.renderer, \"\")"):format(txt.name))
+      -- static 模式：不在 update 中生成任何代码（由用户在 main 中手动调用 set_text 一次）
+      if mode == "static" then
+        emit(("  -- [static] %s: 静态文本，由用户在 App:init 后手动调用 set_text 初始化"):format(txt.name))
       end
-      emit(("    end"):format())
-      emit(("  end"):format())
     end
   end
 
+  emit("end")
+
+  return table.concat(L, "\n")
+end
+
+-- ★ Phase 3.10.5: 生成 <App>:draw_pre_pass（阴影离屏 Pass 1-3）
+-- 仅当 App 有阴影组件时才生成此方法；否则生成一个空实现以兼容 nebula_frame_render_multipass
+local function gen_app_pre_pass(app_name, reg)
+  local L = {}
+  local function emit(s) table.insert(L, s) end
+
+  emit(("function %s:draw_pre_pass(encoder: WGPUCommandEncoder, renderer: *NebulaRenderer): void"):format(app_name))
+  if #reg.shadows > 0 then
+    emit("  -- ★ Phase 3.10.5: 阴影组件离屏 Pass（每个阴影组件执行 3 个离屏 Pass）")
+    for _, shd in ipairs(reg.shadows) do
+      local u_expr = ("self.%s:to_uniforms(self.vw, self.vh)"):format(shd.name)
+      emit(("  -- [shadow] %s: 更新 uniforms 并执行阴影离屏渲染"):format(shd.name))
+      emit(("  do"):format())
+      emit(("    local _u = %s"):format(u_expr))
+      emit(("    self.pipe_%s:update_uniforms(renderer, &_u)"):format(shd.base:lower()))
+      emit(("    self.pipe_%s:draw_shadow(encoder, renderer, %.1f)"):format(shd.base:lower(), shd.blur_radius))
+      emit(("  end"):format())
+    end
+  end
+  emit("end")
+
+  return table.concat(L, "\n")
+end
+
+-- ★ Phase 3.10.5: 生成 <App>:draw_surface_pass（在 Surface Pass 中合成阴影+绘制主体）
+-- 仅当 App 有阴影组件时才生成此方法；否则生成一个空实现
+local function gen_app_surface_pass(app_name, reg)
+  local L = {}
+  local function emit(s) table.insert(L, s) end
+
+  emit(("function %s:draw_surface_pass(pass: WGPURenderPassEncoder): void"):format(app_name))
+  if #reg.shadows > 0 then
+    emit("  -- ★ Phase 3.10.5: 阴影合成层（先合成模糊阴影，再绘制主体）")
+    for _, shd in ipairs(reg.shadows) do
+      emit(("  -- [shadow] %s: 先合成阴影，再绘制主体"):format(shd.name))
+      emit(("  self.pipe_%s:draw_composite(pass)"):format(shd.base:lower()))
+      emit(("  self.pipe_%s:draw(pass)"):format(shd.base:lower()))
+    end
+  end
   emit("end")
 
   return table.concat(L, "\n")
@@ -472,6 +616,9 @@ function nebula_app_generate(app_name)
     gen_app_init(app_name, reg),
     gen_app_update(app_name, reg),
     gen_app_draw(app_name, reg),
+    -- ★ Phase 3.10.5: 多 Pass 渲染支持
+    gen_app_pre_pass(app_name, reg),
+    gen_app_surface_pass(app_name, reg),
   }
 
   local source = table.concat(parts, "\n\n")
@@ -482,21 +629,22 @@ function nebula_app_generate(app_name)
     if slot.producer then slot_producer_count = slot_producer_count + 1 end
   end
 
-  print(("[derive-app] %s: emit App record + init + update + draw (%d components, %d texts, %d slots [%d producer], %d type_groups, arena=%dB)"):format(
+  print((("[derive-app] %s: emit App record + init + update + draw + pre_pass + surface_pass (%d components, %d texts, %d slots [%d producer], %d shadows, %d type_groups, arena=%dB)"):format(
     app_name,
     #reg.components,
     text_count,
     #reg.slots,
     slot_producer_count,
+    #reg.shadows,
     (function()
       local n = 0
       for _ in pairs(reg.type_groups) do n = n + 1 end
       return n
     end)(),
     reg.arena_size
-  ))
+  )))
 
   return source
 end
 
-return "nebula_app_factory_v0.3_phase3.9"
+return "nebula_app_factory_v0.4_phase3.10.5"

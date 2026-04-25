@@ -1,5 +1,5 @@
 -- =============================================================================
--- app.nelua — Nebula GUI Compiler Phase 3.8
+-- app.nelua — Nebula GUI Compiler Phase 3.8 / Phase 3.10.5
 --
 -- 统一输入收集层 + 帧渲染封装
 --   · nebula_input_install_callbacks(window) — 注册 GLFW 回调
@@ -214,6 +214,95 @@ global function nebula_frame_render(
   app:draw(pass)
 
   -- 5. 结束 RenderPass，提交并呈现
+  wgpuRenderPassEncoderEnd(pass)
+  wgpuRenderPassEncoderRelease(pass)
+
+  local cmd = wgpuCommandEncoderFinish(encoder, nilptr)
+  wgpuCommandEncoderRelease(encoder)
+  wgpuQueueSubmit(renderer.queue, 1, &cmd)
+  wgpuCommandBufferRelease(cmd)
+
+  wgpuSurfacePresent(renderer.surface)
+  wgpuTextureViewRelease(view)
+  wgpuTextureRelease(surface_tex.texture)
+end
+
+-- ★ Phase 3.10.5: nebula_frame_render_multipass
+-- 多 Pass 帧渲染函数：Surface 获取 → 阴影离屏 Pass → Surface 主 Pass → submit+present
+--
+-- 公理 C（形即渲染）：泛型展开后等价于手写静态代码。
+-- 与 nebula_frame_render 的区别：
+--   · app 需要实现 draw_pre_pass(encoder, renderer) 方法（在 Surface Pass 前执行离屏渲染）
+--   · app 需要实现 draw_surface_pass(pass) 方法（在 Surface Pass 中执行合成+主体绘制）
+--   · 这两个方法由 app_factory.lua 中的 nebula_app_register_shadow 自动生成
+global function nebula_frame_render_multipass(
+  renderer:  *NebulaRenderer,
+  app:       auto,
+  input:     *NebulaInputState,
+  dt:        float32,
+  clear_r:   float64,
+  clear_g:   float64,
+  clear_b:   float64
+): void
+  -- 1. 获取 Surface 当前纹理
+  local surface_tex: WGPUSurfaceTexture
+  wgpuSurfaceGetCurrentTexture(renderer.surface, &surface_tex)
+  local status = surface_tex.status
+  if status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal and
+     status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal then
+    return  -- 跳帧：Surface 暂时不可用
+  end
+
+  -- 2. 创建 TextureView
+  local view_desc = WGPUTextureViewDescriptor{
+    nextInChain     = nilptr,
+    label           = wgpu_str_null(),
+    format          = renderer.format,
+    dimension       = 2,
+    baseMipLevel    = 0,
+    mipLevelCount   = 1,
+    baseArrayLayer  = 0,
+    arrayLayerCount = 1,
+    aspect          = WGPUTextureAspect_All,
+  }
+  local view = wgpuTextureCreateView(surface_tex.texture, &view_desc)
+
+  -- 3. App Update
+  app:update(input, dt)
+
+  -- 4. 创建 CommandEncoder
+  local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, nilptr)
+
+  -- 5. ★ Phase 3.10.5: 执行阴影离屏 Pass（Pass 1-3）
+  --    app:draw_pre_pass 由 app_factory 自动生成，封装所有阴影组件的 draw_shadow 调用
+  app:draw_pre_pass(encoder, renderer)
+
+  -- 6. Surface 主 Pass（Pass 4）
+  local clear_color = WGPURenderPassColorAttachment{
+    nextInChain   = nilptr,
+    view          = view,
+    depthSlice    = 0xFFFFFFFF,
+    resolveTarget = nilptr,
+    loadOp        = WGPULoadOp_Clear,
+    storeOp       = WGPUStoreOp_Store,
+    clearValue    = WGPUColor{ r = clear_r, g = clear_g, b = clear_b, a = 1.0 },
+  }
+  local pass_desc = WGPURenderPassDescriptor{
+    nextInChain             = nilptr,
+    label                   = wgpu_str_null(),
+    colorAttachmentCount    = 1,
+    colorAttachments        = &clear_color,
+    depthStencilAttachment  = nilptr,
+    occlusionQuerySet       = nilptr,
+    timestampWrites         = nilptr,
+  }
+  local pass = wgpuCommandEncoderBeginRenderPass(encoder, &pass_desc)
+
+  -- 7. ★ Phase 3.10.5: 在 Surface Pass 中先合成阴影，再绘制主体
+  --    app:draw_surface_pass 由 app_factory 自动生成，封装 draw_composite + draw 调用
+  app:draw_surface_pass(pass)
+
+  -- 8. 结束 RenderPass，提交并呈现
   wgpuRenderPassEncoderEnd(pass)
   wgpuRenderPassEncoderRelease(pass)
 

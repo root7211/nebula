@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # run_all_tests.sh
-# Nebula GUI Compiler — Phase 3.9 Full Regression Test Suite
+# Nebula GUI Compiler — Phase 3.10.5 Full Regression Test Suite
 #
 # 运行所有 Lua 冒烟测试和编译回归测试。
 #
@@ -34,7 +34,7 @@ run_test() {
 }
 
 echo "============================================"
-echo " Nebula Phase 3.9 — Full Regression Suite"
+echo " Nebula Phase 3.10.5 — Full Regression Suite"
 echo "============================================"
 
 # ---- Part 1: Lua 冒烟测试（纯编译期逻辑验证） ----
@@ -102,6 +102,10 @@ run_test "smoke_phase3_8 (Phase 3.8 — nebula_frame_render & FrameArena 内嵌�
 run_test "smoke_phase3_9 (Phase 3.9 — 文本一等公民 & Slot Producer 重构验证)" \
   nelua-lua tests/smoke_phase3_9.lua
 
+# ★ Phase 3.10.5 专项测试（独立文本标签 & 多 Pass 渲染兼容）
+run_test "smoke_phase3_10_5 (Phase 3.10.5 — 独立文本标签 & 多 Pass 渲染兼容验证)" \
+  nelua-lua tests/smoke_phase3_10_5.lua
+
 # ---- Part 2: 编译回归测试（Nelua → C → 二进制） ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="
@@ -122,11 +126,11 @@ run_test "compile form_demo (Phase 3.9 — 文本一等公民表单)" \
 run_test "compile dynamic_list_demo (Phase 3.9 — Slot Producer)" \
   bash build.sh dynamic_list_demo
 
-# 暂缓升级的 Demo（等待框架支持）
-run_test "compile shadow_demo (Phase 2.5 — 暂缓升级，等待多 Pass 框架支持)" \
+# ★ Phase 3.10.5 新升级的 Demo
+run_test "compile shadow_demo (Phase 3.10.5 — 阴影已升级到 App 编排体系)" \
   bash build.sh shadow_demo
 
-run_test "compile text_demo (Phase 3.2.5 — 暂缓升级，等待独立标签支持)" \
+run_test "compile text_demo (Phase 3.10.5 — 独立文本标签已支持)" \
   bash build.sh text_demo
 
 # ---- 总结 ----
@@ -139,6 +143,6 @@ if [ "$FAIL" -gt 0 ]; then
   echo "[REGRESSION DETECTED] $FAIL test(s) failed!"
   exit 1
 else
-  echo "[ALL PASS] Phase 3.9 regression suite complete."
+  echo "[ALL PASS] Phase 3.10.5 regression suite complete."
   exit 0
 fi

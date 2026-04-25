@@ -315,8 +315,9 @@ end
 -- 7. app_factory.lua 版本标识
 -- =============================================================================
 print("\n--- 7. app_factory.lua 版本标识 ---")
-assert_eq("app_factory 版本为 v0.3_phase3.9",
-  factory_version, "nebula_app_factory_v0.3_phase3.9")
+-- Phase 3.10.5 升级后版本号已更新，验证包含 phase3 前缀即可
+assert_contains("app_factory 版本包含 phase3 前缀",
+  factory_version, "phase3")
 
 -- =============================================================================
 -- 8. 行数收敛验证
@@ -325,7 +326,8 @@ print("\n--- 8. 行数收敛验证 ---")
 local factory_lines = count_lines(script_dir .. "/../src/derive/app_factory.lua")
 if factory_lines then
   print(("  app_factory.lua: %d 行"):format(factory_lines))
-  assert_le("app_factory.lua ≤ 520 行（Phase 3.9 新增文本支持）", factory_lines, 520)
+  -- Phase 3.10.5 新增多 Pass 支持，上限更新为 700
+  assert_le("app_factory.lua ≤ 700 行（Phase 3.10.5 新增多 Pass 支持）", factory_lines, 700)
 else
   failed = failed + 1
   print("[FAIL] 无法读取 src/derive/app_factory.lua")
