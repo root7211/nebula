@@ -2,7 +2,7 @@
 
 **作者**：Manus AI
 **日期**：2026-04-26
-**目标**：消除原语注入逻辑在 `nebula_core.nelua` 和 `interaction_factory.lua` 中的散布，建立统一的 `NEBULA_PRIMITIVES` 注册表，彻底移除 `toggleable` 的字符串后处理 Hack，为 Phase 3.11 的 Layout-App 桥接提供稳固的基础设施。
+**目标**：消除原语注入逻辑在 `nebula_core.nelua` 和 `interaction_factory.lua` 中的散布，建立统一的 `NEBULA_PRIMITIVES` 注册表，彻底移除 `toggleable` 的字符串后处理 Hack，并从"源码注入"转向"结构化元数据驱动"，为 Phase 3.11 的 Layout-App 桥接提供稳固且哲学上更优的基础设施。
 
 ---
 
@@ -12,13 +12,15 @@
 
 首先，`interaction_factory.lua` 中存在硬编码的分支逻辑，特别是对于 `toggleable` 原语，采用了一种极其脆弱的 `source:sub` 字符串后处理技术（Monkey-patch）来在生成的代码末尾强行插入 `process_toggle` 调用 [2]。其次，在 `nebula_core.nelua` 的 `gen_context_for` 函数中，为 Context 记录注入原语字段以及在 `init()` 方法中初始化这些字段的代码，都使用了长串的硬编码 `if-else` 分支 [3]。最后，在 `nebula_derive` 宏中，全局类型的注入（如 `NebulaToggleState` 和 `NebulaBuf{N}`）也是通过条件判断散布在各处 [4]。
 
-这种散布式实现不仅使得新增原语的成本极高，也违反了总纲领中关于"原语 6（原语统一注册中心）"的明确要求 [5]。因此，Phase 3.10 的核心任务是将所有原语的声明、类型注入、字段生成和状态处理收敛到一张统一的注册表中。
+这种散布式实现不仅使得新增原语的成本极高，也违反了总纲领中关于"原语 6（原语统一注册中心）"的明确要求 [5]。此外，哲学审计指出，当前方案虽然解决了工程问题，但在**公理 A（编译期最大化）**的极致追求上仍有优化空间，即应从"Lua 拼接 Nelua 源码字符串"转向"Lua 提供结构化元数据，由 Nelua 宏负责最终拼装" [6]。
+
+因此，Phase 3.10 的核心任务是将所有原语的声明、类型注入、字段生成和状态处理收敛到一张统一的注册表中，并以**元数据驱动**的方式实现代码生成，而非直接的字符串拼接。
 
 ---
 
-## 2. 核心设计：统一注册表模式
+## 2. 核心设计：元数据驱动的统一注册表模式
 
-Phase 3.10 将在 `interaction_factory.lua` 顶部引入一个全局的 `NEBULA_PRIMITIVES` 注册表。该注册表将使用数据驱动的方式定义每个原语的全部行为特征，取代目前散落在各处的条件判断分支。
+Phase 3.10 将在 `interaction_factory.lua` 顶部引入一个全局的 `NEBULA_PRIMITIVES` 注册表。该注册表将使用数据驱动的方式定义每个原语的全部行为特征，取代目前散落在各处的条件判断分支。最重要的是，注册表将返回**结构化的元数据**（如字段定义列表、代码片段标识），而非直接的 Nelua 源码字符串，最终的 Nelua 源码拼装将由 `nebula_core.nelua` 中的宏负责。
 
 ### 2.1 注册表结构设计
 
@@ -27,18 +29,19 @@ Phase 3.10 将在 `interaction_factory.lua` 顶部引入一个全局的 `NEBULA_
 | 字段 | 类型 | 说明 |
 | :--- | :--- | :--- |
 | `name` | 字符串 | 原语名称，如 "hoverable" |
-| `global_types` | 字符串（可选） | 需要在编译期注入的全局类型定义，如 `NebulaToggleState` 的记录定义 |
-| `context_fields` | 字符串 | 注入到 `<T>Context` 记录中的字段声明，如 `hover: HoverableState,` |
-| `context_init` | 字符串 | 在 `<T>Context:init()` 中执行的初始化代码，如 `self.hover = HoverableState{}` |
-| `process_input` | 字符串（可选） | 在 `process_input` 方法主体中执行的状态更新逻辑 |
-| `post_process` | 字符串（可选） | 在 `process_input` 状态机转换完成后执行的后处理逻辑，专为 `toggleable` 设计 |
-| `extra_methods` | 函数（可选） | 生成额外方法的工厂函数，如 `editable` 的 `mouse_to_cursor` 和 `sync_cursor_to` |
+| `dependencies` | 字符串数组（可选） | 该原语隐式依赖的其他原语，如 `clickable` 依赖 `hoverable`。注册中心将自动注入依赖。 |
+| `global_type_meta` | 表（可选） | 描述需要在编译期注入的全局类型元数据，如 `NebulaToggleState` 的字段定义。由 `nebula_core.nelua` 宏解析并生成 `global @record`。 |
+| `context_field_meta` | 表 | 描述注入到 `<T>Context` 记录中的字段元数据，如 `{ name = "hover", type = "HoverableState" }`。由 `nebula_core.nelua` 宏解析并生成字段声明。 |
+| `context_init_meta` | 表 | 描述在 `<T>Context:init()` 中执行的初始化代码元数据，如 `{ type = "record_init", field = "hover", record_name = "HoverableState" }`。由 `nebula_core.nelua` 宏解析并生成初始化代码。 |
+| `process_input_meta` | 表（可选） | 描述在 `process_input` 方法主体中执行的状态更新逻辑元数据，如 `{ type = "inline_code", snippet_id = "hover_logic" }`。由 `nebula_core.nelua` 宏解析并插入预定义的代码片段。 |
+| `post_process_meta` | 表（可选） | 描述在 `process_input` 状态机转换完成后执行的后处理逻辑元数据，专为 `toggleable` 设计。由 `nebula_core.nelua` 宏解析并插入预定义的代码片段。 |
+| `extra_methods_meta` | 表（可选） | 描述额外方法的元数据，如 `editable` 的 `mouse_to_cursor` 和 `sync_cursor_to`。由 `nebula_core.nelua` 宏解析并生成方法。
 
 ### 2.2 消除字符串后处理 Hack
 
-在引入注册表后，`nebula_gen_process_input` 的实现将被重构。它将不再通过字符串替换来修改已生成的代码，而是遍历 `spec.primitives` 列表，从注册表中提取相应的 `process_input` 和 `post_process` 代码块，并将它们按照固定的模板顺序组装成最终的源码。
+在引入元数据驱动的注册表后，`nebula_gen_process_input` 的实现将被重构。它将不再通过字符串替换来修改已生成的代码，而是返回一个包含 `process_input_meta` 和 `post_process_meta` 的结构化列表。`nebula_core.nelua` 中的宏将负责解析这些元数据，并按照固定的模板顺序，从预定义的 Nelua 代码片段库中组装成最终的源码。
 
-> 通过将 toggleable 的处理逻辑声明为 `post_process` 回调，我们彻底消除了第 450-463 行的 `source:sub` 字符串后处理代码，使得代码生成过程变得确定且安全。
+> 通过将 `toggleable` 的处理逻辑声明为 `post_process_meta`，我们彻底消除了第 450-463 行的 `source:sub` 字符串后处理代码，使得代码生成过程变得确定且安全，并符合公理 A 的"结构化注入"原则 [6]。
 
 ---
 
@@ -47,16 +50,16 @@ Phase 3.10 将在 `interaction_factory.lua` 顶部引入一个全局的 `NEBULA_
 实施过程将严格遵循安全重构的原则，确保在不破坏现有功能的前提下逐步替换旧机制。
 
 ### 步骤一：构建注册表并迁移基础原语
-在 `interaction_factory.lua` 中定义 `NEBULA_PRIMITIVES` 表，并首先将 `hoverable`、`clickable` 和 `focusable` 这三个基础原语迁移到注册表驱动的模式。这包括将它们在 `gen_context_for` 中的字段声明和初始化逻辑提取到注册表中，并修改 `nebula_core.nelua` 以通过遍历注册表来生成这部分代码。
+在 `interaction_factory.lua` 中定义 `NEBULA_PRIMITIVES` 表，并首先将 `hoverable`、`clickable` 和 `focusable` 这三个基础原语迁移到注册表驱动的模式。这包括将它们在 `gen_context_for` 中的字段声明和初始化逻辑提取到注册表的 `context_field_meta` 和 `context_init_meta` 中。同时，修改 `nebula_core.nelua` 中的 `gen_context_for` 和 `nebula_derive` 宏，使其通过遍历 `NEBULA_PRIMITIVES` 注册表来生成这部分代码。
 
-### 步骤二：迁移 toggleable 原语并消除 Hack
-将 `toggleable` 原语迁移到注册表。将其全局类型 `NebulaToggleState` 定义移入 `global_types` 字段，将其字段声明和初始化移入相应字段。最关键的是，将其 `process_toggle` 的调用逻辑定义为 `post_process`，并重写 `nebula_gen_process_input` 以支持该回调机制，从而删除旧的 Monkey-patch 代码。
+### 步骤二：处理原语依赖与迁移 toggleable
+增强注册表，使其能够处理原语间的隐式依赖（例如，如果声明了 `clickable`，则自动注入 `hoverable` 的元数据）。然后，将 `toggleable` 原语迁移到注册表。将其全局类型 `NebulaToggleState` 的定义元数据移入 `global_type_meta` 字段，将其字段声明和初始化元数据移入相应字段。最关键的是，将其 `process_toggle` 的调用逻辑定义为 `post_process_meta`，并重写 `nebula_core.nelua` 中的宏以支持该元数据驱动的后处理机制，从而删除旧的 Monkey-patch 代码。
 
 ### 步骤三：迁移 editable 原语与动态类型
-`editable` 原语具有特殊性，因为它需要根据 `max_text_len` 动态生成 `NebulaBuf{N}` 类型。在注册表中，我们将通过提供一个返回代码字符串的工厂函数来处理这种动态类型生成。同时，将 `editable` 相关的额外方法（如选区处理和光标同步）通过 `extra_methods` 字段进行注入。
+`editable` 原语具有特殊性，因为它需要根据 `max_text_len` 动态生成 `NebulaBuf{N}` 类型。在注册表中，我们将通过 `global_type_meta` 字段提供一个返回类型元数据的工厂函数来处理这种动态类型生成。同时，将 `editable` 相关的额外方法（如选区处理和光标同步）通过 `extra_methods_meta` 字段进行注入，由 `nebula_core.nelua` 宏解析并生成方法。
 
 ### 步骤四：primitives.nelua 瘦身与清理
-在完成所有原语的迁移后，`nebula_core.nelua` 中原有的硬编码 `HoverableState` 和 `ClickableState` 全局定义将被移除，转而通过注册表的 `global_types` 机制按需注入，实现框架核心代码的进一步瘦身。
+在完成所有原语的迁移后，`nebula_core.nelua` 中原有的硬编码 `HoverableState` 和 `ClickableState` 全局定义将被移除，转而通过注册表的 `global_type_meta` 机制按需注入，实现框架核心代码的进一步瘦身。同时，**必须确保 `nm` 命令再也找不到 `HoverableState_update` 等旧时代的幽灵符号** [6]。
 
 ---
 
@@ -86,3 +89,4 @@ Phase 3.10 是一个纯粹的架构重构阶段，不应引入任何面向开发
 [3] `src/nebula_core.nelua`: gen_context_for 函数实现细节.
 [4] `src/nebula_core.nelua`: nebula_derive 宏的条件注入逻辑.
 [5] Nebula 架构总纲领 (ARCHITECTURE_GRAND_PLAN.md): Phase 3.10 原语注册中心规划.
+[6] `docs/PHILOSOPHY_AUDIT_PHASE3_10.md`: Phase 3.10 深度哲学审计报告.
