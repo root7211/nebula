@@ -1,291 +1,204 @@
-# Nebula 架构总纲领：在极致哲学下的最终综合方案
+# Nebula 架构总纲领 v2
 
-**作者**：Manus AI
-**日期**：2026-04-24
-**版本**：v1.0（涵盖 Phase 0 至 Phase 3.6.1 全部既成事实，并指导 Phase 3.6.2 至 Phase 5 的演进）
+**修订日期**：2026-04-26
+**修订动因**：Phase 3.10 完成后的哲学审计发现原始公理体系存在形式化缺陷。本版本对三大公理进行了精确化重构，引入三阶段模型和三层生命周期模型，消除了所有已知的哲学不可达点。
 **适用范围**：所有未来 Phase 规划、所有 PR 评审、所有架构决策
 
 ---
 
-## 序言
+## 1. 公理体系
 
-Nebula GUI Compiler 在过去十二个 Phase 中，从一个"形即数据"的玩具逐步演化为一个具备 SDF 文本、动态列表、Gap Buffer 文本编辑能力的 GUI 框架。然而，正是这种演化的层叠性，使得当前代码库中沉积了**多个不同时代的架构残骸**：占位符着色器路径、混生的管线工厂、模糊的状态/渲染边界、以及若干未被严格执行的哲学承诺。
+Nebula 的全部设计决策由三条公理驱动。三条公理分别约束**时间**（操作归属哪个阶段）、**空间**（数据归属哪个生命周期层）和**映射**（Visual 如何确定性地对应管线），三者作用于正交维度。
 
-本纲领的目的不是再增加一个 Phase，而是**对整个架构做一次"总清算"**：把哲学公理化、把含混的边界形式化、把所有现存与潜在的冲突彻底消除，并据此给出一份贯穿整个剩余生命周期的演进路线图。
+### 1.1 公理 A：阶段封闭性原则
 
----
+Nebula 的生命周期被划分为三个严格有序的阶段，每个阶段有且仅有一类合法操作。后一阶段不得执行前一阶段的操作，前一阶段的输出是后一阶段的不可变输入。
 
-## 1. 三大哲学公理与一条元规则
-
-为了让"哲学"不再是模糊的口号，本纲领将散落于 `DESIGN_PHASE1.md`、`PLAN_PHASE2.md`、`PLAN_PHASE3_6.md` 等文档中的核心承诺，正式公理化为三条不可违反的规则，外加一条用于裁决冲突的元规则 [1] [2] [3]。
-
-**公理 A（编译期最大化原则）**：任何能在编译期确定的事实，必须在编译期确定。Nelua 宏（`##`）是 Nebula 唯一合法的编译期推导通道；运行时不应出现可由编译期消除的虚函数分发、字符串查表或 `if reg.has_xxx then` 风格的特性开关。
-
-**公理 B（生命周期严格分层原则）**：Nebula 中只存在两种内存生命周期，且必须显式归属之一：
-
-| 层 | 名称 | 生命周期 | 合法存储位置 | 典型数据 |
+| 阶段 | 名称 | 合法操作 | 输出 | 执行者 |
 | :--- | :--- | :--- | :--- | :--- |
-| **L1** | 持久层（Persistent） | 跨帧存活 | 栈分配的静态 Record、编译期定容容器（如 Gap Buffer） | 文本内容、焦点 ID、状态机当前态、Toggle 开关 |
-| **L2** | 帧级层（Transient） | 单帧瞬时 | Frame Arena | 排版结果、动态列表实例数据、本帧收集的批量 Uniforms |
+| **S0** | 预处理阶段 | 字体解析、atlas/curve-data 生成、资源序列化 | 静态资产文件（`.nelua`、`.pgm`、`.bin`） | 离线工具（`font_preprocessor`） |
+| **S1** | 编译阶段 | 类型派生、管线生成、布局解算、状态机构建、着色器组合 | Nelua 源码 → C 源码 → 机器码 | Nelua 宏（`##`） |
+| **S2** | 运行阶段 | GPU 资源创建、输入处理、状态转移、渲染提交 | 帧画面 | 编译后的二进制 |
 
-**公理 C（形即渲染原则）**：每一个 `Visual` 类型必须拥有一条专属的、按字段精确组合而成的渲染管线。运行时不应存在"通用渲染器"，也不应存在通过运行时分支选择字段集合的着色器。
+**判定准则**：给定一个操作 O，其合法阶段由输入来源决定——
 
-**元规则（Π，冲突裁决）**：当公理 A、B、C 出现冲突时，按 **B > C > A** 的优先级裁决。即：宁可放弃部分编译期推导，也要保住生命周期的严格分层；宁可让多个 `Visual` 共用底层管线生成器，也要保住生命周期的严格分层。
+1. 如果 O 的所有输入在 S0 时刻已知（如 TTF 文件路径、目标字符集），则 O 属于 S0。
+2. 如果 O 的所有输入在 S1 时刻已知（如 Visual 的字段列表、原语声明），则 O 属于 S1。
+3. 仅当 O 的输入依赖用户交互或外部事件（如鼠标位置、键盘输入、窗口 resize）时，O 属于 S2。
 
-> 示例：Phase 3.6.1 的编译期定容 Gap Buffer 看似违反公理 A（容量在编译期硬编码无法运行时增长），实则是公理 B 在 L1 层的最优实现——它用编译期决策换取了零堆分配，是 A 与 B 的协同而非冲突。
+这是一个可机械判定的分类规则：只需检查操作的输入来源，即可确定其合法阶段。
 
----
+### 1.2 公理 B：生命周期三层原则
 
-## 2. 当前代码库的架构盘点：八处张力点
+Nebula 的运行时数据存在且仅存在三种生命周期，每个运行时数据必须显式归属其一。层间依赖严格单向。
 
-本节基于对 `src/` 目录全部 6,512 行代码、`docs/` 目录全部 16 篇规划文档、以及 `examples/` 目录全部演示的逐行审计，识别出截至 Phase 3.6.1 的八处架构张力点。每一处都将在第 3 节给出统一的解决方案。
+| 层 | 名称 | 生命周期 | 创建时机 | 销毁时机 | 合法存储 | 典型数据 |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **L0** | 永久层 | 应用全生命周期 | `init()` | `deinit()` | 静态全局 / App Record | GPU 管线、纹理、Bind Group Layout、Sampler |
+| **L1** | 持久层 | 跨帧存活 | `init()` 或状态转移 | 显式重置 | App Record 内的状态字段 | 焦点 ID、Gap Buffer 内容、Toggle 状态、状态机当前态 |
+| **L2** | 帧级层 | 单帧瞬时 | 每帧 `update`/`draw` | `arena.reset()` | Frame Arena | 排版结果、Slot Producer 输出、临时 cstring |
 
-### 张力 1：双脑渲染（Split-Brain Rendering）
+**不变量**（形式化表述）：
 
-`src/derive/shader_compose.lua` 同时存在四个着色器组合器：`nebula_compose_shader`（基础 SDF）、`nebula_compose_instanced_shader`（Phase 3.3 的硬编码 InstanceData）、`nebula_compose_text_shader`（文本专属）、`nebula_compose_shader_instanced`（Phase 3.5.1 的标准 Visual Instanced）。其中 `nebula_compose_shader` 的 fragment 阶段实际上只返回一个红色矩形占位符 [4]，真正的 SDF 圆角矩形与边框逻辑已迁移到 `nebula_compose_shader_instanced`。这是典型的"未完成的架构迁移"，违反公理 C 的"专属性"承诺。
+```
+∀ data ∈ L1: valid(data) ⟹ valid(data) after arena.reset()
+∀ data ∈ L0: valid(data) ⟹ valid(data) after any L1 state transition
+```
 
-### 张力 2：管线分发的五条路径
+L2 的 reset 不得影响 L1 的有效性；L1 的任何状态变化不得影响 L0 的有效性。
 
-`src/derive/pipeline_factory.lua` 中 `nebula_gen_pipeline_source(spec)` 通过 `if spec.has_shadow / standard_instanced / instanced / textured / else` 五分支分发到 `gen_pipeline_simple` / `gen_pipeline_textured_vertex` / `gen_pipeline_shadow` / `gen_pipeline_standard_instanced` / `gen_pipeline_instanced` 五个生成器 [4]。其中 `gen_pipeline_simple` 与 `gen_pipeline_instanced` 已经被 `gen_pipeline_standard_instanced` 实质性取代，但代码并未删除。这是公理 A 的反模式——本应在编译期消除的分支留在了 Lua 元代码层面，徒增维护成本。
+### 1.3 公理 C：形即渲染原则
 
-### 张力 3：状态层与渲染层的渗透
+每一个 Visual 类型 V 在编译期（S1）必须确定性地映射到一个**管线签名**：
 
-最初的 Phase 3.6.2 方案（`PLAN_PHASE3_6_2.md`）建议在 `InputVisual` 中注入 `advances: [256]float32`，把字符的屏幕 X 坐标缓存进持久 Record。这违反公理 B：`advances` 是 L2 数据，硬塞进 L1 会导致字号或视口缩放时缓存失效。修订方案（`PLAN_PHASE3_6_2_REVISED.md`）已纠正为栈上即时计算。但同样的渗透风险还潜伏在多处：例如 `flat_buf: [256]uint8` 字段（用于 `get_text` 输出 cstring）实际上也是 L2 数据被错放在了 L1 [5]。
+> Σ(V) = (VertexLayout, UniformsLayout, ShaderModule, BlendState)
 
-### 张力 4：App 编排与文本组件的二等公民身份
+两个 Visual 类型 V₁ ≠ V₂ 当且仅当 Σ(V₁) ≠ Σ(V₂) 时允许共享管线对象。对于多 Pass 渲染，签名扩展为有序序列 Σ(V) = [Σ₁, Σ₂, ..., Σₙ]，其中每个 Σᵢ 对应一个 Pass。
 
-`src/derive/app_factory.lua` 生成的 `<App>:update` / `<App>:draw` 只覆盖了 `nebula_derive` 派生的标准 Visual [6]。而 `TextVisual`（由 `nebula_derive_text_visual` 派生）必须在 `examples/form_demo.nelua` 中**手动**调用 `set_text` / `draw_buffer` [7]。这是一个明显的二等公民问题——文本不是声明意图，而是被强行排除在编排之外。`has_text_buf` 字段虽然在 `app_factory.lua` 中被注册了，但生成的 `update` 并没有真正调用 `process_text_input`，只是聊胜于无的元数据 [6]。
+### 1.4 元规则 Π：正交性原则
 
-### 张力 5：动态插槽依赖外部全局变量
-
-`app_factory.lua` 在生成 `<App>:draw` 时，对动态插槽生成的代码形如 `while _si < <count_var> do _batch[_count] = <data_var>[_si]` [6]。这里的 `count_var` 和 `data_var` 是开发者必须在 App 之外提供的运行时全局变量。这违反了公理 A 的"编译期最大化"原则，也违反了 Phase 3.5.2 自己宣称的"显式编排"哲学——开发者仍然需要手动维护 Arena 的填充逻辑。`dynamic_list_demo.nelua` 完全不使用 `nebula_derive_app`，正是这一问题的体现 [8]。
-
-### 张力 6：渲染循环模板化的承诺未兑现
-
-Phase 3.5 计划提出 `nebula_frame_begin()` / `nebula_frame_end()` 来封装 WebGPU 渲染循环 [9]。但 `form_demo.nelua` 中 surface 获取、view 创建、encoder 创建、render pass 配置、submit、present 仍然是手写的近 50 行模板代码 [7]。这是一个"声明但未实现"的承诺。
-
-### 张力 7：交互原语的层级混乱
-
-`primitives.nelua` 中保留了 `HoverableState:update(mx, my, px, py, sw, sh)` 和 `ClickableState:update(...)` 的运行时函数定义 [10]，但 Phase 2.4 已承诺将其内联展开（`nm` 中不应出现 `HoverableState_update` 符号）[11]。当前 `interaction_factory.lua` 确实生成了内联代码，但旧的运行时函数并未删除，造成了"两套并存、行为相同、调用不一"的歧义。`focusable` / `editable` / `toggleable` 也存在类似的"原语在哪里被生成"的归属混乱：`focusable` 在 `interaction_factory.lua` 内部，`editable` 通过独立的 `nebula_gen_text_buffer` 注入，`toggleable` 通过 `nebula_gen_toggle_state` + 字符串后处理注入。这是典型的"特性按需手补"导致的架构碎片化。
-
-### 张力 8：Layout 引擎与 App 编排的脱钩
-
-`src/derive/layout_engine.lua` 提供了完整的编译期 Flexbox 解算 [12]，但 `app_factory.lua` 在生成 `<App>` 时**完全没有引用 layout 结果**——开发者仍然需要在 `form_demo.nelua` 中手动写 `pos = Vec2{x = 260.0, y = 80.0}` [7]。Phase 3.1 与 Phase 3.5 之间断了一座桥。
+公理 A 约束操作的**时间归属**（S0/S1/S2），公理 B 约束数据的**生命周期归属**（L0/L1/L2），公理 C 约束 Visual 的**管线映射**。三者作用于正交维度，不应产生冲突。如果出现表面冲突，应修订公理的形式化表述，而非裁决优先级。
 
 ---
 
-## 3. 八大原语的统一解决方案
+## 2. 架构张力与原语映射
 
-针对上述八处张力，本纲领提出一套**统一的、自洽的、不再产生新冲突的**架构原语集合。每一条原语都注明它所对应的张力编号、所遵循的公理。
+总纲领识别了八大架构张力，每个张力对应一个需要实现的"原语"。原语是消除张力的最小架构单元。
 
-### 原语 1：唯一管线生成器 `gen_pipeline_universal`（解决张力 1、2）
+| 张力 | 描述 | 对应原语 | 解决方案 |
+| :--- | :--- | :--- | :--- |
+| T1 | 管线路径爆炸 | 原语 1：管线收敛 | `pipeline_factory.lua` 收敛为 3 条路径（standard_instanced、text_vertex、shadow_multipass） |
+| T2 | 命中测试与排版分离 | 原语 2：栈上排版 + 命中测试 | `text_runtime.nelua` 中 L2 排版 + 编译期命中区域注入 |
+| T3 | 文本渲染手动管理 | 原语 3：文本一等公民 | `nebula_app_register_text` 自动编排文本管线 |
+| T4 | 动态列表外部依赖 | 原语 4：Slot Producer | `producer` 纯函数 + Arena mark/rewind |
+| T5 | 渲染循环样板代码 | 原语 5：渲染循环封装 | `nebula_frame_render` 一行调用 |
+| T6 | FrameArena 外置 | 原语 8：Arena 内嵌 | Arena 作为 App Record 的 L0 成员 |
+| T7 | 交互原语硬编码 | 原语 6：原语注册中心 | `NEBULA_PRIMITIVES` 元数据驱动注册表 |
+| T8 | 布局与 App 分离 | 原语 7：Layout-App 桥接 | 布局约束嵌入注册 API，编译期解算坐标 |
 
-废弃 `gen_pipeline_simple` / `gen_pipeline_instanced` / `nebula_compose_shader` 的占位符路径，将所有标准 Visual（含未来的多边形、椭圆等）统一收敛到 `gen_pipeline_standard_instanced` 一条路径上。文本和阴影分别保留为两条**显式具名**的特殊路径：`gen_pipeline_text_vertex` 和 `gen_pipeline_shadow_multipass`，由 `text_mode = "ascii_sdf"` 和 `has_shadow = true` 两个**注解层布尔位**显式选择，而不是通过 `spec.textured / spec.has_shadow / spec.instanced` 三个逻辑可组合但实际上互斥的字段隐式分发。
+---
 
-| 字段 | 策略 | 公理 |
-| :--- | :--- | :--- |
-| `text_mode == "ascii_sdf"` | 走 `text_vertex` 路径 | C |
-| `has_shadow == true` | 走 `shadow_multipass` 路径 | C |
-| 其他全部情况 | 走 `standard_instanced` 路径 | A + C |
+## 3. 已完成的 Phase 历史
 
-实现层面：删除 `nebula_compose_shader`、`nebula_compose_instanced_shader`、`gen_pipeline_simple`、`gen_pipeline_instanced` 共约 600 行死代码。`pipeline_factory.lua` 从 1011 行收敛到约 450 行。
+以下 Phase 已全部合入主线，全量回归测试通过。
 
-### 原语 2：L1/L2 严格分区器（解决张力 3）
+| Phase | 名称 | 消除张力 | 关键成果 | 完成日期 |
+| :--- | :--- | :--- | :--- | :--- |
+| 3.6.2 | 鼠标命中与栈上排版 | T2 | L2 栈上排版替代 L1 缓存 | 2026-04-24 |
+| 3.6.3 | 多行文本与 Selection | T2 | Gap Buffer 选区支持 | 2026-04-24 |
+| 3.7 | 管线生成器收敛与死代码清理 | T1 | 5 条路径 → 3 条路径，删除 600+ 行死代码 | 2026-04-24 |
+| 3.8 | 渲染循环封装与 FrameArena 内嵌 | T5, T6 | `nebula_frame_render` 一行调用；Arena 内嵌 App Record | 2026-04-24 |
+| 3.9 | 文本一等公民 + Slot Producer 重构 | T3, T4 | `nebula_app_register_text`；Producer 纯函数模式 | 2026-04-25 |
+| 3.10 | 原语注册中心 | T7 | `NEBULA_PRIMITIVES` 统一注册表；Monkey-patch 彻底删除 | 2026-04-26 |
+| 3.10.5 | 独立文本标签 + 多 Pass 渲染架构 | — | `register_text` static/dynamic 模式；`register_shadow`；多 Pass 渲染 | 2026-04-26 |
 
-在 `nebula_derive` 中引入一个**编译期校验阶段**：扫描 Visual Record 的每个字段，根据字段名后缀强制归类。任何违反归类的字段必须由开发者显式标注：
+**当前状态**：Phase 3.10.5 已完成，全量回归测试 **27/27 通过**（含 Phase 3.10 注册表专项 22 项断言）。
 
-| 字段命名 | 归属层 | 含义 |
-| :--- | :--- | :--- |
-| 后缀 `_buf`、含 `gap_`、`state`、`is_`、`current_` | L1 持久层 | 跨帧状态 |
-| 后缀 `_color`、`_pos`、`_size`、`_radius` 等视觉属性 | L1 持久层（被状态机插值） | 跨帧状态 |
-| 后缀 `_cache`、`_advances`、`_glyphs`、`_instances` | **禁止出现在 Visual** | 必须在 L2 |
+---
 
-校验失败时编译期 `error()` 中止编译，附友好的错误信息：`"InputVisual.advances violates Axiom B (transient cache must live in Frame Arena, not Visual Record). Move it into Phase 3.6.2's stack-allocated buffer or arena allocation."`
+## 4. 未来路线图
 
-`flat_buf: [256]uint8` 的迁移：将 `get_text()` 改为 `get_text(arena)` 接受 Arena 指针，输出 cstring 指向 Arena 内存。`InputVisual` 中删除 `flat_buf` 字段。
+### 4.1 Phase 3.11：Layout-App 统一注册
 
-### 原语 3：编译期 Text 一等公民 `nebula_app_register_text`（解决张力 4）
+**目标**：消除张力 T8，兑现 30 行愿景。
 
-取消 `has_text_buf` / `text_context` 这种"半 metadata"，转而引入一类全新的注册 API：
+将布局约束嵌入 `nebula_app_register_component` 的注册 API 中，消除独立的 `nebula_app_attach_layout` 调用（消除 DRY 违反）。`app_factory.lua` 在 S1 阶段自动从所有注册组件的 `layout` 字段构建布局树，调用 `layout_engine.lua` 解算坐标，将结果嵌入 `<App>:init()` 的编译期常量中。同时实现 `nebula_init` 和 `nebula_should_close` 便利性封装。
+
+**目标 API**：
 
 ```lua
-nebula_app_register_text("email_label", "TextVisual", {
-    bound_to        = "email_input",   -- 绑定到某个 editable 组件
-    placeholder     = "email",
-    mask_password   = false,
+nebula_app_register_component("email_input", "InputVisual", {
+  component_id = 1,
+  layout = { height = 40, flex_grow = 1, margin = {top = 8} }
+})
+
+nebula_app_set_root_layout("FormApp", {
+  direction = "column", padding = 32, gap = 16
 })
 ```
 
-`app_factory.lua` 据此自动在生成的 `<App>:update` 中注入：
+### 4.2 Phase 4.0：编译期公理校验器
 
-```nelua
-if self.email_input:process_text_input(input) then
-  if self.email_input:get_text_len() > 0 then
-    self.email_label:set_text(self.renderer, self.email_input:get_text(arena))
-  else
-    self.email_label:set_text(self.renderer, "email")
-  end
-end
-```
+**目标**：将公理从"文档约束"升级为"编译期强制"。
 
-`<App>:draw` 中也自动调用 `pipe_text:draw_buffer(...)`。文本组件从此成为编排的一等公民，不再需要在 demo 中手写 50 行 set_text / draw_buffer 模板代码。
+在 `nebula_derive` 和 `app_factory` 内嵌公理 B/C 的编译期断言。利用 Nelua 宏的元编程能力，在 S1 阶段直接校验：公理 B 校验 L2 数据不得出现在 Visual Record 中；公理 C 校验管线签名唯一性。这比外部 grep 工具强大得多，因为它在 S1 阶段拥有完整的类型信息和注册元数据，可以做真正的语义校验。
 
-### 原语 4：插槽即 Arena Producer（解决张力 5）
+### 4.3 Phase 4.1：Slug 文本渲染引擎
 
-将 `nebula_app_register_slot` 从"声明外部全局变量"改为"声明 Producer 函数"：
+**目标**：不违反公理 A 的 Unicode 全量支持。
 
-```lua
-nebula_app_register_slot("list_items", "ListItemVisual", {
-    max_instances = 10000,
-    producer      = "compute_visible_items",  -- 用户实现的纯函数
-})
-```
+**技术选型**：采用 2026 年 3 月进入公共领域的 **Slug 算法**（Eric Lengyel）。Slug 直接在 GPU 上从贝塞尔曲线控制点计算像素覆盖率，不需要光栅化的 SDF atlas。
 
-`<App>:draw` 自动生成：
+**与三阶段模型的对齐**：
 
-```nelua
-do
-  local _arena_mark = self.arena:mark()
-  local _slot: NebulaSlotView(ListItemUniforms)
-  compute_visible_items(self, &self.arena, &_slot)  -- 用户实现，把数据填进 Arena
-  -- 收集到 _batch 并 upload + draw_instanced
-  ...
-  self.arena:rewind(_arena_mark)
-end
-```
+| 阶段 | Slug 操作 | 输入来源 | 公理 A 合法性 |
+| :--- | :--- | :--- | :--- |
+| S0 | 从 TTF 提取贝塞尔曲线控制点，生成 band-data 和 curve-data | TTF 文件（S0 已知） | 合法 |
+| S1 | 将 curve/band 数据嵌入编译期常量，生成 WGSL Slug 着色器 | S0 输出（S1 已知） | 合法 |
+| S2 | GPU 从 curve/band 纹理计算像素覆盖率 | 要渲染的文字（依赖用户交互） | 合法 |
 
-`NebulaSlotView` 是一个由派生器为每个 slot 类型自动生成的视图 Record，包含 `data: *[0]<T>Uniforms` 与 `count: uint32`。这样动态插槽与静态组件在 App 层面拥有**完全相同的接口**：你不再需要外部全局变量，不再需要手动维护 Arena 生命周期，所有 L2 状态都被 App 自身托管。
+Slug 将"字形渲染"分解为"数据提取"（S0）和"像素计算"（S2），运行时没有任何光栅化或 atlas 管理。20,000+ CJK 字形的 curve-data 远小于等效的 SDF atlas（几 MB vs 数百 MB），且渲染质量在任意缩放下都是数学精确的。
 
-### 原语 5：渲染循环 `nebula_frame_render`（解决张力 6）
+**实施路径**：
 
-兑现 Phase 3.5 的承诺，提供唯一的渲染循环原语：
+1. 扩展 `font_preprocessor.nelua`，增加 `--mode=slug` 选项，生成 `curve_data.nelua` 和 `band_data.nelua`。
+2. 在 `shader_compose.lua` 中新增 `nebula_compose_slug_shader`，将参考 HLSL 翻译为 WGSL。
+3. 在 `pipeline_factory.lua` 中新增 `gen_pipeline_slug_text` 路径。
+4. 保留 `text_mode = "ascii_sdf"` 作为 ASCII-only 轻量级路径，`text_mode = "slug"` 作为 Unicode 全量路径。
 
-```nelua
-while glfwWindowShouldClose(window) == 0 do
-  glfwPollEvents()
-  nebula_collect_input(window, &input, dt)
-  
-  nebula_frame_render(&renderer, &app, &input, dt)
-  -- 内部展开为：app:update + frame_begin + app:draw + frame_end
-end
-```
+### 4.4 Phase 4.2：CJK 字体预处理与 HarfBuzz 集成
 
-`nebula_frame_render` 是一个 Nelua 泛型函数（不是宏），它的实现包含 Surface 获取、错误处理、view/encoder/render-pass 创建与释放、submit、present。开发者再也看不见 WGPU 的样板代码。`form_demo.nelua` 的渲染循环将从 100 行收缩到 5 行。
+**目标**：S0 阶段完成所有字形数据提取和 shaping 规则预处理。
 
-### 原语 6：原语统一注册中心（解决张力 7）
+扩展 `font_preprocessor` 支持 CJK 字体子集化（按应用声明的字符集提取），集成 HarfBuzz 进行编译期 shaping（字距调整、连字替换）。shaping 规则表在 S0 阶段生成，S2 阶段仅做查表。
 
-**删除** `primitives.nelua` 中 `HoverableState:update` 和 `ClickableState:update` 的运行时实现（保留纯 Record 作为状态字段类型）。所有原语生成器统一收敛到 `src/derive/interaction_factory.lua` 内部的一张表：
+### 4.5 Phase 5.0：WASM 后端
 
-```lua
-local NEBULA_PRIMITIVES = {
-  hoverable  = { gen_state_field = ..., gen_process = ... },
-  clickable  = { ... },
-  focusable  = { ... },
-  editable   = { ... },  -- 内部包含 Gap Buffer 注入
-  toggleable = { ... },  -- 内部包含正交状态注入
-}
-```
+**目标**：零运行时分支的跨平台。
 
-`nebula_gen_process_input` 通过查这张表生成代码，不再需要硬编码字符串后处理（`"\nend" → "\n  self:process_toggle(input)\nend"`），消除张力 7 中的最后一处 hack。
-
-### 原语 7：Layout 即 App Position 源（解决张力 8）
-
-引入一条注册 API：
-
-```lua
-nebula_app_attach_layout("FormApp", function()
-  return nebula_layout_node({
-    name = "root", direction = "column", padding = 32, gap = 16,
-    children = {
-      {name = "card", visual_type = "CardVisual", width = 480, height = 320},
-      {name = "email_input", visual_type = "InputVisual", height = 40},
-      ...
-    }
-  })
-end)
-```
-
-`app_factory.lua` 在编译期调用该函数得到布局树，并将解算结果写入 `<App>:init` 中：
-
-```nelua
-self.card.visual.pos = Vec2{x = 32.0, y = 32.0}
-self.card.visual.size = Vec2{x = 480.0, y = 320.0}
-self.email_input.visual.pos = Vec2{x = 48.0, y = 380.0}
-...
-```
-
-所有坐标在编译期解算并嵌入字面量，开发者不再需要写一行 `pos = Vec2{x=260.0, ...}`。这才是公理 A + C 协同时应有的形态：声明意图（layout 树），派生位置（编译期常量）。
-
-### 原语 8：FrameArena 全局单例（解决跨原语共享）
-
-`Frame Arena` 由 `<App>` 内部持有一个固定容量（编译期声明）的实例，每帧 `nebula_frame_render` 自动调用 `arena.reset()`。所有 L2 数据（排版结果、Slot Producer 输出、`get_text` 返回的 cstring）统一从这个 Arena 分配。开发者不再需要在 `form_demo.nelua` 顶层声明 `local arena: NebulaArena` 与 `arena_backing` 等样板代码。
+平台差异通过 S1 阶段的编译期条件处理。`NEBULA_TARGET` 在 S1 阶段确定（编译时传入），S2 阶段的二进制中只有一条路径——native 生成 GLFW while 循环，wasm 生成 Emscripten 回调。不存在运行时的平台分支。
 
 ---
 
-## 4. 修订后的 Phase 路线图
+## 5. 不变量与红线
 
-基于上述纲领，以下是从当前 Phase 3.6.1 出发到 Nebula 1.0 的完整路线图。所有 Phase 都有明确的"消除哪一个张力"或"实现哪一条原语"的对应关系。
+以下不变量在任何 Phase 中都不得被打破：
 
-| Phase | 名称 | 对应原语 | 消除张力 | 估时 |
-| :--- | :--- | :--- | :--- | :--- |
-| **3.6.2** | 鼠标命中与栈上排版 | 原语 2 | 张力 3 | 1 周 |
-| **3.6.3** | 多行文本与 Selection（基于 L2 的排版） | 原语 2、原语 8 | 张力 3 | 2 周 |
-| **3.7** | 管线生成器收敛与死代码清理 | 原语 1 | 张力 1、2 | 1 周 |
-| **3.8** | 渲染循环与 FrameArena 内嵌于 App | 原语 5、原语 8 | 张力 6 | 1 周 |
-| **3.9** | 文本一等公民 + Slot Producer 重构 | 原语 3、原语 4 | 张力 4、5 | 2 周 |
-| **3.10** | 原语注册中心与 primitives.nelua 瘦身 | 原语 6 | 张力 7 | 1 周 |
-| **3.11** | Layout-App 桥接 | 原语 7 | 张力 8 | 1 周 |
-| **4.0** | 哲学公理校验器（编译期 lint） | 公理 A/B/C 自动校验 | 防止未来回退 | 2 周 |
-| **4.1** | 中文 / Unicode 全量支持 | 扩展原语 3 | — | 4 周 |
-| **5.0** | WASM 后端与端到端冒烟 | 跨原语整合 | — | 6 周 |
+**I1（零运行时分发）**：S2 阶段不存在虚函数表、字符串查表或 `if typeof(x)` 式的类型分支。所有分发在 S1 阶段由宏展开为直接调用。
 
-总工期约 21 周。每个 Phase 完成后，都必须运行**公理校验脚本**（Phase 4.0 提供）来证明本次改动没有引入新的哲学违反。
+**I2（Arena 唯一性）**：每个 App 实例有且仅有一个 Frame Arena（L2 层），所有帧级临时数据必须从该 Arena 分配。不得在 S2 阶段调用系统 `malloc` 分配帧级数据。
 
-### 4.1 关键路径与并行度
+**I3（管线确定性）**：每个 Visual 的管线签名 Σ(V) 在 S1 阶段完全确定。S2 阶段不得动态创建或切换管线。
 
-Phase 3.6.2 与 Phase 3.7 不互相依赖，可并行；Phase 3.8/3.9/3.10 高度串行，因为它们都修改 `app_factory.lua`；Phase 3.11 必须在 3.9 之后，因为它需要 `<App>:init` 已经被重构为接受布局树。Phase 4.0 是质量门槛，必须先于任何 4.x 工作完成。
+**I4（注册表完备性）**：所有交互原语必须通过 `NEBULA_PRIMITIVES` 注册表声明。`nebula_core.nelua` 中不得出现针对特定原语名称的硬编码分支。
+
+**I5（层间隔离）**：L0 数据的有效性不依赖 L1 的状态；L1 数据的有效性不依赖 L2 的内容。`arena.reset()` 不得使任何 L1 数据失效。
+
+**I6（永不引入 GC）**：Lua 仅作为 S1 阶段的编译期元代码语言存在，S2 阶段不应有任何 Lua 运行时或垃圾回收器。
+
+**I7（永不引入运行时反射）**：所有类型信息必须在 S1 阶段被消解为静态字段访问。S2 阶段不存在类型元数据查询。
 
 ---
 
-## 5. 公理校验器（Phase 4.0）的具体形式
+## 6. 与 v1 总纲领的差异摘要
 
-为了让公理 A/B/C 不再依赖人工自觉，Phase 4.0 将提供一个 Lua 脚本 `tools/axiom_lint.lua`，它在每次 `build.sh` 时自动运行，对 `src/` 目录做静态分析：
+本版本（v2）相对于原始总纲领（v1）的核心变更如下：
 
-| 校验 | 公理 | 实现方式 |
-| :--- | :--- | :--- |
-| 不允许 `malloc` / `calloc` / `free` | B | grep + 白名单 |
-| Visual Record 的字段必须满足原语 2 的命名表 | B | Lua AST 扫描 `global * = @record{...}` |
-| 不允许在 `interaction_factory.lua` 之外注入 process_input | A | grep `^function .*Context:process_input` |
-| `nebula_compose_shader` 必须返回非占位符着色器 | C | grep `vec4<f32>(1.0, 0.0, 0.0, 1.0)` 出现位置 |
-| 每条原语的生成必须在 `NEBULA_PRIMITIVES` 表中注册 | A | Lua 扫描 |
-
-校验失败时编译终止，错误信息引用本纲领的对应章节号，便于新贡献者理解。
-
----
-
-## 6. 不变量与红线
-
-为防止未来 Phase 的"目的性漂移"，本纲领固化以下五条不可逾越的红线，任何违反者都必须在 PR 中显式援引"豁免条款"并经过架构评审：
-
-1. **永不引入 GC**。Lua 仅作为编译期元代码语言存在，运行时不应有任何 Lua 运行时。
-2. **永不引入运行时反射**。所有类型信息必须在编译期被消解为静态字段访问。
-3. **永不让 L1 状态依赖 L2 数据**。Frame Arena 一旦 `reset`，L1 必须仍然完全可用。
-4. **永不允许"通用渲染器"复活**。`Visual` 与 `Pipeline` 是一对多还是一对一可调（共享 standard_instanced 生成器是允许的），但每个 Visual 类型在编译期必须能 `print` 出"我属于哪条管线路径"。
-5. **永不让 demo 写 50 行渲染样板**。任何 demo 必须能用 `<App>:init` + `nebula_frame_render` 在 30 行内完成主循环。
+| 维度 | v1 | v2 | 变更理由 |
+| :--- | :--- | :--- | :--- |
+| 公理 A | "编译期最大化"（模糊谓词） | 阶段封闭性（S0/S1/S2，可机械判定） | 消除"能不能在编译期确定"的争论 |
+| 公理 B | 二层模型（L1/L2） | 三层模型（L0/L1/L2） | 覆盖 GPU 资源的应用级生命周期 |
+| 公理 C | "专属管线"（自然语言） | 管线签名四元组 Σ(V)（数学定义） | 精确定义"专属"的等价判定 |
+| 元规则 Π | 优先级裁决（B > C > A） | 正交性要求（不应冲突） | 更高的数学标准 |
+| CJK 方案 | 未明确 | Slug 算法（S0 数据提取 + S2 GPU 计算） | 不违反公理 A 的 Unicode 全量支持 |
+| Phase 4.0 | grep 校验器 | 编译期内嵌断言 | 利用 S1 阶段的完整类型信息做语义校验 |
+| 行数目标 | 具体行数承诺（如 450 行） | 结构性约束（路径数、注册表完备性） | 行数不是公理约束的对象 |
 
 ---
 
-## 7. 总结：Nebula 该是什么样
+## 7. 愿景：30 行终态
 
-经过这次架构清算，Nebula 应当回答的核心问题是：**"我究竟是什么？"**
-
-它不是 GPUI（GPUI 用 Bump Allocator 但保留了 Rust 的 trait dispatch），不是 Dear ImGUI（IMGUI 不追求零运行时分发），也不是 Flutter（Flutter 完全运行时构建）。Nebula 是一个**用编译期元编程把"声明意图"翻译成"等价手写代码"的 GUI 编译器**，它的优雅完全来自三件事：
-
-> 公理 A 让运行时没有任何"框架开销"。
-> 公理 B 让内存生命周期一目了然。
-> 公理 C 让每个 Visual 都拥有"为它量身定制"的渲染管线。
-
-当本纲领描述的全部八大原语落地之后，开发者的最终体验应该是这样的：
+当路线图全部完成后，一个完整的表单应用将是这样的：
 
 ```nelua
 require "nebula"
@@ -300,13 +213,12 @@ require "nebula"
 
 ##[[
   nebula_app_begin("FormApp")
-    nebula_app_register_component("card",  "CardVisual")
-    nebula_app_register_component("email", "InputVisual",  {component_id=1})
-    nebula_app_register_text     ("email_label", {bound_to="email", placeholder="email"})
-    nebula_app_register_component("login", "ButtonVisual")
+    nebula_app_set_root_layout("FormApp", { direction = "column", padding = 32, gap = 16 })
+    nebula_app_register_component("card",        "CardVisual",   { layout = { width = 480, height = 320 } })
+    nebula_app_register_component("email_input", "InputVisual",  { component_id = 1, layout = { height = 40 } })
+    nebula_app_register_text     ("email_label", { bound_to = "email_input", placeholder = "email" })
+    nebula_app_register_component("login_btn",   "ButtonVisual", { layout = { height = 44 } })
   nebula_app_end()
-
-  nebula_app_attach_layout("FormApp", function() ... end)
 ]]
 ## nebula_derive_app("FormApp")
 
@@ -322,21 +234,15 @@ end
 main()
 ```
 
-整个应用 30 行，零样板，零 WGPU 调用，零 Pipeline 初始化代码，零 Arena 管理代码。这才是 Nebula 该有的样子。
+**30 行，零样板，零 WGPU 调用，零 Pipeline 初始化代码，零 Arena 管理代码。** 布局约束内嵌于注册 API，坐标在 S1 阶段解算并嵌入编译期常量。这是公理 A（阶段封闭性）、公理 B（三层生命周期）和公理 C（形即渲染）协同时应有的形态。
 
 ---
 
-## 参考文献
+## 8. 参考资料
 
-[1] `docs/DESIGN_PHASE1.md` — Nebula Phase 1 设计原则（零运行时开销、命名约定即契约）。
-[2] `docs/PLAN_PHASE2.md` — 形即渲染原则与 std140 编译期推导。
-[3] `docs/PLAN_PHASE3_6.md` — 持久状态与 Frame Arena 双层架构。
-[4] `src/derive/shader_compose.lua` 与 `src/derive/pipeline_factory.lua` — 当前的多代码路径分裂。
-[5] `examples/form_demo.nelua` 第 59–88 行 — InputVisual 中 `flat_buf` 字段的定义。
-[6] `src/derive/app_factory.lua` 第 53–124、204–313 行 — App 编排生成器。
-[7] `examples/form_demo.nelua` 第 280–397 行 — 文本组件与渲染循环的手写样板。
-[8] `examples/dynamic_list_demo.nelua` — 完全绕过 `nebula_derive_app` 的动态列表实现。
-[9] `docs/PLAN_PHASE3_5.md` 第 28–35 行 — 渲染循环模板化的承诺。
-[10] `src/primitives.nelua` 第 14–42 行 — Hoverable/Clickable 的运行时函数残留。
-[11] `docs/PLAN_PHASE2.md` 第 168–171 行 — Phase 2.4 关于 `HoverableState_update` 应被消除的承诺。
-[12] `src/derive/layout_engine.lua` — 编译期 Flexbox 解算引擎。
+| 资料 | 说明 |
+| :--- | :--- |
+| [Slug Algorithm (GitHub)](https://github.com/EricLengyel/Slug) | Eric Lengyel 的 Slug 算法参考着色器实现，2026 年 3 月进入公共领域 |
+| [Sluggish (GitHub)](https://github.com/mightycow/Sluggish) | Slug 的 band-data / curve-data 纹理生成工具 |
+| [HarfBuzz (GitHub)](https://github.com/harfbuzz/harfbuzz) | 文本 shaping 引擎，用于字距调整和连字替换 |
+| [Slug JCGT Paper](https://jcgt.org/published/0006/02/02/) | Slug 算法的原始学术论文（2017） |
