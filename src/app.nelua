@@ -149,6 +149,75 @@ global function nebula_collect_input(
                    (glfwGetKey(window, GLFW_KEY_RIGHT_ALT)    == GLFW_PRESS)
 end
 
+-- ★ Phase 3.11: nebula_init / nebula_should_close / nebula_shutdown
+-- 便利性封装：消除 main() 中的 GLFW/WGPU 样板代码，兑现 30 行愿景。
+--
+-- 使用方式：
+--   local renderer: NebulaRenderer
+--   local app:      MyApp
+--   if not nebula_init(&renderer, &app, "My Window", 800, 600) then return 1 end
+--   while not nebula_should_close() do
+--     nebula_frame_render(&renderer, &app, ...)
+--   end
+--   nebula_shutdown(&renderer)
+--   return 0
+
+-- 内部全局：当前窗口句柄（由 nebula_init 设置，nebula_should_close 使用）
+global _nebula_window: GLFWwindow = nilptr
+
+-- nebula_init: 封装 GLFW 初始化、窗口创建、回调注册、渲染器初始化、App 初始化
+-- 泛型参数 app 必须实现 :init(renderer, vw, vh) 方法（由 nebula_derive_app 自动生成）
+global function nebula_init(
+  renderer:    *NebulaRenderer,
+  app:         auto,
+  title:       cstring,
+  win_w:       int32,
+  win_h:       int32
+): boolean
+  if glfwInit() == 0 then
+    return false
+  end
+  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
+  _nebula_window = glfwCreateWindow(win_w, win_h, title, nilptr, nilptr)
+  if _nebula_window == nilptr then
+    glfwTerminate()
+    return false
+  end
+  nebula_input_install_callbacks(_nebula_window)
+  if not renderer:init(_nebula_window, (@float32)(win_w), (@float32)(win_h)) then
+    glfwDestroyWindow(_nebula_window)
+    glfwTerminate()
+    return false
+  end
+  if not app:init(renderer, (@float32)(win_w), (@float32)(win_h)) then
+    glfwDestroyWindow(_nebula_window)
+    glfwTerminate()
+    return false
+  end
+  return true
+end
+
+-- nebula_should_close: 封装 glfwWindowShouldClose，作为主循环条件
+global function nebula_should_close(): boolean
+  return glfwWindowShouldClose(_nebula_window) ~= 0
+end
+
+-- nebula_poll_events: 封装 glfwPollEvents（可选，也可直接调用 glfwPollEvents）
+global function nebula_poll_events(): void
+  glfwPollEvents()
+end
+
+-- nebula_shutdown: 封装 WGPU/GLFW 资源释放
+global function nebula_shutdown(renderer: *NebulaRenderer): void
+  wgpuSurfaceRelease(renderer.surface)
+  wgpuDeviceRelease(renderer.device)
+  wgpuAdapterRelease(renderer.adapter)
+  wgpuInstanceRelease(renderer.instance)
+  glfwDestroyWindow(_nebula_window)
+  glfwTerminate()
+end
+
 -- ★ Phase 3.8: nebula_frame_render
 -- 泛型帧渲染函数：Surface 获取 → RenderPass 创建 → app:update+draw → submit+present
 -- 公理 C（形即渲染）：渲染循环不持有帧间状态；泛型展开后等价于手写静态代码。

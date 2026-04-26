@@ -214,8 +214,8 @@ end
 local factory_lines = count_lines(script_dir .. "/../src/derive/app_factory.lua")
 if factory_lines then
   print(("  app_factory.lua: %d 行"):format(factory_lines))
-  -- Phase 3.10.5 升级后 app_factory.lua 已扩展到 ~650 行，上限更新为 700
-  assert_le("app_factory.lua ≤ 700 行（Phase 3.10.5 新增多 Pass 支持）", factory_lines, 700)
+  -- Phase 3.11 新增布局解算逻辑，上限更新为 900
+  assert_le("app_factory.lua ≤ 900 行（Phase 3.11 新增布局解算逻辑）", factory_lines, 900)
 else
   failed = failed + 1
   print("[FAIL] 无法读取 src/derive/app_factory.lua")
@@ -224,8 +224,8 @@ end
 local app_lines = count_lines(script_dir .. "/../src/app.nelua")
 if app_lines then
   print(("  app.nelua: %d 行"):format(app_lines))
-  -- Phase 3.10.5: 新增 nebula_frame_render_multipass，行数上限更新为 330
-  assert_le("app.nelua ≤ 330 行（Phase 3.10.5 新增 multipass）", app_lines, 330)
+  -- Phase 3.11: 新增 nebula_init/nebula_should_close/nebula_shutdown，行数上限更新为 450
+  assert_le("app.nelua ≤ 450 行（Phase 3.11 新增便利性 API）", app_lines, 450)
 else
   failed = failed + 1
   print("[FAIL] 无法读取 src/app.nelua")

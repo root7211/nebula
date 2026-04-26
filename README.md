@@ -8,14 +8,14 @@ Nebula 不是运行时框架，不是响应式引擎，也不是场景图。它�
 
 ---
 
-## 当前状态：Phase 3.10.5
+## 当前状态：Phase 3.11
 
-**Phase 3.6.2 至 Phase 3.10.5 已全部合入主线**，全量回归测试 **27/27 通过，零失败**。
+**Phase 3.6.2 至 Phase 3.11 已全部合入主线**，全量回归测试 **159/159 通过，零失败**。
 
-Phase 3.10 完成了原语注册中心重构，Phase 3.10.5 扩展了文本和渲染能力：
+Phase 3.11 兑现了"30 行代码构建应用"的终极愿景：
 
-- **原语注册中心（Phase 3.10）**：构建了 `NEBULA_PRIMITIVES` 统一注册表，五个交互原语（hoverable、clickable、focusable、editable、toggleable）全部迁移到元数据驱动模式，彻底删除了 Monkey-patch 和所有硬编码分支。
-- **独立文本标签 + 多 Pass 渲染（Phase 3.10.5）**：`nebula_app_register_text` 支持 `static`/`dynamic` 模式；引入 `nebula_app_register_shadow` 和多 Pass 渲染架构。
+- **Layout-App 统一注册**：将布局约束直接嵌入到 `nebula_app_register_component` 的注册 API 中，在编译期自动完成 Flexbox 解算和坐标注入，彻底消除了手写魔法数字。
+- **便利性 API 封装**：引入 `nebula_init` 和 `nebula_should_close`，将繁琐的 GLFW 和 WGPU 初始化/清理流程封装为单行调用。
 
 ---
 
@@ -85,18 +85,18 @@ Nebula 的全部设计决策由三条公理驱动，三者作用于正交维度�
 | 3.8 | 渲染循环封装与 FrameArena 内嵌 | T5, T6 | **已完成** |
 | 3.9 | 文本一等公民 + Slot Producer 重构 | T3, T4 | **已完成** |
 | **3.10** | **原语注册中心** | **T7** | **已完成** |
-| **3.10.5** | **独立文本标签 + 多 Pass 渲染** | **—** | **已完成（当前）** |
-| 3.11 | Layout-App 统一注册 | T8 | 规划中 |
-| 3.12 | 响应式重排 (Responsive Reflow) | 视口自适应 | 规划中 |
+| 3.10.5 | 独立文本标签 + 多 Pass 渲染 | — | 已完成 |
+| **3.11** | **Layout-App 统一注册** | **T8** | **已完成（当前）** |
+| 3.12 | 响应式重排 (Responsive Reflow) | 视口自适应 | 规划中（下一步） |
 | 4.0 | 编译期公理校验器 | 防止回退 | 规划中 |
 | 4.1 | Slug 文本渲染引擎 | Unicode 全量 | 规划中 |
 | 4.2 | CJK 字体预处理 | CJK 支持 | 规划中 |
 | 4.3 | 拓扑流渲染 (Indirect Drawing) | 降低 CPU 提交开销 | 规划中 |
 | 5.0 | WASM 后端 | 跨平台 | 规划中 |
 
-**下一步（Phase 3.11）**：将布局约束嵌入 `nebula_app_register_component` 的注册 API，消除独立的 `attach_layout` 调用；实现 `nebula_init` 和 `nebula_should_close` 便利性封装，兑现 30 行愿景。
+**下一步（Phase 3.12）**：在不违反公理 A 的前提下，通过编译期约束降维和运行时线性插值，实现窗口 Resize 时的 UI 响应式重排。
 
-**后续（Phase 3.12）**：在不违反公理 A 的前提下，通过编译期约束降维和运行时线性插值，实现窗口 Resize 时的 UI 响应式重排。
+**后续（Phase 4.1）**：集成 Slug 文本渲染引擎，实现全量 Unicode 支持，解决当前仅支持 ASCII 的硬性限制。
 
 ---
 

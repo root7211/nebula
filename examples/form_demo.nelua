@@ -1,19 +1,20 @@
 -- =============================================================================
 -- form_demo.nelua
--- Nebula GUI Compiler — Phase 3.9
+-- Nebula GUI Compiler — Phase 3.11
 --
--- ★ Phase 3.9: 文本一等公民重构
---   · 使用 nebula_app_register_text 将文本组件纳入 FormApp 编排
---   · 消除 40 行独立文本渲染 Pass（Phase 3.8 遗留的最后一块样板代码）
---   · 消除手动 process_text_input / set_text 调用（由 app_factory 自动生成）
---   · 主循环收缩到 2 行（glfwPollEvents + collect_input + frame_render）
+-- ★ Phase 3.11: Layout-App 统一注册
+--   · nebula_app_set_root_layout 声明根节点布局约束
+--   · nebula_app_register_component 携带 layout 字段，消除手写魔法数字坐标
+--   · nebula_init / nebula_should_close / nebula_shutdown 消除 GLFW/WGPU 样板代码
+--   · main() 收缩到 ~25 行（兑现 30 行愿景）
 --
--- 与 Phase 3.8 的对比：
---   · 删除 pipe_email_text / pipe_password_text 手动声明
---   · 删除 email_text / password_text 手动声明和初始化
---   · 删除主循环中的 process_text_input + set_text 业务逻辑（约 30 行）
---   · 删除 nebula_frame_render 之后的 40 行独立文本 Render Pass
---   · 文本组件现在通过 form.email_label / form.password_label 访问
+-- 历史版本： Phase 3.8 (nebula_frame_render) → Phase 3.9 (文本一等公民) → Phase 3.11 (布局统一注册)
+--
+-- 与 Phase 3.9 的对比：
+--   · 删除 form.card:init / form.email_input:init 等手写 pos/size 魔法数字（约 60 行）
+--   · 删除 glfwInit / glfwCreateWindow / renderer:init 等 GLFW/WGPU 样板（约 15 行）
+--   · 删除 wgpuSurfaceRelease / glfwDestroyWindow 等资源释放样板（约 8 行）
+--   · 布局意图通过 nebula_app_set_root_layout + layout 字段声明，编译期自动解算
 -- =============================================================================
 ## cinclude "<stdio.h>"
 ## cinclude "<string.h>"
@@ -128,7 +129,6 @@ nebula_annotate("CheckboxVisual", {
 })
 ]]
 ## nebula_derive("CheckboxVisual")
--- Phase 3.5.3: nebula_gen_toggle_state 已由 nebula_derive 自动调用，无需手动注入
 -- ---- 文本渲染 Visual ----
 global TextVisual = @record{
   pos:          Vec2,
@@ -147,19 +147,48 @@ nebula_annotate("TextVisual", {
 ]]
 ## nebula_derive_text_visual("TextVisual")
 -- =============================================================================
--- ★ Phase 3.9: 使用 nebula_derive_app 宏声明并派生 FormApp
---   · nebula_app_register_text 将文本组件纳入一等公民编排
---   · email_label 绑定到 email_input（placeholder: "email"）
---   · password_label 绑定到 password_input（placeholder: "password"，掩码显示）
+-- ★ Phase 3.11: Layout-App 统一注册
+--   · nebula_app_set_root_layout 声明根节点布局约束（居中对齐，视口 800x600）
+--   · 每个组件通过 layout 字段携带自身的尺寸约束
+--   · 编译期自动解算坐标，消除手写魔法数字
 -- =============================================================================
 ##[[
+  -- ★ Phase 3.11: 声明根节点布局（column 方向，居中对齐，视口 800x600）
+  nebula_app_set_root_layout("FormApp", {
+    direction = "column",
+    justify   = "center",
+    align     = "center",
+    width     = 800,
+    height    = 600,
+    gap       = 0,
+  })
+
   nebula_app_begin("FormApp")
-    nebula_app_register_component("card",           "CardVisual")
-    nebula_app_register_component("email_input",    "InputVisual", {component_id=1})
-    nebula_app_register_component("password_input", "InputVisual", {component_id=2})
+    -- ★ Phase 3.11: 每个组件携带 layout 字段声明自身尺寸
+    -- 卡片容器：360x440，内部 column 布局，padding=32，gap=16
+    nebula_app_register_component("card", "CardVisual", {
+      layout = {
+        width     = 360,
+        height    = 440,
+        direction = "column",
+        justify   = "start",
+        align     = "center",
+        padding   = 32,
+        gap       = 16,
+        -- 子组件按顺序排列在卡片内部
+        children  = {
+          { name="email_input",    width=296, height=44 },
+          { name="password_input", width=296, height=44 },
+          { name="remember_me",    width=20,  height=20 },
+          { name="login_btn",      width=296, height=48 },
+        },
+      },
+    })
+    nebula_app_register_component("email_input",    "InputVisual",    {component_id=1})
+    nebula_app_register_component("password_input", "InputVisual",    {component_id=2})
     nebula_app_register_component("remember_me",    "CheckboxVisual")
     nebula_app_register_component("login_btn",      "ButtonVisual")
-    -- ★ Phase 3.9: 文本组件一等公民注册
+    -- ★ Phase 3.9: 文本组件一等公民注册（bound 模式）
     nebula_app_register_text("email_label",    "TextVisual", {
       bound_to      = "email_input",
       placeholder   = "email",
@@ -175,31 +204,27 @@ nebula_annotate("TextVisual", {
 ## nebula_derive_app("FormApp")
 -- =============================================================================
 -- 主程序
+-- ★ Phase 3.11: 使用 nebula_init / nebula_should_close / nebula_shutdown
+--   消除 GLFW/WGPU 样板代码，main() 收缩到 ~25 行
 -- =============================================================================
 local function main(): int32
-  if glfwInit() == 0 then printf("glfw: init failed\n") return 1 end
-  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
-  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
-  local window = glfwCreateWindow(WIN_W, WIN_H, "Nebula Phase 3.9 — Form Demo", nilptr, nilptr)
-  if window == nilptr then printf("glfw: window creation failed\n") return 1 end
-  nebula_input_install_callbacks(window)
   local renderer: NebulaRenderer
-  if not renderer:init(window, WIN_W, WIN_H) then return 1 end
-  -- FormApp:init 自动初始化所有管线 + 内嵌 FrameArena（2MB）+ 文本管线（Phase 3.9）
   local form: FormApp
-  if not form:init(&renderer, WIN_W, WIN_H) then return 1 end
-  -- 初始化各组件的视觉规格
+
+  -- ★ Phase 3.11: 一行初始化（封装 GLFW + WGPU + App:init）
+  if not nebula_init(&renderer, &form, "Nebula Phase 3.11 — Form Demo", WIN_W, WIN_H) then
+    printf("nebula: init failed\n")
+    return 1
+  end
+
+  -- 初始化各组件的视觉规格（仅颜色/半径等外观属性；pos/size 由布局引擎注入）
   form.card:init(CardVisual{
-    pos    = Vec2{ x = 220.0, y = 80.0 },
-    size   = Vec2{ x = 360.0, y = 440.0 },
     radius = 16.0,
     default_bg_color     = Color{ r=0.13, g=0.13, b=0.15, a=1.0 },
     default_border_color = Color{ r=0.25, g=0.25, b=0.28, a=1.0 },
     default_border_width = 1.0,
   })
   form.email_input:init(InputVisual{
-    pos    = Vec2{ x = 252.0, y = 176.0 },
-    size   = Vec2{ x = 296.0, y = 44.0 },
     radius = 8.0,
     default_bg_color     = Color{ r=0.18, g=0.18, b=0.20, a=1.0 },
     default_border_color = Color{ r=0.32, g=0.32, b=0.36, a=1.0 },
@@ -217,8 +242,6 @@ local function main(): int32
   form.email_input.is_dragging      = false
   form.email_input.component_id = 1
   form.password_input:init(InputVisual{
-    pos    = Vec2{ x = 252.0, y = 244.0 },
-    size   = Vec2{ x = 296.0, y = 44.0 },
     radius = 8.0,
     default_bg_color     = Color{ r=0.18, g=0.18, b=0.20, a=1.0 },
     default_border_color = Color{ r=0.32, g=0.32, b=0.36, a=1.0 },
@@ -236,8 +259,6 @@ local function main(): int32
   form.password_input.is_dragging      = false
   form.password_input.component_id = 2
   form.remember_me:init(CheckboxVisual{
-    pos    = Vec2{ x = 252.0, y = 308.0 },
-    size   = Vec2{ x = 20.0,  y = 20.0 },
     radius = 4.0,
     default_bg_color     = Color{ r=0.18, g=0.18, b=0.20, a=1.0 },
     default_border_color = Color{ r=0.45, g=0.45, b=0.52, a=1.0 },
@@ -247,8 +268,6 @@ local function main(): int32
     hovered_border_width = 2.0,
   })
   form.login_btn:init(ButtonVisual{
-    pos    = Vec2{ x = 252.0, y = 348.0 },
-    size   = Vec2{ x = 296.0, y = 48.0 },
     radius = 10.0,
     default_bg_color     = Color{ r=0.22, g=0.44, b=0.90, a=1.0 },
     default_border_color = Color{ r=0.30, g=0.52, b=1.00, a=0.6 },
@@ -261,37 +280,29 @@ local function main(): int32
     pressed_border_width = 2.0,
   })
   -- ★ Phase 3.9: 初始化文本组件视觉规格（一等公民）
+  -- pos 由布局引擎注入（文本跟随 bound_to 组件位置，偏移 8px）
   form.email_label:init(TextVisual{
-    pos          = Vec2{ x = 260.0, y = 192.0 },
-    size         = Vec2{ x = 0.0, y = 0.0 },
     pixel_height = 14.0,
     default_text_color = Color{ r=0.90, g=0.90, b=0.92, a=1.0 },
   })
   form.password_label:init(TextVisual{
-    pos          = Vec2{ x = 260.0, y = 260.0 },
-    size         = Vec2{ x = 0.0, y = 0.0 },
     pixel_height = 14.0,
     default_text_color = Color{ r=0.90, g=0.90, b=0.92, a=1.0 },
   })
-  -- 设置初始占位符文本（由 app_factory 生成的 update 会在输入变化时自动更新）
+  -- 设置初始占位符文本
   if not form.email_label:set_text(&renderer, "email") then return 1 end
   if not form.password_label:set_text(&renderer, "password") then return 1 end
 
   local input: NebulaInputState
   local prev_time = glfwGetTime()
 
-  -- =============================================================================
-  -- ★ Phase 3.9: 主循环收缩到 2 行
-  --   · glfwPollEvents + nebula_collect_input：输入收集
-  --   · nebula_frame_render：封装全部渲染（含文本，Phase 3.9 新增）
-  --   · 业务逻辑（Enter 键响应）：保留在应用层
-  -- =============================================================================
-  while glfwWindowShouldClose(window) == 0 do
-    glfwPollEvents()
+  -- ★ Phase 3.11: 主循环使用 nebula_should_close（消除 glfwWindowShouldClose 样板）
+  while not nebula_should_close() do
+    nebula_poll_events()
     local now = glfwGetTime()
     local dt  = (@float32)(now - prev_time)
     prev_time = now
-    nebula_collect_input(window, &input, dt)
+    nebula_collect_input(_nebula_window, &input, dt)
 
     -- 业务逻辑：Enter 键打印表单内容（领域逻辑，保留在应用层）
     if input.key_pressed == NebulaKey.Enter then
@@ -301,17 +312,11 @@ local function main(): int32
       printf("remember_me: %s\n", form.remember_me.toggle.is_on and "true" or "false")
     end
 
-    -- ★ Phase 3.9: nebula_frame_render 现在包含文本渲染（一等公民）
-    -- 内部执行：update（含文本联动）→ arena_reset → render_pass → draw（含文本）→ submit → present
     nebula_frame_render(&renderer, &form, &input, dt, 0.09, 0.09, 0.10)
   end
 
-  wgpuSurfaceRelease(renderer.surface)
-  wgpuDeviceRelease(renderer.device)
-  wgpuAdapterRelease(renderer.adapter)
-  wgpuInstanceRelease(renderer.instance)
-  glfwDestroyWindow(window)
-  glfwTerminate()
+  -- ★ Phase 3.11: 一行清理（封装 WGPU/GLFW 资源释放）
+  nebula_shutdown(&renderer)
   printf("nebula: clean exit\n")
   return 0
 end

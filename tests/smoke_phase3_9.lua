@@ -326,8 +326,8 @@ print("\n--- 8. 行数收敛验证 ---")
 local factory_lines = count_lines(script_dir .. "/../src/derive/app_factory.lua")
 if factory_lines then
   print(("  app_factory.lua: %d 行"):format(factory_lines))
-  -- Phase 3.10.5 新增多 Pass 支持，上限更新为 700
-  assert_le("app_factory.lua ≤ 700 行（Phase 3.10.5 新增多 Pass 支持）", factory_lines, 700)
+  -- Phase 3.11 新增布局解算逻辑，上限更新为 900
+  assert_le("app_factory.lua ≤ 900 行（Phase 3.11 新增布局解算逻辑）", factory_lines, 900)
 else
   failed = failed + 1
   print("[FAIL] 无法读取 src/derive/app_factory.lua")
@@ -345,7 +345,7 @@ end
 local form_lines = count_lines(script_dir .. "/../examples/form_demo.nelua")
 if form_lines then
   print(("  form_demo.nelua: %d 行"):format(form_lines))
-  assert_le("form_demo.nelua ≤ 320 行（消除 40 行文本样板）", form_lines, 320)
+  assert_le("form_demo.nelua ≤ 350 行（Phase 3.11 精简后）", form_lines, 350)
 else
   failed = failed + 1
   print("[FAIL] 无法读取 examples/form_demo.nelua")

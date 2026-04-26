@@ -1,5 +1,5 @@
 -- =============================================================================
--- derive/app_factory.lua — Nebula GUI Compiler Phase 3.10.5
+-- derive/app_factory.lua — Nebula GUI Compiler Phase 3.11
 --
 -- 编译期显式编排工厂（App Factory）
 -- 生成 <App> record + init + update + draw
@@ -14,13 +14,21 @@
 --     · mode = "static"  — 静态文本，初始化后不再更新
 --     · mode = "dynamic" — 动态文本，通过 updater 函数每帧更新
 --     · mode = "bound"   — 绑定到 editable 组件（原有行为）
+-- ★ Phase 3.11 新增（原语 7：Layout-App 桥接）：
+--   · nebula_app_set_root_layout(app_name, spec) — 声明根节点布局约束
+--   · nebula_app_register_component 扩展：opts.layout 字段携带布局约束
+--   · nebula_app_end 自动调用 layout_engine 解算坐标，注入 gen_app_init
+--   · 生成的 <App>:init 自动注入编译期常量 pos/size，消除手写魔法数字
 -- =============================================================================
 
--- 全局应用注册表
-local nebula_app_registry = {}
+-- 全局应用注册表（导出为全局，供测试和 nebula_derive_app 访问）
+nebula_app_registry = nebula_app_registry or {}
 
 -- 当前正在构建的 App 名称
 local _current_app = nil
+
+-- ★ Phase 3.11: 预注册根布局配置（允许在 nebula_app_begin 之前调用 nebula_app_set_root_layout）
+local _pending_root_layouts = {}
 
 -- =============================================================================
 -- 注册 API
@@ -37,7 +45,7 @@ function nebula_app_begin(app_name, opts)
   _current_app = app_name
   nebula_app_registry[app_name] = {
     name        = app_name,
-    components  = {},  -- 静态组件列表：{name, visual_type, base, component_id}
+    components  = {},  -- 静态组件列表：{name, visual_type, base, component_id, layout}
     slots       = {},  -- 动态插槽列表：{name, visual_type, base, max_instances, producer}
     texts       = {},  -- ★ Phase 3.9: 文本组件列表：{name, visual_type, base, mode, bound_to, placeholder, mask_password, updater}
     shadows     = {},  -- ★ Phase 3.10.5: 阴影组件列表：{name, visual_type, base, blur_radius}
@@ -45,7 +53,33 @@ function nebula_app_begin(app_name, opts)
     type_groups = {},  -- {visual_type -> {pipeline_name, base, members=[{name, is_slot}]}}
     -- ★ Phase 3.8: FrameArena 配置
     arena_size  = opts.arena_size or (2 * 1024 * 1024),  -- 默认 2MB
+    -- ★ Phase 3.11: 布局根节点配置（如果已预注册则合并）
+    root_layout = _pending_root_layouts[app_name] or nil,
+    layout_results = nil, -- nebula_app_end 时解算完成后填充
   }
+  -- 清除预注册表中的对应条目
+  _pending_root_layouts[app_name] = nil
+end
+
+-- ★ Phase 3.11: 声明 App 的根节点布局约束
+-- 可在 nebula_app_begin 之前或之后调用。
+-- spec 字段与 nebula_layout_node 完全一致：
+--   direction  : "row" | "column"  (默认 "column")
+--   justify    : "start" | "center" | "end" | "space_between" | "space_around"
+--   align      : "start" | "center" | "end" | "stretch"
+--   padding    : number | {top, right, bottom, left}
+--   gap        : number
+--   width      : number（默认 = 视口宽度，由 nebula_layout_solve 传入）
+--   height     : number（默认 = 视口高度）
+function nebula_app_set_root_layout(app_name, spec)
+  assert(app_name, "nebula_app_set_root_layout: app_name required")
+  -- 如果 App 已注册，直接设置；否则暂存到预注册表
+  local reg = nebula_app_registry[app_name]
+  if reg then
+    reg.root_layout = spec or {}
+  else
+    _pending_root_layouts[app_name] = spec or {}
+  end
 end
 
 -- 注册一个静态组件
@@ -53,6 +87,15 @@ end
 --   name         : string  — 组件实例名（如 "card", "email_input"）
 --   visual_type  : string  — Visual 类型名（如 "CardVisual", "InputVisual"）
 --   component_id : number  — focusable 组件的 ID（可选，默认 0）
+--   layout       : table   — ★ Phase 3.11: 布局约束（可选）
+--     direction  : "row" | "column"
+--     justify    : "start" | "center" | "end" | "space_between" | "space_around"
+--     align      : "start" | "center" | "end" | "stretch"
+--     padding    : number | {top, right, bottom, left}
+--     gap        : number
+--     width      : number
+--     height     : number
+--     children   : table — 嵌套子布局节点（用于容器组件）
 function nebula_app_register_component(name, visual_type, opts)
   assert(_current_app, "nebula_app_register_component: must be called between nebula_app_begin and nebula_app_end")
   opts = opts or {}
@@ -69,6 +112,8 @@ function nebula_app_register_component(name, visual_type, opts)
     -- 以下字段为 Phase 3.8 遗留，Phase 3.9 由 nebula_app_register_text 接管
     has_text_buf = opts.has_text_buf or false,
     text_context = opts.text_context or nil,
+    -- ★ Phase 3.11: 布局约束
+    layout       = opts.layout or nil,
   })
 
   -- 更新 type_groups
@@ -223,9 +268,86 @@ function nebula_app_register_shadow(name, visual_type, opts)
   })
 end
 
+-- ★ Phase 3.11: 内部辅助函数 — 将组件的 layout 字段转换为 layout_engine 节点
+-- 递归处理 layout.children（允许容器组件声明嵌套布局）
+local function _build_layout_node(name, layout_spec)
+  local spec = {
+    name      = name,
+    direction = layout_spec.direction,
+    justify   = layout_spec.justify,
+    align     = layout_spec.align,
+    padding   = layout_spec.padding,
+    gap       = layout_spec.gap,
+    width     = layout_spec.width,
+    height    = layout_spec.height,
+    children  = {},
+  }
+  -- 递归处理子节点
+  if layout_spec.children then
+    for _, child_spec in ipairs(layout_spec.children) do
+      assert(child_spec.name, "_build_layout_node: child layout node must have a name")
+      table.insert(spec.children, _build_layout_node(child_spec.name, child_spec))
+    end
+  end
+  return nebula_layout_node(spec)
+end
+
+-- ★ Phase 3.11: 内部辅助函数 — 在 nebula_app_end 时执行布局解算
+-- 如果 reg.root_layout 存在，则构建布局树并解算，将结果存入 reg.layout_results
+local function _solve_layout(reg)
+  if not reg.root_layout then
+    reg.layout_results = nil
+    return
+  end
+
+  -- 构建根节点（不带 name，因为根节点本身不对应任何组件）
+  local root_spec = {
+    name      = "_root",
+    direction = reg.root_layout.direction or "column",
+    justify   = reg.root_layout.justify   or "center",
+    align     = reg.root_layout.align     or "center",
+    padding   = reg.root_layout.padding   or 0,
+    gap       = reg.root_layout.gap       or 0,
+    width     = reg.root_layout.width,
+    height    = reg.root_layout.height,
+    children  = {},
+  }
+
+  -- 将所有有 layout 字段的组件添加为子节点
+  for _, comp in ipairs(reg.components) do
+    if comp.layout then
+      table.insert(root_spec.children, _build_layout_node(comp.name, comp.layout))
+    end
+  end
+
+  if #root_spec.children == 0 then
+    reg.layout_results = nil
+    return
+  end
+
+  local root = nebula_layout_node(root_spec)
+
+  -- 使用 root_layout 指定的视口尺寸，或默认 800x600
+  local vw = reg.root_layout.width  or 800
+  local vh = reg.root_layout.height or 600
+
+  nebula_layout_solve(root, vw, vh)
+
+  if _DEBUG_LAYOUT then
+    print(("[layout] Phase 3.11 — App '%s' layout solved:"):format(reg.name))
+    nebula_layout_dump(root)
+  end
+
+  reg.layout_results = nebula_layout_collect(root)
+end
+
 -- 结束 App 声明
+-- ★ Phase 3.11: 在 end 时自动执行布局解算
 function nebula_app_end()
   assert(_current_app, "nebula_app_end: no app currently being declared")
+  local reg = nebula_app_registry[_current_app]
+  -- ★ Phase 3.11: 自动解算布局
+  _solve_layout(reg)
   _current_app = nil
 end
 
@@ -293,6 +415,7 @@ end
 -- 生成 <App>:init
 -- ★ Phase 3.8: 注入 nebula_arena_init
 -- ★ Phase 3.9: 注入 TextPipeline:init（文本一等公民）
+-- ★ Phase 3.11: 注入编译期布局坐标（消除手写魔法数字）
 local function gen_app_init(app_name, reg)
   local L = {}
   local function emit(s) table.insert(L, s) end
@@ -346,6 +469,24 @@ local function gen_app_init(app_name, reg)
   emit("")
   emit("  -- ★ Phase 3.8: 初始化 FrameArena（绑定内嵌后备内存）")
   emit(("  nebula_arena_init(&self.arena, &self._arena_backing[0], %d)"):format(reg.arena_size))
+
+  -- ★ Phase 3.11: 注入编译期布局坐标
+  if reg.layout_results and next(reg.layout_results) then
+    emit("")
+    emit("  -- ★ Phase 3.11: 编译期布局坐标注入（由 layout_engine 解算，消除手写魔法数字）")
+    for _, comp in ipairs(reg.components) do
+      local r = reg.layout_results[comp.name]
+      if r then
+        emit(("  -- [layout] %s: pos=(%.1f, %.1f) size=(%.1f x %.1f)"):format(
+          comp.name, r.x, r.y, r.w, r.h))
+        emit(("  self.%s.visual.pos  = Vec2{ x = %.1f, y = %.1f }"):format(
+          comp.name, r.x, r.y))
+        emit(("  self.%s.visual.size = Vec2{ x = %.1f, y = %.1f }"):format(
+          comp.name, r.w, r.h))
+      end
+    end
+  end
+
   emit("  return true")
   emit("end")
 
@@ -628,8 +769,12 @@ function nebula_app_generate(app_name)
   for _, slot in ipairs(reg.slots) do
     if slot.producer then slot_producer_count = slot_producer_count + 1 end
   end
+  local layout_count = 0
+  if reg.layout_results then
+    for _ in pairs(reg.layout_results) do layout_count = layout_count + 1 end
+  end
 
-  print((("[derive-app] %s: emit App record + init + update + draw + pre_pass + surface_pass (%d components, %d texts, %d slots [%d producer], %d shadows, %d type_groups, arena=%dB)"):format(
+  print((("[derive-app] %s: emit App record + init + update + draw + pre_pass + surface_pass (%d components, %d texts, %d slots [%d producer], %d shadows, %d type_groups, %d layout_nodes, arena=%dB)"):format(
     app_name,
     #reg.components,
     text_count,
@@ -641,10 +786,11 @@ function nebula_app_generate(app_name)
       for _ in pairs(reg.type_groups) do n = n + 1 end
       return n
     end)(),
+    layout_count,
     reg.arena_size
   )))
 
   return source
 end
 
-return "nebula_app_factory_v0.4_phase3.10.5"
+return "nebula_app_factory_v0.5_phase3.11"
