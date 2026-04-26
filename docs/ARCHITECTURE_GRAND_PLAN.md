@@ -139,12 +139,7 @@ nebula_app_set_root_layout("FormApp", {
 
 Slug 将"字形渲染"分解为"数据提取"（S0）和"像素计算"（S2），运行时没有任何光栅化或 atlas 管理。20,000+ CJK 字形的 curve-data 远小于等效的 SDF atlas（几 MB vs 数百 MB），且渲染质量在任意缩放下都是数学精确的。
 
-**实施路径**：
-
-1. 扩展 `font_preprocessor.nelua`，增加 `--mode=slug` 选项，生成 `curve_data.nelua` 和 `band_data.nelua`。
-2. 在 `shader_compose.lua` 中新增 `nebula_compose_slug_shader`，将参考 HLSL 翻译为 WGSL。
-3. 在 `pipeline_factory.lua` 中新增 `gen_pipeline_slug_text` 路径。
-4. 保留 `text_mode = "ascii_sdf"` 作为 ASCII-only 轻量级路径，`text_mode = "slug"` 作为 Unicode 全量路径。
+**实施路径**：详见 `docs/PLAN_PHASE4_1.md`。
 
 ### 4.4 Phase 4.2：CJK 字体预处理与 HarfBuzz 集成
 
@@ -152,7 +147,15 @@ Slug 将"字形渲染"分解为"数据提取"（S0）和"像素计算"（S2）�
 
 扩展 `font_preprocessor` 支持 CJK 字体子集化（按应用声明的字符集提取），集成 HarfBuzz 进行编译期 shaping（字距调整、连字替换）。shaping 规则表在 S0 阶段生成，S2 阶段仅做查表。
 
-### 4.5 Phase 5.0：WASM 后端
+### 4.5 Phase 4.3：拓扑流渲染 (Indirect Drawing)
+
+**目标**：引入 GPU 驱动的间接绘制，大幅降低 CPU 提交开销。
+
+**技术选型**：将 CPU 端的显式 Draw Call 替换为 GPU 端维护的 Indirect Buffer。利用 Compute Shader 执行视锥体剔除和状态检查，实现真正的动态拓扑变化。
+
+**实施路径**：详见 `docs/PLAN_PHASE4_3.md`。
+
+### 4.6 Phase 5.0：WASM 后端
 
 **目标**：零运行时分支的跨平台。
 

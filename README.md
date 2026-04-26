@@ -90,6 +90,7 @@ Nebula 的全部设计决策由三条公理驱动，三者作用于正交维度�
 | 4.0 | 编译期公理校验器 | 防止回退 | 规划中 |
 | 4.1 | Slug 文本渲染引擎 | Unicode 全量 | 规划中 |
 | 4.2 | CJK 字体预处理 | CJK 支持 | 规划中 |
+| 4.3 | 拓扑流渲染 (Indirect Drawing) | 降低 CPU 提交开销 | 规划中 |
 | 5.0 | WASM 后端 | 跨平台 | 规划中 |
 
 **下一步（Phase 3.11）**：将布局约束嵌入 `nebula_app_register_component` 的注册 API，消除独立的 `attach_layout` 调用；实现 `nebula_init` 和 `nebula_should_close` 便利性封装，兑现 30 行愿景。
