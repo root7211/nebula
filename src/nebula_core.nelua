@@ -495,7 +495,7 @@ global ClickableState = @record{
 ## 
 ## -- ★ Phase 2.4: 加载交互原语工厂模块
 ## local interaction_factory_mod = require "derive.interaction_factory"
-## assert(interaction_factory_mod == "nebula_interaction_factory_v0.6_phase3.6.3",
+## assert(interaction_factory_mod == "nebula_interaction_factory_v0.7_phase3.10",
 ##   "nebula: failed to load derive/interaction_factory.lua")
 ## 
 ## -- ★ Phase 3.1: 加载编译期布局引擎模块
@@ -505,7 +505,7 @@ global ClickableState = @record{
 ## 
 ## -- ★ Phase 3.5.2: 加载应用编排工厂模块
 ## local app_factory_mod = require "derive.app_factory"
-## assert(app_factory_mod == "nebula_app_factory_v0.3_phase3.9",
+## assert(app_factory_mod == "nebula_app_factory_v0.4_phase3.10.5",
 ##   "nebula: failed to load derive/app_factory.lua")
 ## 
 ## -- ★ Phase 3.6: 加载 Gap Buffer 工厂模块（使 nebula_gen_gap_buffer_type 在所有 require nebula_core 的文件中可用）
@@ -640,14 +640,9 @@ global ClickableState = @record{
 ## -- tween 名称 -> 数值编码（与运行时 get_t() 中的判断保持一致）
 ## local TWEEN_CODE = { none = 0, ease_out = 1, ease_in = 2 }
 ## 
-## -- 是否包含某个原语
-## local function has_prim(reg, name)
-##   for _, p in ipairs(reg.primitives or {}) do
-##     if p == name then return true end
-##   end
-##   return false
-## end
+## -- ★ Phase 3.10: has_prim 已移除，原语判断现在通过 NEBULA_PRIMITIVES 注册表驱动
 ## 
+
 ## -- ---- 生成 State 枚举源代码 ----
 ## local function gen_state_enum(type_name, reg)
 ##   local lines = {("global %sState = @enum{"):format(type_name)}
@@ -754,9 +749,6 @@ global ClickableState = @record{
 ##   local ctx = base .. "Context"
 ##   local sm  = base .. "StateMachine"
 ##   local st  = base .. "State"
-##   local has_hover = has_prim(reg, "hoverable")
-##   local has_click = has_prim(reg, "clickable")
-##   local has_focus = has_prim(reg, "focusable")
 ## 
 ##   local lines = {}
 ## 
@@ -764,18 +756,10 @@ global ClickableState = @record{
 ##   table.insert(lines, ("global %s = @record{"):format(ctx))
 ##   table.insert(lines, ("  visual: %s,"):format(type_name))
 ##   table.insert(lines, ("  sm:     %s,"):format(sm))
-##   if has_hover then table.insert(lines, "  hover:  HoverableState,") end
-##   if has_click then table.insert(lines, "  click:  ClickableState,") end
-##   -- Phase 2.4: focusable 组件需要运行时 component_id 来区分同类型的不同实例
-##   if has_focus then table.insert(lines, "  component_id: uint32,") end
-##   -- Phase 3.5.3: toggleable 原语需要 toggle: NebulaToggleState 字段（Context 层）
-##   if has_prim(reg, "toggleable") then
-##     table.insert(lines, "  toggle: NebulaToggleState,")
-##   end
-##   -- Phase 3.6: editable 原语需要 selection_anchor 和 is_dragging 字段（Context 层）
-##   if has_prim(reg, "editable") then
-##     table.insert(lines, "  selection_anchor: uint32,")
-##     table.insert(lines, "  is_dragging: boolean,")
+##   -- ★ Phase 3.10: 通过 NEBULA_PRIMITIVES 注册表驱动字段注入（替代硬编码分支）
+##   local prim_fields = nebula_get_context_fields(reg.primitives or {})
+##   for _, f in ipairs(prim_fields) do
+##     table.insert(lines, ("  %s: %s,"):format(f.name, f.type))
 ##   end
 ##   for _, p in ipairs(all_props) do
 ##     table.insert(lines, ("  current_%s: %s,"):format(p.name, p.type))
@@ -786,8 +770,13 @@ global ClickableState = @record{
 ##   table.insert(lines, ("function %s:init(vis: %s): void"):format(ctx, type_name))
 ##   table.insert(lines,  "  self.visual = vis")
 ##   table.insert(lines,  "  self.sm:init()")
-##   if has_hover then table.insert(lines, "  self.hover = HoverableState{}") end
-##   if has_click then table.insert(lines, "  self.click = ClickableState{}") end
+##   -- ★ Phase 3.10: 通过 NEBULA_PRIMITIVES 注册表驱动初始化（替代硬编码分支）
+##   local prim_inits = nebula_get_context_init(reg.primitives or {})
+##   for _, init in ipairs(prim_inits) do
+##     if init.type == "record_init" then
+##       table.insert(lines, ("  self.%s = %s{}"):format(init.field, init.record_name))
+##     end
+##   end
 ##   -- 用初始状态（states[1]）的视觉值初始化 current_*
 ##   local init_state = reg.states[1]
 ##   for _, p in ipairs(all_props) do
@@ -1034,28 +1023,9 @@ global ClickableState = @record{
 ##     return nebula_derive_text_visual(type_name)
 ##   end
 ## 
-##   -- Phase 3.5.3: toggleable 原语需要 NebulaToggleState 类型定义在 Context record 被生成之前已存在
-##   if has_prim(reg, "toggleable") then
-##     local toggle_type_src = "global NebulaToggleState = @record{\n  is_on: boolean,\n  just_toggled: boolean,\n}"
-##     -- 防止重复注入（多个 toggleable 类型共用同一个 NebulaToggleState）
-##     if not _nebula_toggle_state_injected then
-##       _nebula_toggle_state_injected = true
-##       local toggle_ast = aster.parse(toggle_type_src, "<nebula_derive:toggle_state:" .. type_name .. ">")
-##       for _, stat in ipairs(toggle_ast) do inject_statement(stat) end
-##     end
-##   end
-## 
-##   -- Phase 3.6: editable 原语需要 NebulaBuf{N} 类型定义在 Visual record 被解析之前已存在
-##   -- nebula_gen_gap_buffer_type 返回 (type_name, source_code)，我们将其注入到编译期上下文
-##   if has_prim(reg, "editable") then
-##     local max_len = reg.max_text_len or 255
-##     local buf_type_name, buf_type_src = nebula_gen_gap_buffer_type(max_len)
-##     local buf_ast = aster.parse(buf_type_src, "<nebula_derive:gap_buffer:" .. type_name .. ">")
-##     for _, stat in ipairs(buf_ast) do
-##       inject_statement(stat)
-##     end
-##     print(("[derive] %s: injected %s (capacity=%d) for editable primitive"):format(type_name, buf_type_name, max_len))
-##   end
+##   -- ★ Phase 3.10: 通过 NEBULA_PRIMITIVES 注册表的 pre_derive_hook 执行原语前置钩子
+##   -- （替代旧的 toggleable/editable 硬编码分支）
+##   nebula_run_pre_derive_hooks(reg, type_name, reg.primitives or {}, inject_statement, aster)
 ## 
 ##   local base_fields, state_fields = nebula_parse_shape(type_name)
 ##   local all_props = collect_all_props(reg, state_fields)
@@ -1109,20 +1079,20 @@ global ClickableState = @record{
 ##   source_parts = source_parts .. gen_state_machine(base, reg) .. "\n\n"
 ##   source_parts = source_parts .. gen_context_for(type_name, base, reg, state_fields, all_props, base_fields) .. "\n\n"
 ##   source_parts = source_parts .. hit_test_src .. "\n\n"
-##   -- Phase 3.5.3: toggleable 原语要求 process_toggle 在 process_input 之前声明
-##   -- （nebula_gen_process_input 在末尾自动插入了 self:process_toggle(input) 调用）
-##   if has_prim(reg, "toggleable") then
-##     source_parts = source_parts .. nebula_gen_toggle_state({ base = base }) .. "\n\n"
+##   -- ★ Phase 3.10: 通过 NEBULA_PRIMITIVES 注册表的 extra_source_hook 收集额外源码
+##   -- （替代旧的 toggleable/editable 硬编码分支）
+##   local extra_spec = {
+##     base         = base,
+##     state_type   = base .. "State",
+##     primitives   = reg.primitives or {},
+##     states       = reg.states,
+##     max_text_len = reg.max_text_len or 255,
+##   }
+##   local extra_src = nebula_get_extra_sources(extra_spec, reg.primitives or {})
+##   if extra_src and #extra_src > 0 then
+##     source_parts = source_parts .. extra_src .. "\n\n"
 ##   end
 ##   source_parts = source_parts .. process_input_src .. "\n\n"
-##   -- Phase 3.6: editable 原语要求 process_text_input / mouse_to_cursor / sync_cursor_to
-##   -- 在 update() 之前声明（因为 update() 内部可能调用这些方法）
-##   if has_prim(reg, "editable") then
-##     source_parts = source_parts .. nebula_gen_text_buffer({
-##       base         = base,
-##       max_text_len = reg.max_text_len or 255,
-##     }) .. "\n\n"
-##   end
 ##   source_parts = source_parts .. gen_update_for(base, reg, all_props) .. "\n\n"
 ##   local use_instanced = not feats.has_shadow
 ##   local max_instances = reg.max_instances or 128

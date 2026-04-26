@@ -1,24 +1,29 @@
 -- =============================================================================
 -- derive/interaction_factory.lua
--- Nebula GUI Compiler — Phase 2.4 → 3.6.2
+-- Nebula GUI Compiler — Phase 3.10
 --
 -- 交互原语代码生成器（Interaction Factory）
+--
+-- ★ Phase 3.10 重构：引入 NEBULA_PRIMITIVES 统一注册表
 --
 -- 根据 Visual 规格中声明的 primitives 列表，在编译期生成以下 Nelua 源码：
 --   · <T>Context:hit_test(x, y)      — 内联 AABB 碰撞检测（无函数调用层）
 --   · <T>Context:process_input(input) — 按 primitives 自动生成状态机触发逻辑
 --
--- 支持的原语：
+-- 支持的原语（通过 NEBULA_PRIMITIVES 注册表声明）：
 --   · "hoverable"  — 生成 hovered 状态检测与 transition_to(Hovered/Default)
 --   · "clickable"  — 在 hoverable 基础上叠加 pressed 状态与 just_clicked 检测
 --   · "focusable"  — 生成基于 self.component_id / input.focused_id 的焦点管理
---                    component_id 是运行时字段，允许同类型多实例拥有不同焦点 ID
+--   · "toggleable" — 正交开关状态，在 process_input 后调用 process_toggle
+--   · "editable"   — Gap Buffer 驱动的文本输入，含选区、光标同步等方法
 --
 -- 公开 API：
---   nebula_gen_hit_test(spec)       -> string  (Nelua 源码)
---   nebula_gen_process_input(spec)  -> string  (Nelua 源码)
---   nebula_gen_text_buffer(spec)    -> string  (Nelua 源码)
---   nebula_gen_toggle_state(spec)   -> string  (Nelua 源码)
+--   NEBULA_PRIMITIVES                 -> table   (统一注册表)
+--   nebula_resolve_primitives(prims)  -> table   (解析依赖后的有序原语列表)
+--   nebula_gen_hit_test(spec)         -> string  (Nelua 源码)
+--   nebula_gen_process_input(spec)    -> string  (Nelua 源码)
+--   nebula_gen_text_buffer(spec)      -> string  (Nelua 源码)
+--   nebula_gen_toggle_state(spec)     -> string  (Nelua 源码)
 --
 -- spec = {
 --   base        : string  — 派生基名（如 "Button"），生成 ButtonContext 方法
@@ -48,6 +53,267 @@ local function has_state(states, name)
 end
 
 -- =============================================================================
+-- ★ Phase 3.10: NEBULA_PRIMITIVES 统一注册表
+--
+-- 每个原语的元数据结构：
+--   name              : string    — 原语名称
+--   dependencies      : string[]  — 隐式依赖的其他原语
+--   global_type_meta  : table?    — 需要注入的全局类型 { type_name, source }
+--                                   或 { factory = function(reg) -> type_name, source }
+--   context_fields    : table[]   — 注入到 <T>Context record 的字段列表
+--                                   每项 { name, type } 或 { factory = function(reg) -> fields[] }
+--   context_init      : table[]   — Context:init() 中的初始化代码
+--                                   每项 { type="record_init", field, record_name }
+--   post_process      : table?    — process_input 末尾的后处理
+--                                   { method_call = "self:process_toggle(input)" }
+--   pre_derive_hook   : function? — 在 nebula_derive 中、Context 生成前执行的钩子
+--                                   function(reg, type_name, inject_statement, aster)
+--   extra_source_hook : function? — 在 source_parts 拼装中、process_input 之后执行的钩子
+--                                   function(spec) -> string (额外 Nelua 源码)
+-- =============================================================================
+NEBULA_PRIMITIVES = {}
+
+-- ---- 1. hoverable ----
+NEBULA_PRIMITIVES["hoverable"] = {
+  name         = "hoverable",
+  dependencies = {},
+  global_type_meta = nil,  -- HoverableState 已在 nebula_core.nelua 中全局定义
+  context_fields = {
+    { name = "hover", type = "HoverableState" },
+  },
+  context_init = {
+    { type = "record_init", field = "hover", record_name = "HoverableState" },
+  },
+  post_process      = nil,
+  pre_derive_hook   = nil,
+  extra_source_hook = nil,
+}
+
+-- ---- 2. clickable ----
+NEBULA_PRIMITIVES["clickable"] = {
+  name         = "clickable",
+  dependencies = { "hoverable" },  -- clickable 隐式依赖 hoverable
+  global_type_meta = nil,  -- ClickableState 已在 nebula_core.nelua 中全局定义
+  context_fields = {
+    { name = "click", type = "ClickableState" },
+  },
+  context_init = {
+    { type = "record_init", field = "click", record_name = "ClickableState" },
+  },
+  post_process      = nil,
+  pre_derive_hook   = nil,
+  extra_source_hook = nil,
+}
+
+-- ---- 3. focusable ----
+NEBULA_PRIMITIVES["focusable"] = {
+  name         = "focusable",
+  dependencies = { "clickable" },  -- focusable 需要 click.just_clicked
+  global_type_meta = nil,
+  context_fields = {
+    { name = "component_id", type = "uint32" },
+  },
+  context_init = {},  -- component_id 默认零初始化即可
+  post_process      = nil,
+  pre_derive_hook   = nil,
+  extra_source_hook = nil,
+}
+
+-- ---- 4. toggleable ----
+NEBULA_PRIMITIVES["toggleable"] = {
+  name         = "toggleable",
+  dependencies = { "clickable" },  -- toggleable 需要 click.just_clicked
+  global_type_meta = {
+    type_name = "NebulaToggleState",
+    source    = "global NebulaToggleState = @record{\n  is_on: boolean,\n  just_toggled: boolean,\n}",
+  },
+  context_fields = {
+    { name = "toggle", type = "NebulaToggleState" },
+  },
+  context_init = {},  -- toggle 默认零初始化即可（is_on=false, just_toggled=false）
+  post_process = {
+    method_call = "self:process_toggle(input)",
+  },
+  pre_derive_hook = function(reg, type_name, inject_statement, aster)
+    -- 注入 NebulaToggleState 全局类型（防止重复注入）
+    if not _nebula_toggle_state_injected then
+      _nebula_toggle_state_injected = true
+      local meta = NEBULA_PRIMITIVES["toggleable"].global_type_meta
+      local ast = aster.parse(meta.source, "<nebula_derive:toggle_state:" .. type_name .. ">")
+      for _, stat in ipairs(ast) do inject_statement(stat) end
+    end
+  end,
+  extra_source_hook = function(spec)
+    -- 生成 process_toggle 方法（必须在 process_input 之前声明）
+    return nebula_gen_toggle_state(spec)
+  end,
+}
+
+-- ---- 5. editable ----
+NEBULA_PRIMITIVES["editable"] = {
+  name         = "editable",
+  dependencies = { "focusable" },  -- editable 需要 focusable（component_id + click）
+  global_type_meta = {
+    -- 动态类型：NebulaBuf{N}，通过工厂函数按需生成
+    factory = function(reg, type_name, inject_statement, aster)
+      local max_len = reg.max_text_len or 255
+      local buf_type_name, buf_type_src = nebula_gen_gap_buffer_type(max_len)
+      local buf_ast = aster.parse(buf_type_src, "<nebula_derive:gap_buffer:" .. type_name .. ">")
+      for _, stat in ipairs(buf_ast) do
+        inject_statement(stat)
+      end
+      print(("[derive] %s: injected %s (capacity=%d) for editable primitive"):format(type_name, buf_type_name, max_len))
+    end,
+  },
+  context_fields = {
+    { name = "selection_anchor", type = "uint32" },
+    { name = "is_dragging",      type = "boolean" },
+  },
+  context_init = {},  -- 默认零初始化
+  post_process      = nil,
+  pre_derive_hook = function(reg, type_name, inject_statement, aster)
+    -- 注入 NebulaBuf{N} 动态类型
+    local meta = NEBULA_PRIMITIVES["editable"].global_type_meta
+    if meta.factory then
+      meta.factory(reg, type_name, inject_statement, aster)
+    end
+  end,
+  extra_source_hook = function(spec)
+    -- 生成 text buffer 相关方法（mouse_to_cursor, sync_cursor_to, process_text_input 等）
+    return nebula_gen_text_buffer({
+      base         = spec.base,
+      max_text_len = spec.max_text_len or 255,
+    })
+  end,
+}
+
+-- =============================================================================
+-- ★ Phase 3.10: nebula_resolve_primitives(prims) -> ordered_list
+--
+-- 解析原语列表，自动注入依赖，返回去重且拓扑排序后的有序原语名列表。
+-- 保证依赖项在被依赖项之前出现。
+-- =============================================================================
+function nebula_resolve_primitives(prims)
+  local resolved = {}
+  local seen = {}
+
+  local function resolve(name)
+    if seen[name] then return end
+    local meta = NEBULA_PRIMITIVES[name]
+    if not meta then return end  -- 未知原语，跳过
+    -- 先解析依赖
+    for _, dep in ipairs(meta.dependencies or {}) do
+      resolve(dep)
+    end
+    if not seen[name] then
+      seen[name] = true
+      table.insert(resolved, name)
+    end
+  end
+
+  for _, p in ipairs(prims or {}) do
+    resolve(p)
+  end
+  return resolved
+end
+
+-- =============================================================================
+-- ★ Phase 3.10: nebula_get_context_fields(prims) -> fields[]
+--
+-- 根据已解析的原语列表，收集所有需要注入到 Context record 的字段。
+-- 返回 { {name, type}, ... } 的有序列表（已去重）。
+-- =============================================================================
+function nebula_get_context_fields(prims)
+  local fields = {}
+  local seen = {}
+  local resolved = nebula_resolve_primitives(prims)
+  for _, prim_name in ipairs(resolved) do
+    local meta = NEBULA_PRIMITIVES[prim_name]
+    if meta then
+      for _, f in ipairs(meta.context_fields or {}) do
+        if not seen[f.name] then
+          seen[f.name] = true
+          table.insert(fields, f)
+        end
+      end
+    end
+  end
+  return fields
+end
+
+-- =============================================================================
+-- ★ Phase 3.10: nebula_get_context_init(prims) -> init_items[]
+--
+-- 根据已解析的原语列表，收集所有 Context:init() 中的初始化项。
+-- =============================================================================
+function nebula_get_context_init(prims)
+  local inits = {}
+  local resolved = nebula_resolve_primitives(prims)
+  for _, prim_name in ipairs(resolved) do
+    local meta = NEBULA_PRIMITIVES[prim_name]
+    if meta then
+      for _, init in ipairs(meta.context_init or {}) do
+        table.insert(inits, init)
+      end
+    end
+  end
+  return inits
+end
+
+-- =============================================================================
+-- ★ Phase 3.10: nebula_get_post_process(prims) -> post_items[]
+--
+-- 根据已解析的原语列表，收集所有 process_input 末尾的后处理调用。
+-- =============================================================================
+function nebula_get_post_process(prims)
+  local posts = {}
+  local resolved = nebula_resolve_primitives(prims)
+  for _, prim_name in ipairs(resolved) do
+    local meta = NEBULA_PRIMITIVES[prim_name]
+    if meta and meta.post_process then
+      table.insert(posts, meta.post_process)
+    end
+  end
+  return posts
+end
+
+-- =============================================================================
+-- ★ Phase 3.10: nebula_run_pre_derive_hooks(reg, type_name, prims, inject_statement, aster)
+--
+-- 在 nebula_derive 中、Context 生成前，执行所有原语的 pre_derive_hook。
+-- =============================================================================
+function nebula_run_pre_derive_hooks(reg, type_name, prims, inject_statement, aster)
+  local resolved = nebula_resolve_primitives(prims)
+  for _, prim_name in ipairs(resolved) do
+    local meta = NEBULA_PRIMITIVES[prim_name]
+    if meta and meta.pre_derive_hook then
+      meta.pre_derive_hook(reg, type_name, inject_statement, aster)
+    end
+  end
+end
+
+-- =============================================================================
+-- ★ Phase 3.10: nebula_get_extra_sources(spec, prims) -> string
+--
+-- 在 source_parts 拼装中，收集所有原语的额外源码（如 toggleable 的 process_toggle、
+-- editable 的 text_buffer 方法）。
+-- =============================================================================
+function nebula_get_extra_sources(spec, prims)
+  local parts = {}
+  local resolved = nebula_resolve_primitives(prims)
+  for _, prim_name in ipairs(resolved) do
+    local meta = NEBULA_PRIMITIVES[prim_name]
+    if meta and meta.extra_source_hook then
+      local src = meta.extra_source_hook(spec)
+      if src and #src > 0 then
+        table.insert(parts, src)
+      end
+    end
+  end
+  return table.concat(parts, "\n\n")
+end
+
+-- =============================================================================
 -- nebula_gen_hit_test(spec) -> string
 -- =============================================================================
 function nebula_gen_hit_test(spec)
@@ -68,6 +334,10 @@ end
 -- =============================================================================
 -- nebula_gen_process_input(spec) -> string
 --
+-- ★ Phase 3.10 重构：不再使用 Monkey-patch 注入 toggleable。
+-- 后处理调用通过 NEBULA_PRIMITIVES 注册表的 post_process 元数据驱动，
+-- 在函数末尾按注册顺序插入。
+--
 -- focusable 原语使用 self.component_id（运行时字段），而非编译期常量。
 -- 这允许同一 Visual 类型的多个实例拥有不同的焦点 ID。
 -- =============================================================================
@@ -82,11 +352,14 @@ function nebula_gen_process_input(spec)
   local prims      = spec.primitives
   local states     = spec.states
 
+  -- ★ Phase 3.10: 使用原始声明的 prims 列表判断基础交互能力
+  -- 注意：这里使用原始 prims 而非 resolved，保持与旧版本行为一致
+  -- 纯 toggleable 无 clickable 时仍然生成 no-op（因为 toggleable 依赖 clickable 的 just_clicked）
   local is_hoverable  = has(prims, "hoverable")
   local is_clickable  = has(prims, "clickable")
   local is_focusable  = has(prims, "focusable")
 
-  -- 无任何交互原语：生成空体，保持接口统一
+  -- 无任何基础交互原语：生成空体，保持接口统一
   if not is_hoverable and not is_clickable and not is_focusable then
     local lines = {}
     table.insert(lines, ("-- [interaction] %s: process_input (no primitives, no-op)"):format(ctx))
@@ -167,6 +440,14 @@ function nebula_gen_process_input(spec)
     table.insert(lines,  "  else")
     table.insert(lines, ("    self.sm:transition_to(%s.%s)"):format(st, default_st))
     table.insert(lines,  "  end")
+  end
+
+  -- ★ Phase 3.10: 元数据驱动的后处理注入（替代旧的 Monkey-patch）
+  local post_items = nebula_get_post_process(prims)
+  for _, post in ipairs(post_items) do
+    if post.method_call then
+      table.insert(lines, ("  %s"):format(post.method_call))
+    end
   end
 
   table.insert(lines,  "end")
@@ -440,27 +721,9 @@ function nebula_gen_toggle_state(spec)
   return table.concat(lines, "\n")
 end
 
--- =============================================================================
--- ★ Phase 3.5.3: 扩展 nebula_gen_process_input 支持 toggleable 原语
---
--- 对现有函数的增量扩展：
---   · 检测到 "toggleable" 时，在 process_input 末尾自动调用 process_toggle
---   · 不修改主状态机逻辑，实现真正的正交状态
--- =============================================================================
-local _orig_gen_process_input = nebula_gen_process_input
-function nebula_gen_process_input(spec)
-  local source = _orig_gen_process_input(spec)
-  if not has(spec.primitives or {}, "toggleable") then
-    return source
-  end
-  -- 在 process_input 的最后一行（end）之前插入 process_toggle 调用
-  -- 利用字符串替换：将最后的 "\nend" 替换为 toggle 调用 + end
-  local last_end_pos = source:match(".*()\nend$")
-  if last_end_pos then
-    source = source:sub(1, last_end_pos - 1) .. "\n  self:process_toggle(input)\nend"
-  end
-  return source
-end
+-- ★ Phase 3.10: Monkey-patch 已删除。
+-- toggleable 的 process_toggle 调用现在通过 NEBULA_PRIMITIVES 注册表的
+-- post_process 元数据驱动，在 nebula_gen_process_input 中按顺序插入。
 
 -- 返回模块标识
-return "nebula_interaction_factory_v0.6_phase3.6.3"
+return "nebula_interaction_factory_v0.7_phase3.10"
