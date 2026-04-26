@@ -117,13 +117,21 @@ nebula_app_set_root_layout("FormApp", {
 })
 ```
 
-### 4.2 Phase 4.0：编译期公理校验器
+### 4.2 Phase 3.12：响应式重排 (Responsive Reflow)
+
+**目标**：在不违反公理 A 的前提下，实现窗口 Resize 时的 UI 响应式重排。
+
+**技术选型**：将 S1 阶段的"绝对坐标输出"降维为"相对视口的线性函数"。在 `layout_engine.lua` 中进行多次微扰采样，推导出每个组件坐标关于视口尺寸的线性系数。在 S2 阶段的 `<App>:update` 中，仅执行扁平化的线性插值计算，保持零遍历开销。
+
+**实施路径**：详见 `docs/PLAN_PHASE3_12.md`。
+
+### 4.3 Phase 4.0：编译期公理校验器
 
 **目标**：将公理从"文档约束"升级为"编译期强制"。
 
 在 `nebula_derive` 和 `app_factory` 内嵌公理 B/C 的编译期断言。利用 Nelua 宏的元编程能力，在 S1 阶段直接校验：公理 B 校验 L2 数据不得出现在 Visual Record 中；公理 C 校验管线签名唯一性。这比外部 grep 工具强大得多，因为它在 S1 阶段拥有完整的类型信息和注册元数据，可以做真正的语义校验。
 
-### 4.3 Phase 4.1：Slug 文本渲染引擎
+### 4.4 Phase 4.1：Slug 文本渲染引擎
 
 **目标**：不违反公理 A 的 Unicode 全量支持。
 
@@ -141,13 +149,13 @@ Slug 将"字形渲染"分解为"数据提取"（S0）和"像素计算"（S2）�
 
 **实施路径**：详见 `docs/PLAN_PHASE4_1.md`。
 
-### 4.4 Phase 4.2：CJK 字体预处理与 HarfBuzz 集成
+### 4.5 Phase 4.2：CJK 字体预处理与 HarfBuzz 集成
 
 **目标**：S0 阶段完成所有字形数据提取和 shaping 规则预处理。
 
 扩展 `font_preprocessor` 支持 CJK 字体子集化（按应用声明的字符集提取），集成 HarfBuzz 进行编译期 shaping（字距调整、连字替换）。shaping 规则表在 S0 阶段生成，S2 阶段仅做查表。
 
-### 4.5 Phase 4.3：拓扑流渲染 (Indirect Drawing)
+### 4.6 Phase 4.3：拓扑流渲染 (Indirect Drawing)
 
 **目标**：引入 GPU 驱动的间接绘制，大幅降低 CPU 提交开销。
 
@@ -155,7 +163,7 @@ Slug 将"字形渲染"分解为"数据提取"（S0）和"像素计算"（S2）�
 
 **实施路径**：详见 `docs/PLAN_PHASE4_3.md`。
 
-### 4.6 Phase 5.0：WASM 后端
+### 4.7 Phase 5.0：WASM 后端
 
 **目标**：零运行时分支的跨平台。
 
