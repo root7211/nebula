@@ -149,11 +149,17 @@ Slug 将"字形渲染"分解为"数据提取"（S0）和"像素计算"（S2）�
 
 **实施路径**：详见 `docs/PLAN_PHASE4_1.md`。
 
-### 4.5 Phase 4.2：CJK 字体预处理与 HarfBuzz 集成
+### 4.5 Phase 4.2：跨平台 PAL (Platform Abstraction Layer) 与 CJK 支持
 
-**目标**：S0 阶段完成所有字形数据提取和 shaping 规则预处理。
+**目标**：实现 Linux、Windows、Web (Wasm) 的源码级对齐，解决 Surface 创建与主循环结构的平台差异。
 
-扩展 `font_preprocessor` 支持 CJK 字体子集化（按应用声明的字符集提取），集成 HarfBuzz 进行编译期 shaping（字距调整、连字替换）。shaping 规则表在 S0 阶段生成，S2 阶段仅做查表。
+**技术方案**：
+1. **Surface 抽象**：在 `renderer.nelua` 中引入条件编译。Linux 使用 X11/Wayland 句柄，Windows 使用 Win32 HWND 句柄，Web 则通过 Emscripten 映射到浏览器 WebGPU。
+2. **主循环抽象**：引入 `nebula_main_loop` 宏。Native 端保持阻塞式 `while` 循环；Wasm 端自动展开为 `emscripten_set_main_loop` 回调模式。
+3. **构建链升维**：`build.sh` 支持 `TARGET` 变量，自动切换 `gcc/cl/emcc` 编译器并处理各自的链接库（如 Win 端的 `user32.lib`，Web 端的胶水 JS）。
+4. **CJK 集成**：同步完成 HarfBuzz 的 S0 预处理集成，利用 Slug 引擎实现真正的全球化渲染。
+
+**实施路径**：详见 `docs/PLAN_PHASE4_2_PAL.md`。
 
 ### 4.6 Phase 4.3：拓扑流渲染 (Indirect Drawing)
 
@@ -163,11 +169,14 @@ Slug 将"字形渲染"分解为"数据提取"（S0）和"像素计算"（S2）�
 
 **实施路径**：详见 `docs/PLAN_PHASE4_3.md`。
 
-### 4.7 Phase 5.0：WASM 后端
+### 4.7 Phase 5.0：自动化 CI/CD 与工业化发布
 
-**目标**：零运行时分支的跨平台。
+**目标**：确保 Linux、Windows、Web 三端代码在每次提交时都能自动编译并通过全量回归测试，建立工业级的发布流程。
 
-平台差异通过 S1 阶段的编译期条件处理。`NEBULA_TARGET` 在 S1 阶段确定（编译时传入），S2 阶段的二进制中只有一条路径——native 生成 GLFW while 循环，wasm 生成 Emscripten 回调。不存在运行时的平台分支。
+**核心任务**：
+1. **CI 集成**：在 GitHub Actions 中配置多平台编译环境（Ubuntu, Windows Server, Emscripten SDK）。
+2. **测试自动化**：实现 Headless 模式下的 WebGPU 渲染测试，确保跨平台渲染结果的一致性。
+3. **版本发布**：自动化生成多端二进制包及 Web 预览版。
 
 ---
 
@@ -202,6 +211,7 @@ Slug 将"字形渲染"分解为"数据提取"（S0）和"像素计算"（S2）�
 | 公理 C | "专属管线"（自然语言） | 管线签名四元组 Σ(V)（数学定义） | 精确定义"专属"的等价判定 |
 | 元规则 Π | 优先级裁决（B > C > A） | 正交性要求（不应冲突） | 更高的数学标准 |
 | CJK 方案 | 未明确 | Slug 算法（S0 数据提取 + S2 GPU 计算） | 不违反公理 A 的 Unicode 全量支持 |
+| 跨平台方案 | 未明确 | 编译期 PAL 抽象 | Linux/Win/Web 源码级对齐，解决循环结构冲突 |
 | Phase 4.0 | grep 校验器 | 编译期内嵌断言 | 利用 S1 阶段的完整类型信息做语义校验 |
 | 行数目标 | 具体行数承诺（如 450 行） | 结构性约束（路径数、注册表完备性） | 行数不是公理约束的对象 |
 
