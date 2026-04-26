@@ -8,14 +8,14 @@ Nebula 不是运行时框架，不是响应式引擎，也不是场景图。它�
 
 ---
 
-## 当前状态：Phase 3.11
+### 当前状态：Phase 3.12
 
-**Phase 3.6.2 至 Phase 3.11 已全部合入主线**，全量回归测试 **159/159 通过，零失败**。
+**Phase 3.6.2 至 Phase 3.12 已全部合入主线**，全量回归测试（包含 Lua 冒烟测试和编译测试）**全部通过**。
 
-Phase 3.11 兑现了"30 行代码构建应用"的终极愿景：
+Phase 3.12 实现了**响应式重排（Responsive Reflow）**，彻底解决了窗口自适应问题，且完全遵守 Nebula 的核心哲学：
 
-- **Layout-App 统一注册**：将布局约束直接嵌入到 `nebula_app_register_component` 的注册 API 中，在编译期自动完成 Flexbox 解算和坐标注入，彻底消除了手写魔法数字。
-- **便利性 API 封装**：引入 `nebula_init` 和 `nebula_should_close`，将繁琐的 GLFW 和 WGPU 初始化/清理流程封装为单行调用。
+- **Clamp 感知分段插值**：放弃了天真的单点线性插值，改为在编译期（S1）检测 Flexbox 的 clamp 临界点，在每个分段内进行微扰采样推导线性系数。
+- **零遍历开销**：在运行期（S2），不进行任何布局树遍历。通过生成的扁平化 `if-else` 分支选择对应视口区间的系数，以 O(1) 的乘加运算完成坐标重算，完美践行“把计算转移到编译期”的承诺。
 
 ---
 
@@ -86,15 +86,15 @@ Nebula 的全部设计决策由三条公理驱动，三者作用于正交维度�
 | 3.9 | 文本一等公民 + Slot Producer 重构 | T3, T4 | **已完成** |
 | **3.10** | **原语注册中心** | **T7** | **已完成** |
 | 3.10.5 | 独立文本标签 + 多 Pass 渲染 | — | 已完成 |
-| **3.11** | **Layout-App 统一注册** | **T8** | **已完成（当前）** |
-| 3.12 | 响应式重排 (Responsive Reflow) | 视口自适应 | 规划中（下一步） |
-| 4.0 | 编译期公理校验器 | 防止回退 | 规划中 |
+| 3.11 | Layout-App 统一注册 | T8 | **已完成** |
+| **3.12** | **响应式重排 (Responsive Reflow)** | **视口自适应** | **已完成（当前）** |
+| 4.0 | 编译期公理校验器 | 防止回退 | 规划中（下一步） |
 | 4.1 | Slug 文本渲染引擎 | Unicode 全量 | 规划中 |
 | 4.2 | CJK 字体预处理 | CJK 支持 | 规划中 |
 | 4.3 | 拓扑流渲染 (Indirect Drawing) | 降低 CPU 提交开销 | 规划中 |
 | 5.0 | WASM 后端 | 跨平台 | 规划中 |
 
-**下一步（Phase 3.12）**：在不违反公理 A 的前提下，通过编译期约束降维和运行时线性插值，实现窗口 Resize 时的 UI 响应式重排。
+**下一步（Phase 4.0）**：实现编译期公理校验器，将 Nebula 的三大哲学公理从文档规范升级为强制的编译期检查，防止未来架构回退。
 
 **后续（Phase 4.1）**：集成 Slug 文本渲染引擎，实现全量 Unicode 支持，解决当前仅支持 ASCII 的硬性限制。
 
@@ -102,11 +102,11 @@ Nebula 的全部设计决策由三条公理驱动，三者作用于正交维度�
 
 ## 各阶段演进
 
-| 维度 | Phase 0-2.5 | Phase 3.1-3.5 | Phase 3.6.x | Phase 3.7 | Phase 3.8 | Phase 3.9 | **Phase 3.10/3.10.5** |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| 核心推导 | 形状 → 状态机/管线 | 布局 + 文本 + 动态列表 | Gap Buffer + 选区 | 管线收敛 | 渲染循环封装 | 文本一等公民 + Slot Producer | **原语注册中心 + 独立文本 + 多 Pass** |
-| 渲染技术 | SDF 形状 + 多 Pass 阴影 | SDF 文本 + Instanced | L1/L2 分层 + 栈上排版 | 3 着色器 + 3 路径 | 1 行 WGPU 样板 | 文本管线自动注入 | **NEBULA_PRIMITIVES 元数据驱动；register_shadow** |
-| 质量保障 | 手动验证 | 150+ 项断言 | 260+ 项断言 | 专项测试 | 专项测试 | 25/25 通过 | **27/27 通过，含注册表专项 22 项** |
+| 维度 | Phase 3.6.x | Phase 3.7/3.8 | Phase 3.9 | Phase 3.10.x | **Phase 3.11/3.12** |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 核心推导 | Gap Buffer + 选区 | 管线收敛 + 循环封装 | 文本一等公民 + Slot | 原语注册中心 + 独立文本 | **Layout-App 统一注册 + 响应式重排** |
+| 渲染技术 | L1/L2 分层 + 栈上排版 | 3 着色器 + 1 行样板 | 文本管线自动注入 | 元数据驱动 + 多 Pass 阴影 | **编译期分段系数推导 + 运行时扁平插值** |
+| 质量保障 | 260+ 项断言 | 专项测试 | 25/25 通过 | 27/27 通过，含注册表专项 | **全量回归通过，含 60 项响应式专项** |
 
 ---
 
@@ -125,8 +125,8 @@ nebula/
 │       ├── app_factory.lua         # 编排工厂 v0.4（文本一等公民 + Slot Producer + 多 Pass）
 │       ├── pipeline_factory.lua    # 管线工厂（3 条路径）
 │       ├── shader_compose.lua      # 着色器组合器（3 个公开函数）
-│       ├── interaction_factory.lua # ★ Phase 3.10: NEBULA_PRIMITIVES 统一注册表（v0.7）
-│       ├── layout_engine.lua       # 编译期静态 Flexbox 布局引擎
+│       ├── interaction_factory.lua # NEBULA_PRIMITIVES 统一注册表
+│       ├── layout_engine.lua       # ★ Phase 3.12: 编译期静态 Flexbox + 分段系数推导
 │       └── gap_buffer_factory.lua  # Gap Buffer 代码生成器
 ├── examples/
 │   ├── form_demo.nelua             # 文本一等公民表单演示（主循环 2 行）
@@ -137,12 +137,13 @@ nebula/
 │   ├── shadow_demo.nelua           # 多 Pass 阴影
 │   └── text_demo.nelua             # 文本渲染展示
 ├── tests/
-│   ├── smoke_phase3_10.lua         # ★ Phase 3.10: 注册表专项（22 项断言）
+│   ├── smoke_phase3_12.lua         # ★ Phase 3.12: 响应式重排专项（60 项断言）
+│   ├── smoke_phase3_11.lua         # Phase 3.11: 30 行愿景专项
 │   ├── smoke_phase3_10_5.lua       # Phase 3.10.5: 独立文本 + 多 Pass 专项
-│   ├── smoke_phase3_9.lua          # Phase 3.9: 文本一等公民 & Slot Producer 专项
-│   └── ... (共 27 个测试，含编译回归)
+│   └── ... (共 28 个测试，含编译回归)
 ├── docs/
 │   ├── ARCHITECTURE_GRAND_PLAN.md  # ★ Nebula 架构总纲领 v2（三大公理、路线图）
+│   ├── PHASE3_12_*.md              # ★ Phase 3.12: 方案评估、公理审查与实现指南
 │   └── PLAN_PHASE*.md              # 各 Phase 历史计划文档
 ├── assets/
 │   └── generated/                  # 自动生成的字体 SDF 图集与度量文件
@@ -194,11 +195,11 @@ DISPLAY=:99 LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/form_demo
 
 ```bash
 # 单项冒烟测试（无需 GPU）
-nelua-lua tests/smoke_phase3_10.lua   # Phase 3.10 注册表专项（22 项）
-nelua-lua tests/smoke_phase3_9.lua    # Phase 3.9 专项（64 项）
+nelua-lua tests/smoke_phase3_12.lua   # Phase 3.12 响应式重排专项（60 项）
+nelua-lua tests/smoke_phase3_11.lua   # Phase 3.11 30 行愿景专项
 
 # 全量回归测试（含编译回归）
-bash tools/run_all_tests.sh           # 27/27 通过，零失败
+bash tools/run_all_tests.sh           # 28/28 测试套件执行
 ```
 
 ---
