@@ -1,7 +1,7 @@
-# Nebula 架构总纲领 v2
+# Nebula 架构总纲领 v3
 
-**修订日期**：2026-04-26
-**修订动因**：Phase 3.10 完成后的哲学审计发现原始公理体系存在形式化缺陷。本版本对三大公理进行了精确化重构，引入三阶段模型和三层生命周期模型，消除了所有已知的哲学不可达点。
+**修订日期**：2026-04-27
+**修订动因**：基于“可编程 GUI 编译器”的哲学演进分析，对路线图进行全面重构，引入三大纪元分层，并更新愿景终态。
 **适用范围**：所有未来 Phase 规划、所有 PR 评审、所有架构决策
 
 ---
@@ -78,9 +78,19 @@ L2 的 reset 不得影响 L1 的有效性；L1 的任何状态变化不得影响
 
 ---
 
-## 3. 已完成的 Phase 历史
+## 3. Nebula 发展路线图：三大纪元
 
-以下 Phase 已全部合入主线，全量回归测试通过。
+Nebula 的发展并非线性，而是遵循着从“形即外观”到“形即行为”，最终迈向“计算统一”的哲学升维之路。我们将整个发展路线图划分为三大纪元（Era），每个纪元代表一次核心范式的转变。
+
+### Era I：形即渲染 (Shape-Is Rendering) — Phase 0 至 Phase 4.1（已完成）
+
+**核心命题**：开发者声明 Visual 的**外观**规格，编译器推导渲染代码。
+
+**关键成就**：
+*   确立三大公理体系（A、B、C）与不变量（I1-I7）。
+*   实现编译期类型派生、状态机生成、管线收敛。
+*   引入 Slug 文本渲染引擎，实现 Unicode 全量支持。
+*   构建编译期公理校验器，将哲学约束强制化。
 
 | Phase | 名称 | 消除张力 | 关键成果 | 完成日期 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -91,96 +101,36 @@ L2 的 reset 不得影响 L1 的有效性；L1 的任何状态变化不得影响
 | 3.9 | 文本一等公民 + Slot Producer 重构 | T3, T4 | `nebula_app_register_text`；Producer 纯函数模式 | 2026-04-25 |
 | 3.10 | 原语注册中心 | T7 | `NEBULA_PRIMITIVES` 统一注册表；Monkey-patch 彻底删除 | 2026-04-26 |
 | 3.10.5 | 独立文本标签 + 多 Pass 渲染架构 | — | `register_text` static/dynamic 模式；`register_shadow`；多 Pass 渲染 | 2026-04-26 |
+| 3.11 | Layout-App 统一注册 | T8 | 布局约束嵌入注册 API，消除独立 `attach_layout` | 2026-04-26 |
+| 3.12 | 响应式重排 (Responsive Reflow) | 视口自适应 | 编译期线性函数推导，S2 扁平插值 | 2026-04-26 |
+| 4.0 | 编译期公理校验器 | 防止回退 | 将公理从文档约束升级为编译期强制 | 2026-04-26 |
+| **4.1** | **Slug 文本渲染引擎** | **Unicode 全量** | **纯数学矢量渲染，47/47 回归通过** | **2026-04-26** |
 
-**当前状态**：Phase 3.10.5 已完成，全量回归测试 **27/27 通过**（含 Phase 3.10 注册表专项 22 项断言）。
+### Era II：形即行为 (Shape-Is Behavior) — Phase 4.2 至 Phase 5.x（进行中）
 
----
+**核心命题**：将“形即”范式从外观扩展到**行为**。开发者不仅声明 Visual 的外观，还能通过暴露的编译器 API 声明和组合自定义交互原语，将 Nebula 升维为“可编程 GUI 编译器”。
 
-## 4. 未来路线图
-
-### 4.1 Phase 3.11：Layout-App 统一注册
-
-**目标**：消除张力 T8，兑现 30 行愿景。
-
-将布局约束嵌入 `nebula_app_register_component` 的注册 API 中，消除独立的 `nebula_app_attach_layout` 调用（消除 DRY 违反）。`app_factory.lua` 在 S1 阶段自动从所有注册组件的 `layout` 字段构建布局树，调用 `layout_engine.lua` 解算坐标，将结果嵌入 `<App>:init()` 的编译期常量中。同时实现 `nebula_init` 和 `nebula_should_close` 便利性封装。
-
-**目标 API**：
-
-```lua
-nebula_app_register_component("email_input", "InputVisual", {
-  component_id = 1,
-  layout = { height = 40, flex_grow = 1, margin = {top = 8} }
-})
-
-nebula_app_set_root_layout("FormApp", {
-  direction = "column", padding = 32, gap = 16
-})
-```
-
-### 4.2 Phase 3.12：响应式重排 (Responsive Reflow)
-
-**目标**：在不违反公理 A 的前提下，实现窗口 Resize 时的 UI 响应式重排。
-
-**技术选型**：将 S1 阶段的"绝对坐标输出"降维为"相对视口的线性函数"。在 `layout_engine.lua` 中进行多次微扰采样，推导出每个组件坐标关于视口尺寸的线性系数。在 S2 阶段的 `<App>:update` 中，仅执行扁平化的线性插值计算，保持零遍历开销。
-
-**实施路径**：详见 `docs/PLAN_PHASE3_12.md`。
-
-### 4.3 Phase 4.0：编译期公理校验器
-
-**目标**：将公理从"文档约束"升级为"编译期强制"。
-
-在 `nebula_derive` 和 `app_factory` 内嵌公理 B/C 的编译期断言。利用 Nelua 宏的元编程能力，在 S1 阶段直接校验：公理 B 校验 L2 数据不得出现在 Visual Record 中；公理 C 校验管线签名唯一性。这比外部 grep 工具强大得多，因为它在 S1 阶段拥有完整的类型信息和注册元数据，可以做真正的语义校验。
-
-### 4.4 Phase 4.1：Slug 文本渲染引擎
-
-**目标**：不违反公理 A 的 Unicode 全量支持。
-
-**技术选型**：采用 2026 年 3 月进入公共领域的 **Slug 算法**（Eric Lengyel）。Slug 直接在 GPU 上从贝塞尔曲线控制点计算像素覆盖率，不需要光栅化的 SDF atlas。
-
-**与三阶段模型的对齐**：
-
-| 阶段 | Slug 操作 | 输入来源 | 公理 A 合法性 |
+| Phase | 名称 | 目标 | 状态 |
 | :--- | :--- | :--- | :--- |
-| S0 | 从 TTF 提取贝塞尔曲线控制点，生成 band-data 和 curve-data | TTF 文件（S0 已知） | 合法 |
-| S1 | 将 curve/band 数据嵌入编译期常量，生成 WGSL Slug 着色器 | S0 输出（S1 已知） | 合法 |
-| S2 | GPU 从 curve/band 纹理计算像素覆盖率 | 要渲染的文字（依赖用户交互） | 合法 |
+| 4.2 | 跨平台 PAL (Platform Abstraction Layer) 与 CJK 支持 | 实现 Linux、Windows、Web (Wasm) 的源码级对齐；集成 HarfBuzz 实现 CJK 深度支持。 | **进行中** |
+| **4.3** | **可编程原语注册表** | **暴露 `nebula_register_primitive` API，允许界面开发者在 S1 编译期安全注入自定义交互逻辑。** | **规划中** |
+| 4.4 | 高级宏观原语库 | 基于可编程原语注册表，实现 `multiline_editable`、`scrollable_y`、`clipboard_aware` 等高级宏观原语。 | 规划中 |
+| 4.5 | 小型文本编辑器原型 | 作为 Era II 的里程碑验证，使用自定义原语构建一个功能完备的小型文本编辑器原型。 | 规划中 |
+| 5.0 | 自动化 CI/CD 与工业化发布 | 确保 Linux、Windows、Web 三端代码在每次提交时都能自动编译并通过全量回归测试，建立工业级的发布流程。 | 规划中 |
 
-Slug 将"字形渲染"分解为"数据提取"（S0）和"像素计算"（S2），运行时没有任何光栅化或 atlas 管理。20,000+ CJK 字形的 curve-data 远小于等效的 SDF atlas（几 MB vs 数百 MB），且渲染质量在任意缩放下都是数学精确的。
+### Era III：计算统一 (Unified Computation) — Phase 6.0+（远期愿景）
 
-**实施路径**：详见 `docs/PLAN_PHASE4_1.md`。
+**核心命题**：兑现公理 Ω——CPU 仅负责“意图的编排”（Orchestration），GPU 负责“事实的生成”（Generation）。将 UI 的复杂性与 CPU 性能彻底脱钩，释放前所未有的交互潜能。
 
-### 4.5 Phase 4.2：跨平台 PAL (Platform Abstraction Layer) 与 CJK 支持
-
-**目标**：实现 Linux、Windows、Web (Wasm) 的源码级对齐，解决 Surface 创建与主循环结构的平台差异。
-
-**技术方案**：
-1. **Surface 抽象**：在 `renderer.nelua` 中引入条件编译。Linux 使用 X11/Wayland 句柄，Windows 使用 Win32 HWND 句柄，Web 则通过 Emscripten 映射到浏览器 WebGPU。
-2. **主循环抽象**：引入 `nebula_main_loop` 宏。Native 端保持阻塞式 `while` 循环；Wasm 端自动展开为 `emscripten_set_main_loop` 回调模式。
-3. **构建链升维**：`build.sh` 支持 `TARGET` 变量，自动切换 `gcc/cl/emcc` 编译器并处理各自的链接库（如 Win 端的 `user32.lib`，Web 端的胶水 JS）。
-4. **CJK 集成**：同步完成 HarfBuzz 的 S0 预处理集成，利用 Slug 引擎实现真正的全球化渲染。
-
-**实施路径**：详见 `docs/PLAN_PHASE4_2_PAL.md`。
-
-### 4.6 Phase 4.3：拓扑流渲染 (Indirect Drawing)
-
-**目标**：引入 GPU 驱动的间接绘制，大幅降低 CPU 提交开销。
-
-**技术选型**：将 CPU 端的显式 Draw Call 替换为 GPU 端维护的 Indirect Buffer。利用 Compute Shader 执行视锥体剔除和状态检查，实现真正的动态拓扑变化。
-
-**实施路径**：详见 `docs/PLAN_PHASE4_3.md`。
-
-### 4.7 Phase 5.0：自动化 CI/CD 与工业化发布
-
-**目标**：确保 Linux、Windows、Web 三端代码在每次提交时都能自动编译并通过全量回归测试，建立工业级的发布流程。
-
-**核心任务**：
-1. **CI 集成**：在 GitHub Actions 中配置多平台编译环境（Ubuntu, Windows Server, Emscripten SDK）。
-2. **测试自动化**：实现 Headless 模式下的 WebGPU 渲染测试，确保跨平台渲染结果的一致性。
-3. **版本发布**：自动化生成多端二进制包及 Web 预览版。
+| Phase | 名称 | 目标 | 状态 |
+| :--- | :--- | :--- | :--- |
+| 6.0 | GPU Compute Shader Layout (CSL) | 将布局算法完全迁移至 GPU Compute Shader，实现并行解算数万个节点的几何属性。 | 规划中 |
+| 6.1 | 拓扑流渲染 (Indirect Drawing) | 引入 GPU 驱动的间接绘制，将 CPU 端的显式 Draw Call 替换为 GPU 端维护的 Indirect Buffer，实现真正的动态拓扑变化。 | 规划中 |
+| 7.0 | 统一状态仓库 (Unified State Storage) | 所有 UI 状态原生驻留在 GPU 显存中，交互逻辑由 Compute Shader 直接在显存中完成状态更新。 | 规划中 |
 
 ---
 
-## 5. 不变量与红线
+## 4. 不变量与红线
 
 以下不变量在任何 Phase 中都不得被打破：
 
@@ -200,52 +150,71 @@ Slug 将"字形渲染"分解为"数据提取"（S0）和"像素计算"（S2）�
 
 ---
 
-## 6. 与 v1 总纲领的差异摘要
+## 5. 与 v2 总纲领的差异摘要
 
-本版本（v2）相对于原始总纲领（v1）的核心变更如下：
+本版本（v3）相对于原始总纲领（v2）的核心变更如下：
 
-| 维度 | v1 | v2 | 变更理由 |
+| 维度 | v2 | v3 | 变更理由 |
 | :--- | :--- | :--- | :--- |
-| 公理 A | "编译期最大化"（模糊谓词） | 阶段封闭性（S0/S1/S2，可机械判定） | 消除"能不能在编译期确定"的争论 |
-| 公理 B | 二层模型（L1/L2） | 三层模型（L0/L1/L2） | 覆盖 GPU 资源的应用级生命周期 |
-| 公理 C | "专属管线"（自然语言） | 管线签名四元组 Σ(V)（数学定义） | 精确定义"专属"的等价判定 |
-| 元规则 Π | 优先级裁决（B > C > A） | 正交性要求（不应冲突） | 更高的数学标准 |
-| CJK 方案 | 未明确 | Slug 算法（S0 数据提取 + S2 GPU 计算） | 不违反公理 A 的 Unicode 全量支持 |
-| 跨平台方案 | 未明确 | 编译期 PAL 抽象 | Linux/Win/Web 源码级对齐，解决循环结构冲突 |
-| Phase 4.0 | grep 校验器 | 编译期内嵌断言 | 利用 S1 阶段的完整类型信息做语义校验 |
-| 行数目标 | 具体行数承诺（如 450 行） | 结构性约束（路径数、注册表完备性） | 行数不是公理约束的对象 |
+| 路线图结构 | 扁平的 Phase 列表 | 三大纪元分层（Era I/II/III） | 更好地体现哲学演进与范式转变 |
+| Phase 4.3 | 拓扑流渲染 | 可编程原语注册表 | 将“可编程 GUI 编译器”核心功能提前，更符合 Era II 哲学 |
+| Phase 6.1 | 未定义 | 拓扑流渲染 | 将拓扑流渲染后移至 Era III，更符合公理 Ω 愿景 |
+| 愿景终态 | 30 行表单 | 50 行文本编辑器 | 反映 Era II 行为编程的新能力 |
+| Phase 4.4 | 可编程 GUI 编译器（位于参考资料后） | 高级宏观原语库（位于 Era II 内） | 修正文档结构，并明确其在 Era II 中的定位 |
 
 ---
 
-## 7. 愿景：30 行终态
+## 6. 愿景：50 行终态（文本编辑器）
 
-当路线图全部完成后，一个完整的表单应用将是这样的：
+当 Era II 的路线图全部完成后，一个功能完备的小型文本编辑器将是这样的：
 
 ```nelua
 require "nebula"
 
 ##[[
-  nebula_annotate("CardVisual",   { ... })
-  nebula_annotate("InputVisual",  { primitives = {"hoverable","clickable","focusable","editable"}, max_text_len = 255 })
-  nebula_annotate("TextVisual",   { text_mode = "ascii_sdf" })
-  nebula_annotate("ButtonVisual", { ... })
+  -- 界面开发者自定义原语：一个简单的拖拽行为
+  nebula_register_primitive("draggable", {
+    state_fields = { is_dragging = "bool", start_x = "float32", start_y = "float32" },
+    inline_process = [[ -- Nelua 代码片段，将在 S1 阶段注入
+      if self.is_dragging then
+        self.visual.pos.x = self.visual.pos.x + (mx - self.start_x)
+        self.visual.pos.y = self.visual.pos.y + (my - self.start_y)
+        self.start_x = mx
+        self.start_y = my
+      end
+      if is_btn_down and not self.is_dragging and self.visual:hit_test(mx, my) then
+        self.is_dragging = true
+        self.start_x = mx
+        self.start_y = my
+      elseif not is_btn_down and self.is_dragging then
+        self.is_dragging = false
+      end
+    ]],
+    -- 编译期静态契约：要求 Visual 必须有 pos 字段
+    static_asserts = { "visual.pos" }
+  })
+
+  nebula_annotate("EditorVisual", {
+    primitives = {"multiline_editable", "scrollable_y", "clipboard_aware"},
+    -- 其他视觉属性...
+  })
 ]]
-## nebula_derive("CardVisual"); nebula_derive("InputVisual"); nebula_derive("TextVisual"); nebula_derive("ButtonVisual")
+## nebula_derive("EditorVisual")
 
 ##[[
-  nebula_app_begin("FormApp")
-    nebula_app_set_root_layout("FormApp", { direction = "column", padding = 32, gap = 16 })
-    nebula_app_register_component("card",        "CardVisual",   { layout = { width = 480, height = 320 } })
-    nebula_app_register_component("email_input", "InputVisual",  { component_id = 1, layout = { height = 40 } })
-    nebula_app_register_text     ("email_label", { bound_to = "email_input", placeholder = "email" })
-    nebula_app_register_component("login_btn",   "ButtonVisual", { layout = { height = 44 } })
+  nebula_app_begin("TextEditorApp")
+    nebula_app_set_root_layout("TextEditorApp", { direction = "column", padding = 16 })
+    nebula_app_register_component("editor", "EditorVisual", {
+      component_id = 1,
+      layout = { flex_grow = 1, width = 800, height = 600 }
+    })
   nebula_app_end()
 ]]
-## nebula_derive_app("FormApp")
+## nebula_derive_app("TextEditorApp")
 
 local function main()
   local renderer: NebulaRenderer
-  local app:      FormApp
+  local app:      TextEditorApp
   if not nebula_init(&renderer, &app) then return 1 end
   while not nebula_should_close() do
     nebula_frame_render(&renderer, &app)
@@ -255,11 +224,11 @@ end
 main()
 ```
 
-**30 行，零样板，零 WGPU 调用，零 Pipeline 初始化代码，零 Arena 管理代码。** 布局约束内嵌于注册 API，坐标在 S1 阶段解算并嵌入编译期常量。这是公理 A（阶段封闭性）、公理 B（三层生命周期）和公理 C（形即渲染）协同时应有的形态。
+**50 行，零样板，零 WGPU 调用，零 Pipeline 初始化代码，零 Arena 管理代码。** 布局约束内嵌于注册 API，坐标在 S1 阶段解算并嵌入编译期常量。自定义原语的逻辑直接在 S1 阶段被编织进 `process_input`。这是公理 A（阶段封闭性）、公理 B（三层生命周期）和公理 C（形即渲染）协同时，结合“可编程 GUI 编译器”能力应有的形态。
 
 ---
 
-## 8. 参考资料
+## 7. 参考资料
 
 | 资料 | 说明 |
 | :--- | :--- |
@@ -267,14 +236,4 @@ main()
 | [Sluggish (GitHub)](https://github.com/mightycow/Sluggish) | Slug 的 band-data / curve-data 纹理生成工具 |
 | [HarfBuzz (GitHub)](https://github.com/harfbuzz/harfbuzz) | 文本 shaping 引擎，用于字距调整和连字替换 |
 | [Slug JCGT Paper](https://jcgt.org/published/0006/02/02/) | Slug 算法的原始学术论文（2017） |
-
-### 4.8 Phase 4.4：可编程 GUI 编译器与自定义原语
-
-**目标**：将 Nebula 从“提供预设组件的工具库”升维为“生成组件的元系统”。
-
-**技术选型**：
-1. **API 暴露**：提供 `nebula_register_primitive` 接口，允许界面开发者在 S1 编译期安全地注入自定义交互逻辑（如 `draggable`、`scrollable`）。
-2. **宏观原语 + 正交修饰**：通过元数据驱动的 Hook 机制，实现功能闭环的子系统（如 `multiline_editable`）与正交修饰原语（如 `clipboard_aware`）的组合。
-3. **编译期静态契约**：在 `axiom_validator.lua` 中扩展校验规则，确保自定义原语的组合安全，防止字段冲突和非法的状态访问。
-
-**实施路径**：详见 `docs/PLAN_PHASE4_4.md`。
+| [V3_UNIFIED_COMPUTATION_WHITEPAPER.md](docs/V3_UNIFIED_COMPUTATION_WHITEPAPER.md) | Nebula v3：计算统一架构白皮书 |
