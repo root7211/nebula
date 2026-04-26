@@ -855,6 +855,12 @@ function nebula_app_generate(app_name)
   local reg = nebula_app_registry[app_name]
   assert(reg, ("nebula_derive_app: app '%s' not registered. Call nebula_app_begin/end first."):format(app_name))
 
+  -- ★ Phase 4.0: App 级公理校验（任务 B + 任务 C）
+  -- 在代码生成之前执行，确保元数据合法性
+  if nebula_validate_app then
+    nebula_validate_app(app_name, reg)
+  end
+
   local parts = {
     gen_app_record(app_name, reg),
     gen_app_init(app_name, reg),
