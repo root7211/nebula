@@ -369,3 +369,134 @@ global function nebula_text_hit_test(
   -- 鼠标在文本右侧
   return char_count
 end
+
+-- =============================================================================
+-- ★ Phase 4.1: Slug 文本渲染运行时支持
+--
+-- 设计哲学（公理 A）：
+--   · NebulaSlugVertex 是纯值类型，不持有任何 GPU 资源生命周期。
+--   · nebula_slug_text_build_vertices 是纯函数：输入文本字符串 + 字形表，
+--     输出顶点数组，不写入任何持久状态（L1）。
+--   · GPU 上传由调用方（TextContext:set_text）负责，符合公理 B。
+--
+-- 顶点格式（64 bytes/vertex，4 x vec4<f32>）：
+--   attr0: vec4<f32> — (pos_x, pos_y, glyph_x_min, glyph_y_min)
+--   attr1: vec4<f32> — (glyph_x_max, glyph_y_max, curve_offset, curve_count)
+--   attr2: vec4<f32> — (band_offset, band_count, ref_offset, scale)
+--   attr3: vec4<f32> — (color_r, color_g, color_b, color_a)
+--
+-- 每个字形由 2 个三角形（6 个顶点）组成，覆盖字形的 AABB 包围盒。
+-- 片段着色器通过 Slug 算法在包围盒内精确计算覆盖率。
+-- =============================================================================
+
+global NebulaSlugVertex = @record{
+  attr0: Vec4,
+  attr1: Vec4,
+  attr2: Vec4,
+  attr3: Vec4,
+}
+
+global function nebula_slug_text_build_vertices(
+  text:         cstring,
+  origin_x:     float32,
+  origin_y:     float32,
+  pixel_height: float32,
+  color:        Color,
+  glyphs:       *[0]NebulaSlugGlyph,
+  out_vertices: *[0]NebulaSlugVertex,
+  max_vertices: uint32,
+  out_width:    *float32,
+  out_height:   *float32
+): uint32
+  if text == nilptr then
+    $out_width  = 0.0
+    $out_height = 0.0
+    return 0
+  end
+
+  local FONT_UNITS: float32 = (@float32)(NEBULA_SLUG_ASCENT - NEBULA_SLUG_DESCENT)
+  local scale = pixel_height / FONT_UNITS
+  local pen_x:        float32 = origin_x
+  local vertex_count: uint32  = 0
+  local text_len  = strlen(text)
+  local text_bytes = (@*[0]uint8)(text)
+  local max_x: float32 = origin_x
+  local line_height = pixel_height
+
+  local i: csize = 0
+  while i < text_len do
+    local cp = (@cint)(text_bytes[i])
+
+    if cp == 10 or cp == 13 then
+      i = i + 1
+      goto slug_next
+    end
+
+    if cp >= NEBULA_SLUG_FIRST_CODEPOINT and cp <= NEBULA_SLUG_LAST_CODEPOINT then
+      local glyph_idx = cp - NEBULA_SLUG_FIRST_CODEPOINT
+      local glyph = glyphs[glyph_idx]
+
+      if glyph.curve_count > 0 and vertex_count + 6 <= max_vertices then
+        local gx0 = pen_x + glyph.x_min * scale
+        local gx1 = pen_x + glyph.x_max * scale
+        local gy0 = origin_y - glyph.y_max * scale
+        local gy1 = origin_y - glyph.y_min * scale
+
+        local cf = (@float32)(glyph.curve_offset)
+        local cc = (@float32)(glyph.curve_count)
+        local bf = (@float32)(glyph.band_offset)
+        local rf = (@float32)(glyph.ref_offset)
+
+        -- 三角形 1
+        out_vertices[vertex_count + 0] = NebulaSlugVertex{
+          attr0 = Vec4{ x=gx0, y=gy0, z=glyph.x_min*scale, w=glyph.y_min*scale },
+          attr1 = Vec4{ x=glyph.x_max*scale, y=glyph.y_max*scale, z=cf, w=cc },
+          attr2 = Vec4{ x=bf, y=rf, z=scale, w=0.0 },
+          attr3 = Vec4{ x=color.r, y=color.g, z=color.b, w=color.a },
+        }
+        out_vertices[vertex_count + 1] = NebulaSlugVertex{
+          attr0 = Vec4{ x=gx1, y=gy0, z=glyph.x_min*scale, w=glyph.y_min*scale },
+          attr1 = Vec4{ x=glyph.x_max*scale, y=glyph.y_max*scale, z=cf, w=cc },
+          attr2 = Vec4{ x=bf, y=rf, z=scale, w=0.0 },
+          attr3 = Vec4{ x=color.r, y=color.g, z=color.b, w=color.a },
+        }
+        out_vertices[vertex_count + 2] = NebulaSlugVertex{
+          attr0 = Vec4{ x=gx1, y=gy1, z=glyph.x_min*scale, w=glyph.y_min*scale },
+          attr1 = Vec4{ x=glyph.x_max*scale, y=glyph.y_max*scale, z=cf, w=cc },
+          attr2 = Vec4{ x=bf, y=rf, z=scale, w=0.0 },
+          attr3 = Vec4{ x=color.r, y=color.g, z=color.b, w=color.a },
+        }
+        -- 三角形 2
+        out_vertices[vertex_count + 3] = NebulaSlugVertex{
+          attr0 = Vec4{ x=gx0, y=gy0, z=glyph.x_min*scale, w=glyph.y_min*scale },
+          attr1 = Vec4{ x=glyph.x_max*scale, y=glyph.y_max*scale, z=cf, w=cc },
+          attr2 = Vec4{ x=bf, y=rf, z=scale, w=0.0 },
+          attr3 = Vec4{ x=color.r, y=color.g, z=color.b, w=color.a },
+        }
+        out_vertices[vertex_count + 4] = NebulaSlugVertex{
+          attr0 = Vec4{ x=gx1, y=gy1, z=glyph.x_min*scale, w=glyph.y_min*scale },
+          attr1 = Vec4{ x=glyph.x_max*scale, y=glyph.y_max*scale, z=cf, w=cc },
+          attr2 = Vec4{ x=bf, y=rf, z=scale, w=0.0 },
+          attr3 = Vec4{ x=color.r, y=color.g, z=color.b, w=color.a },
+        }
+        out_vertices[vertex_count + 5] = NebulaSlugVertex{
+          attr0 = Vec4{ x=gx0, y=gy1, z=glyph.x_min*scale, w=glyph.y_min*scale },
+          attr1 = Vec4{ x=glyph.x_max*scale, y=glyph.y_max*scale, z=cf, w=cc },
+          attr2 = Vec4{ x=bf, y=rf, z=scale, w=0.0 },
+          attr3 = Vec4{ x=color.r, y=color.g, z=color.b, w=color.a },
+        }
+        vertex_count = vertex_count + 6
+      end
+
+      pen_x = pen_x + glyph.advance * scale
+      if pen_x > max_x then max_x = pen_x end
+    end
+
+    ::slug_next::
+    i = i + 1
+  end
+
+  $out_width  = max_x - origin_x
+  $out_height = line_height
+  return vertex_count
+end

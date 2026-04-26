@@ -1014,6 +1014,144 @@ global ClickableState = @record{
 ##   end
 ## end
 ## 
+## -- ---- ★ Phase 4.1: Slug 文本派生器 ----
+## --
+## -- 为标注了 text_mode="slug" 的 Visual 类型生成：
+## --   (1) <T>Uniforms         —— 标准布局 record
+## --   (2) SlugTextPipeline    —— Slug 专属管线（共享，由 app_factory 注入）
+## --   (3) <T>Context          —— 包含 set_text 方法，调用 nebula_slug_text_build_vertices
+## -- =============================================================================
+## function nebula_derive_slug_text_visual(type_name)
+##   local reg = nebula_registry[type_name]
+##   assert(reg, "nebula_derive_slug_text_visual: type '" .. type_name .. "' must be annotated first via nebula_annotate")
+## 
+##   local base_fields, state_fields = nebula_parse_shape(type_name)
+##   local all_props = collect_all_props(reg, state_fields)
+##   local base = derive_base_name(type_name)
+##   local uniforms_record = base .. "Uniforms"
+##   local layout = nebula_gen_uniform_layout(type_name, {
+##     record_name      = uniforms_record,
+##     wgsl_struct_name = "Uniforms",
+##   })
+## 
+##   -- ★ Phase 4.1: 使用 Slug 着色器生成器
+##   local shader_result = nebula_compose_slug_shader({
+##     wgsl_struct  = layout.wgsl_struct,
+##     struct_name  = layout.wgsl_struct_name,
+##   })
+## 
+##   -- 查找颜色字段
+##   local color_field = nil
+##   for _, state in ipairs(reg.states) do
+##     local info = state_fields[state] and state_fields[state].text_color or nil
+##     if info then color_field = info.name break end
+##   end
+##   assert(color_field, "slug text derive requires <state>_text_color field")
+## 
+##   local max_chars   = reg.max_chars or 256
+##   local max_vertices = max_chars * 6
+##   local ctx  = base .. "Context"
+##   local lines = {}
+## 
+##   -- 生成 State 枚举和状态机
+##   local source_parts = gen_state_enum(base, reg) .. "\n\n"
+##   source_parts = source_parts .. gen_state_machine(base, reg) .. "\n\n"
+## 
+##   -- 生成 SlugTextContext record
+##   table.insert(lines, ("global %s = @record{"):format(ctx))
+##   table.insert(lines, ("  visual: %s,"):format(type_name))
+##   table.insert(lines, ("  sm:     %sStateMachine,"):format(base))
+##   table.insert(lines,  "  mesh:   NebulaTextMesh,")
+##   table.insert(lines,  "  current_text_color: Color,")
+##   table.insert(lines,  "}")
+## 
+##   table.insert(lines, ("function %s:init(vis: %s): void"):format(ctx, type_name))
+##   table.insert(lines,  "  self.visual = vis")
+##   table.insert(lines,  "  self.sm:init()")
+##   table.insert(lines,  "  self.mesh:init()")
+##   table.insert(lines, ("  self.current_text_color = vis.%s"):format(color_field))
+##   table.insert(lines,  "end")
+## 
+##   table.insert(lines, ("function %s:update(_input: *NebulaInputState, _dt: float32): void"):format(ctx))
+##   table.insert(lines, ("  self.current_text_color = self.visual.%s"):format(color_field))
+##   table.insert(lines,  "end")
+## 
+##   -- ★ Phase 4.1: set_text 调用 nebula_slug_text_build_vertices
+##   table.insert(lines, ("function %s:set_text(renderer: *NebulaRenderer, text: cstring): boolean"):format(ctx))
+##   table.insert(lines, ("  local verts: [%d]NebulaSlugVertex"):format(max_vertices))
+##   table.insert(lines,  "  local mesh_w: float32 = 0.0")
+##   table.insert(lines,  "  local mesh_h: float32 = 0.0")
+##   table.insert(lines,  "  local vertex_count = nebula_slug_text_build_vertices(")
+##   table.insert(lines,  "    text,")
+##   table.insert(lines,  "    self.visual.pos.x,")
+##   table.insert(lines,  "    self.visual.pos.y,")
+##   table.insert(lines,  "    self.visual.pixel_height,")
+##   table.insert(lines,  "    self.current_text_color,")
+##   table.insert(lines,  "    &NEBULA_SLUG_GLYPHS[0],")
+##   table.insert(lines,  "    &verts[0],")
+##   table.insert(lines, ("    (@uint32)(%d),"):format(max_vertices))
+##   table.insert(lines,  "    &mesh_w,")
+##   table.insert(lines,  "    &mesh_h")
+##   table.insert(lines,  "  )")
+##   table.insert(lines,  "  self.visual.size = Vec2{ x = mesh_w, y = mesh_h }")
+##   table.insert(lines,  "  self.mesh.width = mesh_w")
+##   table.insert(lines,  "  self.mesh.height = mesh_h")
+##   table.insert(lines,  "  local data_ptr: pointer = nilptr")
+##   table.insert(lines,  "  local data_size: csize = 0")
+##   table.insert(lines,  "  if vertex_count > 0 then")
+##   table.insert(lines,  "    data_ptr = &verts[0]")
+##   table.insert(lines,  "    data_size = (@csize)((@uint64)(vertex_count) * (@uint64)(#NebulaSlugVertex))")
+##   table.insert(lines,  "  end")
+##   table.insert(lines, ("  if not nebula_text_mesh_upload(renderer, &self.mesh, data_ptr, data_size, vertex_count, \"%s\") then return false end"):format("nebula-" .. base:lower() .. "-slug-mesh"))
+##   table.insert(lines,  "  return true")
+##   table.insert(lines,  "end")
+## 
+##   source_parts = source_parts .. table.concat(lines, "\n") .. "\n\n"
+## 
+##   -- 生成 Uniforms record 和 SlugTextPipeline
+##   local pipeline_spec = {
+##     base            = "SlugText",
+##     visual_type     = type_name,
+##     uniforms_record = "SlugTextUniforms",
+##     wgsl_source     = shader_result.source,
+##     slug_text       = true,
+##   }
+## 
+##   -- 生成 SlugTextUniforms record（视口大小等基础参数）
+##   local slug_uniforms_src = [[global SlugTextUniforms = @record{
+##   viewport: Vec2,
+##   _pad0: float32,
+##   _pad1: float32,
+## }]]
+## 
+##   print(("[derive-slug] %s: emit SlugTextContext + SlugTextPipeline (max_chars=%d)"):format(
+##     type_name, max_chars))
+## 
+##   local rec_ast = aster.parse(layout.nelua_record_source,
+##                               "<nebula_derive_slug:" .. uniforms_record .. ">")
+##   for _, stat in ipairs(rec_ast) do
+##     inject_statement(stat)
+##   end
+## 
+##   -- 注入 SlugTextUniforms
+##   local slug_uni_ast = aster.parse(slug_uniforms_src, "<nebula_derive_slug:SlugTextUniforms>")
+##   for _, stat in ipairs(slug_uni_ast) do
+##     inject_statement(stat)
+##   end
+## 
+##   -- 注入 SlugTextPipeline
+##   local slug_pipe_src = nebula_gen_pipeline_source(pipeline_spec)
+##   local slug_pipe_ast = aster.parse(slug_pipe_src, "<nebula_derive_slug:SlugTextPipeline>")
+##   for _, stat in ipairs(slug_pipe_ast) do
+##     inject_statement(stat)
+##   end
+## 
+##   local block_ast = aster.parse(source_parts, "<nebula_derive_slug:" .. type_name .. ">")
+##   for _, stat in ipairs(block_ast) do
+##     inject_statement(stat)
+##   end
+## end
+## 
 ## -- ---- 主入口：派生并 inject 到调用点 ----
 ## --
 ## -- Phase 2.3.3: 扩展 nebula_derive 在调用点额外发出：
@@ -1032,7 +1170,12 @@ global ClickableState = @record{
 ##     return nebula_derive_text_visual(type_name)
 ##   end
 ## 
-##   -- ★ Phase 3.10: 通过 NEBULA_PRIMITIVES 注册表的 pre_derive_hook 执行原语前置钩子
+##   -- ★ Phase 4.1: Slug 文本渲染路径
+##   if reg.text_mode == "slug" then
+##     return nebula_derive_slug_text_visual(type_name)
+##   end
+## 
+##   -- ★ Phase 3.10: 通过 NEBULA_PRIMITIVES 注册表的 pre_derive_hook 执行原语前置钉子
 ##   -- （替代旧的 toggleable/editable 硬编码分支）
 ##   nebula_run_pre_derive_hooks(reg, type_name, reg.primitives or {}, inject_statement, aster)
 ## 

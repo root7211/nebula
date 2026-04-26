@@ -1,0 +1,675 @@
+-- =============================================================================
+-- tools/font_preprocessor_slug.nelua
+-- Nebula GUI Compiler — Phase 4.1 (S0)
+--
+-- Slug 模式字体预处理工具：
+--   · 通过 stb_truetype 读取 TTF，提取每个字形的二次贝塞尔曲线轮廓
+--   · 将直线段转换为退化二次贝塞尔（含对角线微扰，防止 Slug 根判定失效）
+--   · 将三次贝塞尔在中点处分裂为两段二次贝塞尔
+--   · 按 Slug 算法要求，将曲线打包为水平/垂直 Band 索引结构
+--   · 导出 liberation_sans_slug_metrics.nelua（编译期常量数组）
+--
+-- 输出格式：
+--   · NebulaSlugCurve  — 每条二次贝塞尔的 3 个控制点（em 空间，font units）
+--   · NebulaSlugBand   — 每个 Band 的曲线索引列表（offset + count）
+--   · NebulaSlugGlyph  — 每个字形的 Band 起始偏移、曲线起始偏移、边界框、advance
+--
+-- 用法：
+--   mkdir -p assets/generated
+--   nelua -L src tools/font_preprocessor_slug.nelua
+-- =============================================================================
+require 'stb_truetype_bindings'
+require 'io'
+##[==[
+linklib 'm'
+cinclude [[
+#define STB_TRUETYPE_IMPLEMENTATION
+#include <stb/stb_truetype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+]]
+]==]
+global function printf(fmt: cstring, ...: cvarargs): cint <cimport, nodecl> end
+global function sqrt(x: float64): float64 <cimport, nodecl> end
+global function fabs(x: float64): float64 <cimport, nodecl> end
+global function floor(x: float64): float64 <cimport, nodecl> end
+global function ceil(x: float64): float64 <cimport, nodecl> end
+local FILE: type <cimport,cinclude'<stdio.h>',forwarddecl> = @record{}
+local function fopen(pathname: cstring, mode: cstring): *FILE <cimport,cinclude'<stdio.h>'> end
+local function fclose(fp: *FILE): cint <cimport,cinclude'<stdio.h>'> end
+local function fread(ptr: pointer, size: csize, n: csize, fp: *FILE): csize <cimport,cinclude'<stdio.h>'> end
+local function fseek(fp: *FILE, offset: clong, whence: cint): cint <cimport,cinclude'<stdio.h>'> end
+local function ftell(fp: *FILE): clong <cimport,cinclude'<stdio.h>'> end
+local function malloc(size: csize): pointer <cimport,cinclude'<stdlib.h>'> end
+local function realloc(ptr: pointer, size: csize): pointer <cimport,cinclude'<stdlib.h>'> end
+local function free(ptr: pointer): void <cimport,cinclude'<stdlib.h>'> end
+local function memset(ptr: pointer, ch: cint, count: csize): pointer <cimport,cinclude'<string.h>'> end
+
+-- =============================================================================
+-- 配置常量
+-- =============================================================================
+local FONT_PATH <const>       = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+local OUTPUT_METRICS <const>  = "assets/generated/liberation_sans_slug_metrics.nelua"
+local FIRST_CODEPOINT <comptime> = 32    -- ASCII space
+local LAST_CODEPOINT  <comptime> = 126   -- ASCII ~
+local GLYPH_COUNT     <comptime> = LAST_CODEPOINT - FIRST_CODEPOINT + 1
+local BAND_COUNT      <comptime> = 8     -- 每轴 8 个 Band（水平 + 垂直）
+local LINE_EPSILON    <const>    = 0.125 -- 对角线微扰量（防止退化二次贝塞尔失效）
+local MAX_CURVES_PER_GLYPH <comptime> = 512
+local MAX_BANDS_PER_GLYPH  <comptime> = BAND_COUNT * 2  -- h-bands + v-bands
+local MAX_BAND_CURVE_REFS  <comptime> = MAX_CURVES_PER_GLYPH * 4  -- 每条曲线最多跨 4 个 band
+
+-- =============================================================================
+-- 数据结构
+-- =============================================================================
+-- 二次贝塞尔曲线（em 空间，font units）
+local SlugCurve = @record{
+  p0x: float32, p0y: float32,  -- 起点
+  p1x: float32, p1y: float32,  -- 控制点
+  p2x: float32, p2y: float32,  -- 终点
+}
+
+-- Band 中的曲线引用（曲线在本字形曲线数组中的局部索引）
+local BandCurveRef = @record{
+  curve_idx: uint16,
+}
+
+-- 单个 Band 的元数据
+local BandMeta = @record{
+  offset: uint32,  -- 在全局 band_curve_refs 数组中的偏移
+  count:  uint16,  -- 该 Band 包含的曲线数量
+}
+
+-- 字形元数据
+local GlyphMeta = @record{
+  codepoint:    cint,
+  curve_offset: uint32,   -- 在全局 curves 数组中的偏移
+  curve_count:  uint16,   -- 本字形的曲线数量
+  band_offset:  uint32,   -- 在全局 band_meta 数组中的偏移（共 BAND_COUNT*2 个 BandMeta）
+  ref_offset:   uint32,   -- 在全局 band_curve_refs 数组中的偏移（本字形的 refs 起始）
+  x_min: float32, y_min: float32,
+  x_max: float32, y_max: float32,
+  advance: float32,
+  lsb:    float32,
+}
+
+-- =============================================================================
+-- 辅助函数
+-- =============================================================================
+local function load_file(path: cstring): (*cuchar, csize)
+  local fp = fopen(path, "rb")
+  if fp == nilptr then return nilptr, 0 end
+  fseek(fp, 0, 2)
+  local sz = ftell(fp)
+  if sz <= 0 then fclose(fp) return nilptr, 0 end
+  fseek(fp, 0, 0)
+  local mem = (@*cuchar)(malloc((@csize)(sz)))
+  if mem == nilptr then fclose(fp) return nilptr, 0 end
+  local nread = fread(mem, 1, (@csize)(sz), fp)
+  fclose(fp)
+  if nread ~= (@csize)(sz) then free(mem) return nilptr, 0 end
+  return mem, (@csize)(sz)
+end
+
+-- 将直线段转换为退化二次贝塞尔（含对角线微扰）
+local function line_to_quad(x0: float32, y0: float32, x1: float32, y1: float32): SlugCurve
+  local mx = (x0 + x1) * 0.5
+  local my = (y0 + y1) * 0.5
+  local dx = x1 - x0
+  local dy = y1 - y0
+  -- 对角线微扰：防止完全退化的二次贝塞尔在 Slug 根判定中失效
+  if (@float64)(fabs((@float64)(dx))) > 0.1 and (@float64)(fabs((@float64)(dy))) > 0.1 then
+    local length = (@float32)(sqrt((@float64)(dx * dx + dy * dy)))
+    if length > 0.0 then
+      local inv = LINE_EPSILON / length
+      -- 将控制点沿法线方向偏移一个微小量
+      mx = mx - dy * inv
+      my = my + dx * inv
+    end
+  end
+  return SlugCurve{ p0x=x0, p0y=y0, p1x=mx, p1y=my, p2x=x1, p2y=y1 }
+end
+
+-- =============================================================================
+-- 主处理函数：提取单个字形的曲线
+-- 返回写入 out_curves 的曲线数量
+-- =============================================================================
+local function extract_glyph_curves(
+  font:       *stbtt_fontinfo,
+  glyph_idx:  cint,
+  out_curves: *[MAX_CURVES_PER_GLYPH]SlugCurve
+): uint16
+  local verts: *stbtt_vertex = nilptr
+  local nv = stbtt_GetGlyphShape(font, glyph_idx, &verts)
+  if nv <= 0 or verts == nilptr then
+    return 0
+  end
+  local count: uint16 = 0
+  local cur_x: float32 = 0.0
+  local cur_y: float32 = 0.0
+  local start_x: float32 = 0.0
+  local start_y: float32 = 0.0
+  local i: cint = 0
+  while i < nv do
+    local vptr = (@*[0]stbtt_vertex)(verts)
+    local v = vptr[i]
+    local vx = (@float32)(v.x)
+    local vy = (@float32)(v.y)
+    if v.type == STBTT_vmove then
+      -- 移动到新轮廓起点（不生成曲线）
+      cur_x = vx
+      cur_y = vy
+      start_x = vx
+      start_y = vy
+    elseif v.type == STBTT_vline then
+      -- 直线段 → 退化二次贝塞尔
+      local dx = vx - cur_x
+      local dy = vy - cur_y
+      if (@float64)(fabs((@float64)(dx))) > 0.1 or (@float64)(fabs((@float64)(dy))) > 0.1 then
+        if count < MAX_CURVES_PER_GLYPH then
+          out_curves[count] = line_to_quad(cur_x, cur_y, vx, vy)
+          count = count + 1
+        end
+      end
+      cur_x = vx
+      cur_y = vy
+    elseif v.type == STBTT_vcurve then
+      -- 二次贝塞尔（直接使用）
+      if count < MAX_CURVES_PER_GLYPH then
+        out_curves[count] = SlugCurve{
+          p0x = cur_x, p0y = cur_y,
+          p1x = (@float32)(v.cx), p1y = (@float32)(v.cy),
+          p2x = vx, p2y = vy,
+        }
+        count = count + 1
+      end
+      cur_x = vx
+      cur_y = vy
+    elseif v.type == STBTT_vcubic then
+      -- 三次贝塞尔 → 在中点处分裂为两段二次贝塞尔
+      local cx1 = (@float32)(v.cx)
+      local cy1 = (@float32)(v.cy)
+      local cx2 = (@float32)(v.cx1)
+      local cy2 = (@float32)(v.cy1)
+      -- 计算中间点（de Casteljau 细分）
+      local m01x = (cur_x + cx1) * 0.5
+      local m01y = (cur_y + cy1) * 0.5
+      local m12x = (cx1 + cx2) * 0.5
+      local m12y = (cy1 + cy2) * 0.5
+      local m23x = (cx2 + vx) * 0.5
+      local m23y = (cy2 + vy) * 0.5
+      local m012x = (m01x + m12x) * 0.5
+      local m012y = (m01y + m12y) * 0.5
+      local m123x = (m12x + m23x) * 0.5
+      local m123y = (m12y + m23y) * 0.5
+      local midx = (m012x + m123x) * 0.5
+      local midy = (m012y + m123y) * 0.5
+      -- 第一段
+      if count < MAX_CURVES_PER_GLYPH then
+        out_curves[count] = SlugCurve{
+          p0x = cur_x, p0y = cur_y,
+          p1x = m01x,  p1y = m01y,
+          p2x = midx,  p2y = midy,
+        }
+        count = count + 1
+      end
+      -- 第二段
+      if count < MAX_CURVES_PER_GLYPH then
+        out_curves[count] = SlugCurve{
+          p0x = midx,  p0y = midy,
+          p1x = m123x, p1y = m123y,
+          p2x = vx,    p2y = vy,
+        }
+        count = count + 1
+      end
+      cur_x = vx
+      cur_y = vy
+    end
+    i = i + 1
+  end
+  stbtt_FreeShape(font, verts)
+  return count
+end
+
+-- =============================================================================
+-- Band 构建：将曲线按水平/垂直 Band 分区
+-- h-bands: 按 y 轴分区（用于水平扫描线）
+-- v-bands: 按 x 轴分区（用于垂直扫描线）
+-- =============================================================================
+local function build_bands(
+  curves:     *[MAX_CURVES_PER_GLYPH]SlugCurve,
+  ncurves:    uint16,
+  x_min: float32, y_min: float32,
+  x_max: float32, y_max: float32,
+  -- 输出：每个 band 的曲线索引列表（临时，栈上分配）
+  h_band_counts: *[BAND_COUNT]uint16,
+  h_band_refs:   *[BAND_COUNT][MAX_CURVES_PER_GLYPH]uint16,
+  v_band_counts: *[BAND_COUNT]uint16,
+  v_band_refs:   *[BAND_COUNT][MAX_CURVES_PER_GLYPH]uint16
+): void
+  local width  = x_max - x_min
+  local height = y_max - y_min
+  local i: uint16 = 0
+  while i < ncurves do
+    local c = curves[i]
+    -- 计算曲线的 AABB
+    local cy_min = c.p0y
+    if c.p1y < cy_min then cy_min = c.p1y end
+    if c.p2y < cy_min then cy_min = c.p2y end
+    local cy_max = c.p0y
+    if c.p1y > cy_max then cy_max = c.p1y end
+    if c.p2y > cy_max then cy_max = c.p2y end
+    local cx_min = c.p0x
+    if c.p1x < cx_min then cx_min = c.p1x end
+    if c.p2x < cx_min then cx_min = c.p2x end
+    local cx_max = c.p0x
+    if c.p1x > cx_max then cx_max = c.p1x end
+    if c.p2x > cx_max then cx_max = c.p2x end
+    -- 分配到水平 Band（按 y 轴）
+    if height > 0.0 then
+      local b0 = (@cint)(floor((@float64)((cy_min - y_min) / height * BAND_COUNT)))
+      local b1 = (@cint)(floor((@float64)((cy_max - y_min) / height * BAND_COUNT)))
+      if b0 < 0 then b0 = 0 end
+      if b1 >= BAND_COUNT then b1 = BAND_COUNT - 1 end
+      local b = b0
+      while b <= b1 do
+        local cnt = h_band_counts[b]
+        if cnt < MAX_CURVES_PER_GLYPH then
+          h_band_refs[b][cnt] = i
+          h_band_counts[b] = cnt + 1
+        end
+        b = b + 1
+      end
+    end
+    -- 分配到垂直 Band（按 x 轴）
+    if width > 0.0 then
+      local b0 = (@cint)(floor((@float64)((cx_min - x_min) / width * BAND_COUNT)))
+      local b1 = (@cint)(floor((@float64)((cx_max - x_min) / width * BAND_COUNT)))
+      if b0 < 0 then b0 = 0 end
+      if b1 >= BAND_COUNT then b1 = BAND_COUNT - 1 end
+      local b = b0
+      while b <= b1 do
+        local cnt = v_band_counts[b]
+        if cnt < MAX_CURVES_PER_GLYPH then
+          v_band_refs[b][cnt] = i
+          v_band_counts[b] = cnt + 1
+        end
+        b = b + 1
+      end
+    end
+    i = i + 1
+  end
+end
+
+-- =============================================================================
+-- 辅助：float32 的最大值（用于排序比较）
+-- =============================================================================
+local function max3f(a: float32, b: float32, c: float32): float32
+  local m = a
+  if b > m then m = b end
+  if c > m then m = c end
+  return m
+end
+
+-- =============================================================================
+-- 主函数
+-- =============================================================================
+local function main(): cint
+  -- 加载字体
+  local font_data, font_size = load_file(FONT_PATH)
+  if font_data == nilptr or font_size == 0 then
+    printf("slug_preprocessor: failed to load font: %s\n", FONT_PATH)
+    return 1
+  end
+  local font: stbtt_fontinfo
+  local offset = stbtt_GetFontOffsetForIndex(font_data, 0)
+  if offset < 0 then
+    printf("slug_preprocessor: invalid TTF offset\n")
+    free(font_data)
+    return 1
+  end
+  if stbtt_InitFont(&font, font_data, offset) == 0 then
+    printf("slug_preprocessor: stbtt_InitFont failed\n")
+    free(font_data)
+    return 1
+  end
+  -- 获取字体全局度量（em 空间，font units）
+  local ascent: cint = 0
+  local descent: cint = 0
+  local line_gap: cint = 0
+  stbtt_GetFontVMetrics(&font, &ascent, &descent, &line_gap)
+
+  -- =========================================================================
+  -- 第一遍：提取所有字形的曲线和 Band 数据，统计总量
+  -- =========================================================================
+  -- 全局曲线数组（动态增长）
+  local total_curves:   uint32 = 0
+  local total_band_refs: uint32 = 0
+
+  -- 每个字形的元数据
+  local glyph_metas: [GLYPH_COUNT]GlyphMeta
+
+  -- 临时存储每个字形的曲线（栈上）
+  local tmp_curves: [MAX_CURVES_PER_GLYPH]SlugCurve
+  local h_band_counts: [BAND_COUNT]uint16
+  local h_band_refs:   [BAND_COUNT][MAX_CURVES_PER_GLYPH]uint16
+  local v_band_counts: [BAND_COUNT]uint16
+  local v_band_refs:   [BAND_COUNT][MAX_CURVES_PER_GLYPH]uint16
+
+  -- 全局曲线缓冲区（堆分配）
+  local MAX_TOTAL_CURVES <comptime> = GLYPH_COUNT * MAX_CURVES_PER_GLYPH
+  local all_curves = (@*[0]SlugCurve)(malloc(MAX_TOTAL_CURVES * #SlugCurve))
+  if all_curves == nilptr then
+    printf("slug_preprocessor: out of memory (curves)\n")
+    free(font_data)
+    return 1
+  end
+
+  -- 全局 BandMeta 缓冲区（每个字形有 BAND_COUNT*2 个 BandMeta）
+  local MAX_TOTAL_BAND_METAS <comptime> = GLYPH_COUNT * BAND_COUNT * 2
+  local all_band_metas = (@*[0]BandMeta)(malloc(MAX_TOTAL_BAND_METAS * #BandMeta))
+  if all_band_metas == nilptr then
+    printf("slug_preprocessor: out of memory (band_metas)\n")
+    free(all_curves)
+    free(font_data)
+    return 1
+  end
+
+  -- 全局 BandCurveRef 缓冲区
+  local MAX_TOTAL_REFS <comptime> = GLYPH_COUNT * MAX_BAND_CURVE_REFS
+  local all_refs = (@*[0]BandCurveRef)(malloc(MAX_TOTAL_REFS * #BandCurveRef))
+  if all_refs == nilptr then
+    printf("slug_preprocessor: out of memory (refs)\n")
+    free(all_band_metas)
+    free(all_curves)
+    free(font_data)
+    return 1
+  end
+
+  local total_band_metas: uint32 = 0
+
+  for gi = 0, GLYPH_COUNT - 1 do
+    local cp: cint = FIRST_CODEPOINT + gi
+    local glyph_idx = stbtt_FindGlyphIndex(&font, cp)
+
+    -- 清零临时 Band 计数
+    local b = 0
+    while b < BAND_COUNT do
+      h_band_counts[b] = 0
+      v_band_counts[b] = 0
+      b = b + 1
+    end
+
+    -- 提取曲线
+    local ncurves = extract_glyph_curves(&font, glyph_idx, &tmp_curves)
+
+    -- 获取边界框（em 空间）
+    local bx0: cint = 0
+    local by0: cint = 0
+    local bx1: cint = 0
+    local by1: cint = 0
+    stbtt_GetGlyphBox(&font, glyph_idx, &bx0, &by0, &bx1, &by1)
+    local x_min = (@float32)(bx0)
+    local y_min = (@float32)(by0)
+    local x_max = (@float32)(bx1)
+    local y_max = (@float32)(by1)
+
+    -- 获取 advance 和 lsb（em 空间）
+    local adv: cint = 0
+    local lsb: cint = 0
+    stbtt_GetGlyphHMetrics(&font, glyph_idx, &adv, &lsb)
+
+    -- 记录字形元数据
+    glyph_metas[gi] = GlyphMeta{
+      codepoint    = cp,
+      curve_offset = total_curves,
+      curve_count  = ncurves,
+      band_offset  = total_band_metas,
+      ref_offset   = total_band_refs,
+      x_min = x_min, y_min = y_min,
+      x_max = x_max, y_max = y_max,
+      advance = (@float32)(adv),
+      lsb     = (@float32)(lsb),
+    }
+
+    -- 将曲线复制到全局数组
+    local ci: uint16 = 0
+    while ci < ncurves do
+      all_curves[total_curves + ci] = tmp_curves[ci]
+      ci = ci + 1
+    end
+    total_curves = total_curves + ncurves
+
+    -- 构建 Band 分区
+    if ncurves > 0 then
+      build_bands(
+        &tmp_curves, ncurves,
+        x_min, y_min, x_max, y_max,
+        &h_band_counts, &h_band_refs,
+        &v_band_counts, &v_band_refs
+      )
+    end
+
+    -- 将 Band 元数据和引用写入全局数组
+    -- h-bands 先，v-bands 后（与 Slug 着色器约定一致）
+    local band_ref_base = total_band_refs
+    -- 先计算所有 band 的 offset（相对于本字形 ref_offset 的偏移）
+    local local_ref_offset: uint32 = 0
+    local b2 = 0
+    while b2 < BAND_COUNT do
+      -- h-band
+      all_band_metas[total_band_metas] = BandMeta{
+        offset = band_ref_base + local_ref_offset,
+        count  = h_band_counts[b2],
+      }
+      total_band_metas = total_band_metas + 1
+      local_ref_offset = local_ref_offset + h_band_counts[b2]
+      b2 = b2 + 1
+    end
+    b2 = 0
+    while b2 < BAND_COUNT do
+      -- v-band
+      all_band_metas[total_band_metas] = BandMeta{
+        offset = band_ref_base + local_ref_offset,
+        count  = v_band_counts[b2],
+      }
+      total_band_metas = total_band_metas + 1
+      local_ref_offset = local_ref_offset + v_band_counts[b2]
+      b2 = b2 + 1
+    end
+
+    -- 写入 h-band 曲线引用（按 max_x 降序排序，优化 Slug 早退）
+    b2 = 0
+    while b2 < BAND_COUNT do
+      -- 对 h_band_refs[b2] 按曲线 max_x 降序排序（插入排序，数量小）
+      local cnt = (@cint)(h_band_counts[b2])
+      local j = 1
+      while j < cnt do
+        local key = h_band_refs[b2][j]
+        local key_maxx = max3f(
+          tmp_curves[key].p0x,
+          tmp_curves[key].p1x,
+          tmp_curves[key].p2x
+        )
+        local k = j - 1
+        while k >= 0 do
+          local ref_k = h_band_refs[b2][k]
+          local maxk = max3f(
+            tmp_curves[ref_k].p0x,
+            tmp_curves[ref_k].p1x,
+            tmp_curves[ref_k].p2x
+          )
+          if maxk >= key_maxx then break end
+          h_band_refs[b2][k + 1] = h_band_refs[b2][k]
+          k = k - 1
+        end
+        h_band_refs[b2][k + 1] = key
+        j = j + 1
+      end
+      -- 写入全局 refs
+      local r = 0
+      while r < cnt do
+        all_refs[total_band_refs] = BandCurveRef{
+          curve_idx = (@uint16)(glyph_metas[gi].curve_offset + h_band_refs[b2][r])
+        }
+        total_band_refs = total_band_refs + 1
+        r = r + 1
+      end
+      b2 = b2 + 1
+    end
+
+    -- 写入 v-band 曲线引用（按 max_y 降序排序）
+    b2 = 0
+    while b2 < BAND_COUNT do
+      local cnt = (@cint)(v_band_counts[b2])
+      local j = 1
+      while j < cnt do
+        local key = v_band_refs[b2][j]
+        local key_maxy = max3f(
+          tmp_curves[key].p0y,
+          tmp_curves[key].p1y,
+          tmp_curves[key].p2y
+        )
+        local k = j - 1
+        while k >= 0 do
+          local ref_k = v_band_refs[b2][k]
+          local maxk = max3f(
+            tmp_curves[ref_k].p0y,
+            tmp_curves[ref_k].p1y,
+            tmp_curves[ref_k].p2y
+          )
+          if maxk >= key_maxy then break end
+          v_band_refs[b2][k + 1] = v_band_refs[b2][k]
+          k = k - 1
+        end
+        v_band_refs[b2][k + 1] = key
+        j = j + 1
+      end
+      local r = 0
+      while r < cnt do
+        all_refs[total_band_refs] = BandCurveRef{
+          curve_idx = (@uint16)(glyph_metas[gi].curve_offset + v_band_refs[b2][r])
+        }
+        total_band_refs = total_band_refs + 1
+        r = r + 1
+      end
+      b2 = b2 + 1
+    end
+  end
+
+  printf("slug_preprocessor: total_curves=%d total_band_metas=%d total_refs=%d\n",
+    (@cint)(total_curves), (@cint)(total_band_metas), (@cint)(total_band_refs))
+
+  -- =========================================================================
+  -- 第二遍：生成 Nelua 源文件
+  -- =========================================================================
+  local f = io.open(OUTPUT_METRICS, "w")
+  if not f then
+    printf("slug_preprocessor: failed to open output: %s\n", OUTPUT_METRICS)
+    free(all_refs)
+    free(all_band_metas)
+    free(all_curves)
+    free(font_data)
+    return 1
+  end
+
+  f:write("-- Auto-generated by tools/font_preprocessor_slug.nelua (Phase 4.1)\n")
+  f:write("-- DO NOT EDIT — regenerate with: nelua -L src tools/font_preprocessor_slug.nelua\n\n")
+
+  -- 全局常量
+  f:write(("global NEBULA_SLUG_FONT_PATH <const> = \"%s\"\n"):format(FONT_PATH))
+  f:write(("global NEBULA_SLUG_FIRST_CODEPOINT <const> = %d\n"):format(FIRST_CODEPOINT))
+  f:write(("global NEBULA_SLUG_LAST_CODEPOINT  <const> = %d\n"):format(LAST_CODEPOINT))
+  f:write(("global NEBULA_SLUG_GLYPH_COUNT     <const> = %d\n"):format(GLYPH_COUNT))
+  f:write(("global NEBULA_SLUG_BAND_COUNT       <const> = %d\n"):format(BAND_COUNT))
+  f:write(("global NEBULA_SLUG_ASCENT           <const> = %d\n"):format(ascent))
+  f:write(("global NEBULA_SLUG_DESCENT          <const> = %d\n"):format(descent))
+  f:write(("global NEBULA_SLUG_LINE_GAP         <const> = %d\n"):format(line_gap))
+  f:write(("global NEBULA_SLUG_TOTAL_CURVES     <const> = %d\n"):format((@cint)(total_curves)))
+  f:write(("global NEBULA_SLUG_TOTAL_BAND_METAS <const> = %d\n"):format((@cint)(total_band_metas)))
+  f:write(("global NEBULA_SLUG_TOTAL_BAND_REFS  <const> = %d\n\n"):format((@cint)(total_band_refs)))
+
+  -- NebulaSlugCurve 类型定义
+  f:write("global NebulaSlugCurve = @record{\n")
+  f:write("  p0x: float32, p0y: float32,\n")
+  f:write("  p1x: float32, p1y: float32,\n")
+  f:write("  p2x: float32, p2y: float32,\n")
+  f:write("}\n\n")
+
+  -- NebulaSlugBandMeta 类型定义
+  f:write("global NebulaSlugBandMeta = @record{\n")
+  f:write("  offset: uint32,\n")
+  f:write("  count:  uint16,\n")
+  f:write("}\n\n")
+
+  -- NebulaSlugGlyph 类型定义
+  f:write("global NebulaSlugGlyph = @record{\n")
+  f:write("  codepoint:    cint,\n")
+  f:write("  curve_offset: uint32,\n")
+  f:write("  curve_count:  uint16,\n")
+  f:write("  band_offset:  uint32,\n")
+  f:write("  ref_offset:   uint32,\n")
+  f:write("  x_min: float32, y_min: float32,\n")
+  f:write("  x_max: float32, y_max: float32,\n")
+  f:write("  advance: float32,\n")
+  f:write("  lsb:     float32,\n")
+  f:write("}\n\n")
+
+  -- 曲线数组
+  f:write(("global NEBULA_SLUG_CURVES: [%d]NebulaSlugCurve <const> = {\n"):format((@cint)(total_curves)))
+  local ci: uint32 = 0
+  while ci < total_curves do
+    local c = all_curves[ci]
+    f:write(("  { p0x=%.4f, p0y=%.4f, p1x=%.4f, p1y=%.4f, p2x=%.4f, p2y=%.4f },\n"):format(
+      c.p0x, c.p0y, c.p1x, c.p1y, c.p2x, c.p2y))
+    ci = ci + 1
+  end
+  f:write("}\n\n")
+
+  -- BandMeta 数组
+  f:write(("global NEBULA_SLUG_BAND_METAS: [%d]NebulaSlugBandMeta <const> = {\n"):format((@cint)(total_band_metas)))
+  local bmi: uint32 = 0
+  while bmi < total_band_metas do
+    local bm = all_band_metas[bmi]
+    f:write(("  { offset=%d, count=%d },\n"):format((@cint)(bm.offset), (@cint)(bm.count)))
+    bmi = bmi + 1
+  end
+  f:write("}\n\n")
+
+  -- BandCurveRef 数组
+  f:write(("global NEBULA_SLUG_BAND_REFS: [%d]uint16 <const> = {\n"):format((@cint)(total_band_refs)))
+  local ri: uint32 = 0
+  while ri < total_band_refs do
+    f:write(("  %d,\n"):format((@cint)(all_refs[ri].curve_idx)))
+    ri = ri + 1
+  end
+  f:write("}\n\n")
+
+  -- 字形元数据数组
+  f:write(("global NEBULA_SLUG_GLYPHS: [%d]NebulaSlugGlyph <const> = {\n"):format(GLYPH_COUNT))
+  for gi = 0, GLYPH_COUNT - 1 do
+    local g = glyph_metas[gi]
+    f:write(("  { codepoint=%d, curve_offset=%d, curve_count=%d, band_offset=%d, ref_offset=%d, x_min=%.2f, y_min=%.2f, x_max=%.2f, y_max=%.2f, advance=%.2f, lsb=%.2f },\n"):format(
+      g.codepoint, (@cint)(g.curve_offset), (@cint)(g.curve_count),
+      (@cint)(g.band_offset), (@cint)(g.ref_offset),
+      g.x_min, g.y_min, g.x_max, g.y_max,
+      g.advance, g.lsb))
+  end
+  f:write("}\n")
+  f:close()
+
+  printf("slug_preprocessor: loaded %s (%ld bytes)\n", FONT_PATH, (@clong)(font_size))
+  printf("slug_preprocessor: generated Slug metrics -> %s\n", OUTPUT_METRICS)
+  printf("slug_preprocessor: glyphs=%d curves=%d band_metas=%d band_refs=%d\n",
+    GLYPH_COUNT, (@cint)(total_curves), (@cint)(total_band_metas), (@cint)(total_band_refs))
+
+  free(all_refs)
+  free(all_band_metas)
+  free(all_curves)
+  free(font_data)
+  return 0
+end
+
+main()

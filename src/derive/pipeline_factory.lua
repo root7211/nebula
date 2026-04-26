@@ -645,8 +645,119 @@ end
 
 
 
--- [gen_pipeline_instanced 已在 Phase 3.7 中删除]
+--- [gen_pipeline_instanced 已在 Phase 3.7 中删除]
 -- 请使用 gen_pipeline_standard_instanced（通过 nebula_derive 自动派生）
+
+-- =============================================================================
+-- ★ Phase 4.1: Slug 文本管线生成（必须在 nebula_gen_pipeline_source 之前定义）
+--
+-- 生成支持 Slug 算法的 <T>Pipeline 源码。
+-- 绑定布局：
+--   Binding 0: Uniform Buffer (视口大小等)
+--   Binding 1: Storage Buffer (曲线数据，只读)
+--   Binding 2: Storage Buffer (Band 元数据，只读)
+--   Binding 3: Storage Buffer (Band 曲线引用索引，只读)
+-- 顶点格式： NebulaSlugVertex (4 x vec4<f32> = 64 bytes/vertex)
+-- =============================================================================
+local function gen_pipeline_slug_text(base, uniforms_record, wgsl_source)
+  local pipe = base .. "Pipeline"
+  local wgsl_const = "NEBULA_SLUG_WGSL_" .. base:upper()
+  local lines = {}
+  local function emit(s) table.insert(lines, s) end
+
+  emit(("-- === Derived pipeline: %s (uniforms=%s, slug_text=true) ==="):format(pipe, uniforms_record))
+  emit(("global %s = @record{"):format(pipe))
+  emit("  pipeline:         WGPURenderPipeline,")
+  emit("  bind_layout:      WGPUBindGroupLayout,")
+  emit("  uniform_buf:      WGPUBuffer,")
+  emit("  curve_buf:        WGPUBuffer,")
+  emit("  band_meta_buf:    WGPUBuffer,")
+  emit("  band_ref_buf:     WGPUBuffer,")
+  emit("  bind_group:       WGPUBindGroup,")
+  emit("  vertex_buf:       WGPUBuffer,")
+  emit("  vertex_buf_size:  uint64,")
+  emit("  vertex_count:     uint32,")
+  emit("}")
+
+  emit(("local %s <comptime> = %s"):format(wgsl_const, escape_to_long_bracket(wgsl_source)))
+
+  -- init
+  emit(("function %s:init(renderer: *NebulaRenderer): boolean"):format(pipe))
+  emit(("  if not nebula_create_uniform_buffer(&self.uniform_buf, renderer, (@csize)(#%s), \"nebula-%s-slug-ubuf\") then return false end"):format(uniforms_record, base:lower()))
+  emit("  local bgl_entries: [4]WGPUBindGroupLayoutEntry")
+  emit("  nebula_bgl_entry_uniform(&bgl_entries[0], 0)")
+  emit("  nebula_bgl_entry_storage_ro(&bgl_entries[1], 1)")
+  emit("  nebula_bgl_entry_storage_ro(&bgl_entries[2], 2)")
+  emit("  nebula_bgl_entry_storage_ro(&bgl_entries[3], 3)")
+  emit(("  self.bind_layout = nebula_create_bind_group_layout(renderer, &bgl_entries[0], 4, \"nebula-%s-slug-bgl\")"):format(base:lower()))
+  emit("  if self.bind_layout == nilptr then return false end")
+  emit("  local attrs: [4]WGPUVertexAttribute")
+  emit("  local vlayout: WGPUVertexBufferLayout")
+  emit("  nebula_init_slug_vertex_layout(&vlayout, &attrs[0])")
+  emit(("  self.pipeline = nebula_create_render_pipeline_with_layout(renderer, self.bind_layout, %s, #%s, renderer.format, &vlayout, \"nebula-%s-slug-pipeline\")"):format(wgsl_const, wgsl_const, base:lower()))
+  emit("  if self.pipeline == nilptr then return false end")
+  emit("  self.bind_group = nilptr")
+  emit("  self.vertex_buf = nilptr")
+  emit("  self.vertex_buf_size = 0")
+  emit("  self.vertex_count = 0")
+  emit("  self.curve_buf = nilptr")
+  emit("  self.band_meta_buf = nilptr")
+  emit("  self.band_ref_buf = nilptr")
+  emit(("  printf(\"wgpu: %s slug text pipeline created\\n\")"):format(base:lower()))
+  emit("  return true")
+  emit("end")
+
+  -- update_uniforms
+  emit(("function %s:update_uniforms(renderer: *NebulaRenderer, uniforms: *%s): void"):format(pipe, uniforms_record))
+  emit(("  wgpuQueueWriteBuffer(renderer.queue, self.uniform_buf, 0, uniforms, #%s)"):format(uniforms_record))
+  emit("end")
+
+  -- upload_slug_buffers
+  emit(("function %s:upload_slug_buffers(renderer: *NebulaRenderer, curves: pointer, curves_size: csize, band_metas: pointer, band_metas_size: csize, band_refs: pointer, band_refs_size: csize): boolean"):format(pipe))
+  emit(("  if not nebula_create_storage_buffer(&self.curve_buf, renderer, curves, curves_size, \"nebula-%s-slug-curves\") then return false end"):format(base:lower()))
+  emit(("  if not nebula_create_storage_buffer(&self.band_meta_buf, renderer, band_metas, band_metas_size, \"nebula-%s-slug-bands\") then return false end"):format(base:lower()))
+  emit(("  if not nebula_create_storage_buffer(&self.band_ref_buf, renderer, band_refs, band_refs_size, \"nebula-%s-slug-refs\") then return false end"):format(base:lower()))
+  emit("  return true")
+  emit("end")
+
+  -- update_slug_bind_group
+  emit(("function %s:update_slug_bind_group(renderer: *NebulaRenderer): boolean"):format(pipe))
+  emit("  local entries: [4]WGPUBindGroupEntry")
+  emit("  nebula_bge_buffer(&entries[0], 0, self.uniform_buf, 0, wgpuBufferGetSize(self.uniform_buf))")
+  emit("  nebula_bge_buffer(&entries[1], 1, self.curve_buf, 0, wgpuBufferGetSize(self.curve_buf))")
+  emit("  nebula_bge_buffer(&entries[2], 2, self.band_meta_buf, 0, wgpuBufferGetSize(self.band_meta_buf))")
+  emit("  nebula_bge_buffer(&entries[3], 3, self.band_ref_buf, 0, wgpuBufferGetSize(self.band_ref_buf))")
+  emit(("  self.bind_group = nebula_create_bind_group(renderer, self.bind_layout, &entries[0], 4, \"nebula-%s-slug-bg\")"):format(base:lower()))
+  emit("  return self.bind_group ~= nilptr")
+  emit("end")
+
+  -- upload_vertices
+  emit(("function %s:upload_vertices(renderer: *NebulaRenderer, data: pointer, size: csize, vertex_count: uint32): boolean"):format(pipe))
+  emit("  if self.vertex_buf ~= nilptr and self.vertex_buf_size < (@uint64)(size) then")
+  emit("    wgpuBufferRelease(self.vertex_buf)")
+  emit("    self.vertex_buf = nilptr")
+  emit("  end")
+  emit("  if self.vertex_buf == nilptr then")
+  emit(("    if not nebula_create_vertex_buffer(&self.vertex_buf, renderer, data, size, \"nebula-%s-slug-vbuf\") then return false end"):format(base:lower()))
+  emit("    self.vertex_buf_size = (@uint64)(size)")
+  emit("  elseif data ~= nilptr and size > 0 then")
+  emit("    wgpuQueueWriteBuffer(renderer.queue, self.vertex_buf, 0, data, size)")
+  emit("  end")
+  emit("  self.vertex_count = vertex_count")
+  emit("  return true")
+  emit("end")
+
+  -- draw
+  emit(("function %s:draw(pass: WGPURenderPassEncoder): void"):format(pipe))
+  emit("  if self.bind_group == nilptr or self.vertex_buf == nilptr or self.vertex_count == 0 then return end")
+  emit("  wgpuRenderPassEncoderSetPipeline(pass, self.pipeline)")
+  emit("  wgpuRenderPassEncoderSetBindGroup(pass, 0, self.bind_group, 0, nilptr)")
+  emit("  wgpuRenderPassEncoderSetVertexBuffer(pass, 0, self.vertex_buf, 0, self.vertex_buf_size)")
+  emit("  wgpuRenderPassEncoderDraw(pass, self.vertex_count, 1, 0, 0)")
+  emit("end")
+
+  return table.concat(lines, "\n")
+end
 
 -- =============================================================================
 -- 主入口：生成完整的 <T>Pipeline 源码
@@ -677,6 +788,10 @@ function nebula_gen_pipeline_source(spec)
     -- 文本 SDF 路径
     assert(spec.wgsl_source, "nebula_gen_pipeline_source: wgsl_source required for textured path")
     return gen_pipeline_textured_vertex(spec.base, spec.uniforms_record, spec.wgsl_source)
+  elseif spec.slug_text then
+    -- ★ Phase 4.1: Slug 文本管线路径
+    assert(spec.wgsl_source, "nebula_gen_pipeline_source: wgsl_source required for slug_text path")
+    return gen_pipeline_slug_text(spec.base, spec.uniforms_record, spec.wgsl_source)
   else
     error("nebula_gen_pipeline_source: unrecognized spec for '" .. tostring(spec.base) .. "'. " ..
           "All standard Visuals must use standard_instanced path (set via nebula_derive). " ..
@@ -736,4 +851,4 @@ end
 
 
 -- 返回模块标识
-return "nebula_pipeline_factory_v0.7_phase3.7"
+return "nebula_pipeline_factory_v0.8_phase4.1"

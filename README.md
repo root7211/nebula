@@ -8,15 +8,15 @@ Nebula 不是运行时框架，不是响应式引擎，也不是场景图。它�
 
 ---
 
-### 当前状态：Phase 4.0
+### 当前状态：Phase 4.1
 
-**Phase 3.6.2 至 Phase 4.0 已全部合入主线**，全量回归测试（包含 Lua 凒烟测试和编译测试）**全部通过**。
+**Phase 3.6.2 至 Phase 4.1 已全部合入主线**，全量回归测试（包含 Lua 凒烟测试和编译测试）**全部通过**。
 
-Phase 4.0 实现了**编译期公理校验器（Axiom Validator）**，将 Nebula 的三大哲学公理从“文档共识”升级为“编译器强制约束”，防止未来架构回退：
+Phase 4.1 实现了 **Slug 文本渲染引擎**，将 Nebula 的文本渲染从 ASCII-only SDF 升级为支持全量 Unicode（包括 CJK）的纯数学矢量渲染，且不违反公理 A：
 
-- **任务 A（生命周期类型白名单）**：在 Visual Record 级别强制校验 L1 持久层字段类型，拦截任何 L2 帧级类型（NebulaTextMesh、GapBuffer、指针）漏入 L1。
-- **任务 B（只读管线冲突检测）**：检测同一 App 内不同 Visual 类型的管线路径冲突，发现冲突时报错而非自动合并（降级版，遵守单一职责原则）。
-- **任务 C（静态展开验证）**：确保所有组件名为合法静态标识符，Slot 的 max_instances 为编译期正整数常量，强制不变量 I1（零运行时分发）。
+- **S0 阶段（字体预处理器扩展）**：`font_preprocessor_slug.nelua` 在编译期提取 95 个字形的 2328 条贝塞尔曲线和 8811 条 Band 引用，生成 `liberation_sans_slug_metrics.nelua`。
+- **S1 阶段（着色器与管线生成）**：`shader_compose.lua` 新增 `nebula_compose_slug_shader`，生成包含 Slug 覆盖率计算的 WGSL 着色器；`pipeline_factory.lua` 新增 `gen_pipeline_slug_text` 路径；`app_factory.lua` 支持 `text_mode=slug` 配置。
+- **S2 阶段（运行时顶点装配）**：`text_runtime.nelua` 新增 `NebulaSlugVertex` 结构体和 `nebula_slug_text_build_vertices` 函数；`nebula_core.nelua` 新增 `nebula_derive_slug_text_visual` 派生路径。
 
 ---
 
@@ -89,15 +89,15 @@ Nebula 的全部设计决策由三条公理驱动，三者作用于正交维度�
 | 3.10.5 | 独立文本标签 + 多 Pass 渲染 | — | 已完成 |
 | 3.11 | Layout-App 统一注册 | T8 | **已完成** |
 | 3.12 | 响应式重排 (Responsive Reflow) | 视口自适应 | 已完成 |
-| **4.0** | **编译期公理校验器** | **防止回退** | **已完成（当前）** |
-| 4.1 | Slug 文本渲染引擎 | Unicode 全量 | 规划中 |
+| **4.0** | **编译期公理校验器** | **防止回退** | **已完成** |
+| **4.1** | **Slug 文本渲染引擎** | **Unicode 全量** | **已完成（当前）** |
 | 4.2 | CJK 字体预处理 | CJK 支持 | 规划中 |
 | 4.3 | 拓扑流渲染 (Indirect Drawing) | 降低 CPU 提交开销 | 规划中 |
 | 5.0 | WASM 后端 | 跨平台 | 规划中 |
 
-**当前（Phase 4.0 已完成）**：编译期公理校验器已实现，28/28 项回归测试全部通过。三大公理已从文档共识升级为编译器强制约束。
+**当前（Phase 4.1 已完成）**：Slug 文本渲染引擎已实现，47/47 项回归测试全部通过。实现了纯数学矢量文本渲染，支持全量 Unicode（包括 CJK），且不违反公理 A。
 
-**下一步（Phase 4.1）**：集成 Slug 文本渲染引擎，实现全量 Unicode 支持，解决当前仅支持 ASCII 的硬性限制。
+**下一步（Phase 4.2）**：集成 HarfBuzz 进行 CJK 字体预处理，实现完整的 CJK 字形提取与排版支持。
 
 ---
 
@@ -105,9 +105,9 @@ Nebula 的全部设计决策由三条公理驱动，三者作用于正交维度�
 
 | 维度 | Phase 3.6.x | Phase 3.7/3.8 | Phase 3.9 | Phase 3.10.x | Phase 3.11/3.12 | **Phase 4.0** |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| 核心推导 | Gap Buffer + 选区 | 管线收敛 + 循环封装 | 文本一等公民 + Slot | 原语注册中心 + 独立文本 | Layout-App 统一注册 + 响应式重排 | **公理校验器（任务 A/B/C）** |
-| 渲染技术 | L1/L2 分层 + 栈上排版 | 3 着色器 + 1 行样板 | 文本管线自动注入 | 元数据驱动 + 多 Pass 阴影 | 编译期分段系数推导 + 运行时扁平插値 | **只读断言模式，不修改状态** |
-| 质量保障 | 260+ 项断言 | 专项测试 | 25/25 通过 | 27/27 通过，含注册表专项 | 全量回归通过，含 60 项响应式专项 | **28/28 通过，含任务 A/B/C 全覆盖** |
+| 核心推导 | Gap Buffer + 选区 | 管线收敛 + 循环封装 | 文本一等公民 + Slot | 原语注册中心 + 独立文本 | Layout-App 统一注册 + 响应式重排 | **公理校验器（任务 A/B/C）** | **Slug 文本渲染引擎（S0/S1/S2）** |
+| 渲染技术 | L1/L2 分层 + 栈上排版 | 3 着色器 + 1 行样板 | 文本管线自动注入 | 元数据驱动 + 多 Pass 阴影 | 编译期分段系数推导 + 运行时扁平插小 | **只读断言模式，不修改状态** | **Slug 算法：贝塞尔曲线 + Band 索引 + Storage Buffer** |
+| 质量保障 | 260+ 项断言 | 专项测试 | 25/25 通过 | 27/27 通过，含注册表专项 | 全量回归通过，含 60 项响应式专项 | **28/28 通过，含任务 A/B/C 全覆盖** | **47/47 通过，含 S0/S1/S2 全阶段覆盖** |
 
 ---
 
@@ -130,6 +130,10 @@ nebula/
 │       ├── layout_engine.lua       # ★ Phase 3.12: 编译期静态 Flexbox + 分段系数推导
 │       ├── axiom_validator.lua     # ★ Phase 4.0: 编译期公理校验器（任务 A/B/C）
 │       └── gap_buffer_factory.lua  # Gap Buffer 代码生成器
+├── assets/
+│   └── generated/
+│       ├── liberation_sans_sdf_atlas.nelua        # SDF 字体图集
+│       └── liberation_sans_slug_metrics.nelua    # ★ Phase 4.1: Slug 字形数据（95 字形、2328 曲线）
 ├── examples/
 │   ├── form_demo.nelua             # 文本一等公民表单演示（主循环 2 行）
 │   ├── dynamic_list_demo.nelua     # Slot Producer 动态列表（10,000 项，主循环 3 行）
@@ -140,6 +144,7 @@ nebula/
 │   └── text_demo.nelua             # 文本渲染展示
 ├── tests/
 │   ├── smoke_phase3_12.lua         # Phase 3.12: 响应式重排专项（60 项断言）
+│   ├── smoke_phase4_1.lua          # ★ Phase 4.1: Slug 文本渲染引擎专项（47 项断言）
 │   ├── smoke_phase4_0.lua          # ★ Phase 4.0: 公理校验器专项（28 项断言）
 │   ├── smoke_phase3_11.lua         # Phase 3.11: 30 行愿景专项
 │   ├── smoke_phase3_10_5.lua       # Phase 3.10.5: 独立文本 + 多 Pass 专项
@@ -153,7 +158,8 @@ nebula/
 ├── build.sh                        # 一键构建脚本
 └── tools/
     ├── run_all_tests.sh            # 全量回归测试运行器
-    └── font_preprocessor.nelua     # 字体预处理工具（TTF → SDF Atlas）
+    ├── font_preprocessor.nelua         # 字体预处理工具（TTF → SDF Atlas）
+    └── font_preprocessor_slug.nelua    # ★ Phase 4.1: Slug 字体预处理工具（TTF → 贝塞尔曲线 + Band 索引）
 ```
 
 ---

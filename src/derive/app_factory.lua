@@ -185,6 +185,8 @@ function nebula_app_register_text(name, visual_type, opts)
     mask_password = opts.mask_password or false,
     -- dynamic 模式字段
     updater       = opts.updater,
+    -- ★ Phase 4.1: 渲染模式（"ascii_sdf" | "slug"）
+    text_mode     = opts.text_mode or "ascii_sdf",
   })
 end
 
@@ -387,12 +389,19 @@ local function gen_app_record(app_name, reg)
     emit(("  %s: %sContext,"):format(comp.name, comp.base))
   end
 
-  -- ★ Phase 3.9: 注入 TextContext 字段
+  -- ★ Phase 3.9 / Phase 4.1: 注入 TextContext 字段
   if #reg.texts > 0 then
     emit("")
-    emit("  -- ★ Phase 3.9: 文本组件 Context（一等公民）")
-    -- 共享 TextPipeline（所有文本组件共用一个管线实例）
-    emit("  pipe_text: TextPipeline,")
+    emit("  -- ★ Phase 3.9 / Phase 4.1: 文本组件 Context（一等公民）")
+    -- ★ Phase 4.1: 根据 text_mode 选择管线类型
+    local has_sdf_txt  = false
+    local has_slug_txt = false
+    for _, txt in ipairs(reg.texts) do
+      if txt.text_mode == "slug" then has_slug_txt = true
+      else has_sdf_txt = true end
+    end
+    if has_sdf_txt  then emit("  pipe_text: TextPipeline,") end
+    if has_slug_txt then emit("  pipe_slug_text: SlugTextPipeline,") end
     for _, txt in ipairs(reg.texts) do
       emit(("  %s: %sContext,"):format(txt.name, txt.base))
     end
@@ -463,11 +472,33 @@ local function gen_app_init(app_name, reg)
     end
   end
 
-  -- ★ Phase 3.9: 初始化 TextPipeline（文本一等公民）
+  -- ★ Phase 3.9 / Phase 4.1: 初始化文本管线
   if #reg.texts > 0 then
+    local has_sdf_init  = false
+    local has_slug_init = false
+    for _, txt in ipairs(reg.texts) do
+      if txt.text_mode == "slug" then has_slug_init = true
+      else has_sdf_init = true end
+    end
     emit("")
-    emit("  -- ★ Phase 3.9: 初始化文本管线（一等公民）")
-    emit("  if not self.pipe_text:init(renderer) then return false end")
+    emit("  -- ★ Phase 3.9 / Phase 4.1: 初始化文本管线")
+    if has_sdf_init then
+      emit("  if not self.pipe_text:init(renderer) then return false end")
+    end
+    if has_slug_init then
+      emit("  if not self.pipe_slug_text:init(renderer) then return false end")
+      emit("  -- ★ Phase 4.1: 上传 Slug Storage Buffer（编译期常量数组）")
+      emit("  do")
+      emit("    local _curves_sz = (@csize)(NEBULA_SLUG_TOTAL_CURVES * #NebulaSlugCurve)")
+      emit("    local _metas_sz  = (@csize)(NEBULA_SLUG_TOTAL_BAND_METAS * #NebulaSlugBandMeta)")
+      emit("    local _refs_sz   = (@csize)(NEBULA_SLUG_TOTAL_BAND_REFS * #uint32)")
+      emit("    if not self.pipe_slug_text:upload_slug_buffers(renderer,")
+      emit("      &NEBULA_SLUG_CURVES[0], _curves_sz,")
+      emit("      &NEBULA_SLUG_BAND_METAS[0], _metas_sz,")
+      emit("      &NEBULA_SLUG_BAND_REFS[0], _refs_sz) then return false end")
+      emit("    if not self.pipe_slug_text:update_slug_bind_group(renderer) then return false end")
+      emit("  end")
+    end
   end
 
   -- ★ Phase 3.10.5: 初始化阴影管线（多 Pass）
@@ -829,16 +860,27 @@ local function gen_app_draw(app_name, reg)
     ::continue::
   end
 
-  -- ★ Phase 3.9: 文本管线在最后绘制（确保文本始终在最上层）
+  -- ★ Phase 3.9 / Phase 4.1: 文本管线在最后绘制（确保文本始终在最上层）
   if #reg.texts > 0 then
     emit("")
-    emit("  -- ★ Phase 3.9: 文本渲染（一等公民，最后绘制确保在最上层）")
+    emit("  -- ★ Phase 3.9 / Phase 4.1: 文本渲染（一等公民，最后绘制）")
     for _, txt in ipairs(reg.texts) do
       emit(("  if self.%s.mesh.vertex_count > 0 then"):format(txt.name))
-      emit(("    self.pipe_text:draw_buffer(pass,"):format())
-      emit(("      self.%s.mesh.vertex_buffer,"):format(txt.name))
-      emit(("      self.%s.mesh.vertex_buffer_size,"):format(txt.name))
-      emit(("      self.%s.mesh.vertex_count)"):format(txt.name))
+      if txt.text_mode == "slug" then
+        -- ★ Phase 4.1: Slug 渲染路径
+        emit(("    -- ★ Phase 4.1: Slug 渲染 %s"):format(txt.name))
+        emit(("    if self.pipe_slug_text:upload_vertices(self.renderer,"))
+        emit(("      self.%s.mesh.vertex_buffer, self.%s.mesh.vertex_buffer_size,"):format(txt.name, txt.name))
+        emit(("      self.%s.mesh.vertex_count) then"):format(txt.name))
+        emit(("      self.pipe_slug_text:draw(pass)"))
+        emit(("    end"))
+      else
+        -- 原有 SDF 路径
+        emit(("    self.pipe_text:draw_buffer(pass,"):format())
+        emit(("      self.%s.mesh.vertex_buffer,"):format(txt.name))
+        emit(("      self.%s.mesh.vertex_buffer_size,"):format(txt.name))
+        emit(("      self.%s.mesh.vertex_count)"):format(txt.name))
+      end
       emit(("  end"):format())
     end
   end
@@ -902,4 +944,4 @@ function nebula_app_generate(app_name)
   return source
 end
 
-return "nebula_app_factory_v0.6_phase3.12"
+return "nebula_app_factory_v0.7_phase4.1"
