@@ -72,6 +72,10 @@ global NebulaInputState = @record{
   mod_shift:          boolean,   -- Shift 键当前是否按下
   mod_ctrl:           boolean,   -- Ctrl 键当前是否按下
   mod_alt:            boolean,   -- Alt 键当前是否按下
+  -- ★ Phase 3.12: 视口尺寸状态（响应式重排）
+  viewport_w:         float32,   -- 当前视口宽度（像素）
+  viewport_h:         float32,   -- 当前视口高度（像素）
+  viewport_resized:   boolean,   -- 本帧视口尺寸是否发生变化
 }
 
 -- =============================================================================
@@ -500,13 +504,13 @@ global ClickableState = @record{
 ## 
 ## -- ★ Phase 3.1: 加载编译期布局引擎模块
 ## local layout_engine_mod = require "derive.layout_engine"
-## assert(layout_engine_mod == "nebula_layout_engine_v0.1_phase3.1",
-##   "nebula: failed to load derive/layout_engine.lua")
+## assert(layout_engine_mod == "nebula_layout_engine_v0.2_phase3.12",
+##   "nebula: failed to load derive/layout_engine.lua")  -- ★ Phase 3.12 升级
 ## 
 ## -- ★ Phase 3.5.2: 加载应用编排工厂模块
 ## local app_factory_mod = require "derive.app_factory"
-## assert(app_factory_mod == "nebula_app_factory_v0.5_phase3.11",
-##   "nebula: failed to load derive/app_factory.lua")
+## assert(app_factory_mod == "nebula_app_factory_v0.6_phase3.12",
+##   "nebula: failed to load derive/app_factory.lua")  -- ★ Phase 3.12 升级
 ## 
 ## -- ★ Phase 3.6: 加载 Gap Buffer 工厂模块（使 nebula_gen_gap_buffer_type 在所有 require nebula_core 的文件中可用）
 ## local gap_buffer_factory_mod = require "derive.gap_buffer_factory"

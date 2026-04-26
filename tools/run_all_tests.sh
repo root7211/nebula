@@ -34,7 +34,7 @@ run_test() {
 }
 
 echo "============================================"
-echo " Nebula Phase 3.10.5 — Full Regression Suite"
+echo " Nebula Phase 3.12 — Full Regression Suite"
 echo "============================================"
 
 # ---- Part 1: Lua 冒烟测试（纯编译期逻辑验证） ----
@@ -106,6 +106,14 @@ run_test "smoke_phase3_9 (Phase 3.9 — 文本一等公民 & Slot Producer 重�
 run_test "smoke_phase3_10_5 (Phase 3.10.5 — 独立文本标签 & 多 Pass 渲染兼容验证)" \
   nelua-lua tests/smoke_phase3_10_5.lua
 
+# ★ Phase 3.11 专项测试（Layout-App 统一注册 & 30 行愿景）
+run_test "smoke_phase3_11 (Phase 3.11 — Layout-App 统一注册 & 30 行愿景验证)" \
+  nelua-lua tests/smoke_phase3_11.lua
+
+# ★ Phase 3.12 专项测试（响应式重排 — Clamp 感知分段插值）
+run_test "smoke_phase3_12 (Phase 3.12 — 响应式重排 & Clamp 感知分段插值验证)" \
+  nelua-lua tests/smoke_phase3_12.lua
+
 # ---- Part 2: 编译回归测试（Nelua → C → 二进制） ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="
@@ -143,6 +151,6 @@ if [ "$FAIL" -gt 0 ]; then
   echo "[REGRESSION DETECTED] $FAIL test(s) failed!"
   exit 1
 else
-  echo "[ALL PASS] Phase 3.10.5 regression suite complete."
+  echo "[ALL PASS] Phase 3.12 regression suite complete."
   exit 0
 fi

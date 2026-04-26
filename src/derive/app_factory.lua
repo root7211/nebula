@@ -292,15 +292,18 @@ local function _build_layout_node(name, layout_spec)
   return nebula_layout_node(spec)
 end
 
--- ★ Phase 3.11: 内部辅助函数 — 在 nebula_app_end 时执行布局解算
--- 如果 reg.root_layout 存在，则构建布局树并解算，将结果存入 reg.layout_results
+-- ★ Phase 3.12: 内部辅助函数 — 在 nebula_app_end 时执行布局解算（升级为分段系数推导）
+-- 如果 reg.root_layout 存在，则构建布局树并解算，将结果存入 reg.layout_results。
+-- ★ Phase 3.12 升级：额外调用 nebula_layout_derive_segments 推导分段系数，
+--   存入 reg.layout_segments，供 gen_app_update 生成响应式更新代码。
 local function _solve_layout(reg)
   if not reg.root_layout then
-    reg.layout_results = nil
+    reg.layout_results  = nil
+    reg.layout_segments = nil
     return
   end
 
-  -- 构建根节点（不带 name，因为根节点本身不对应任何组件）
+  -- 构建根节点规格（不带 name，因为根节点本身不对应任何组件）
   local root_spec = {
     name      = "_root",
     direction = reg.root_layout.direction or "column",
@@ -321,24 +324,35 @@ local function _solve_layout(reg)
   end
 
   if #root_spec.children == 0 then
-    reg.layout_results = nil
+    reg.layout_results  = nil
+    reg.layout_segments = nil
     return
   end
 
-  local root = nebula_layout_node(root_spec)
-
   -- 使用 root_layout 指定的视口尺寸，或默认 800x600
-  local vw = reg.root_layout.width  or 800
-  local vh = reg.root_layout.height or 600
+  local base_vw = reg.root_layout.width  or 800
+  local base_vh = reg.root_layout.height or 600
 
-  nebula_layout_solve(root, vw, vh)
-
+  -- ★ Phase 3.11: 保留单次解算结果（用于 init 中的初始坐标注入）
+  local root = nebula_layout_node(root_spec)
+  nebula_layout_solve(root, base_vw, base_vh)
   if _DEBUG_LAYOUT then
-    print(("[layout] Phase 3.11 — App '%s' layout solved:"):format(reg.name))
+    print((("[layout] Phase 3.11 — App '%s' layout solved:"):format(reg.name)))
     nebula_layout_dump(root)
   end
-
   reg.layout_results = nebula_layout_collect(root)
+
+  -- ★ Phase 3.12: 分段系数推导（用于 update 中的响应式更新代码生成）
+  reg.layout_segments = nebula_layout_derive_segments(root_spec, base_vw, base_vh)
+  if _DEBUG_LAYOUT then
+    local segs = reg.layout_segments.segments
+    print((("[layout] Phase 3.12 — App '%s' derived %d segments:"):format(reg.name, #segs)))
+    for i, seg in ipairs(segs) do
+      local th = seg.threshold_h and tostring(seg.threshold_h) or "nil"
+      local tw = seg.threshold_w and tostring(seg.threshold_w) or "nil"
+      print((("  segment %d: threshold_h=%s threshold_w=%s"):format(i, th, tw)))
+    end
+  end
 end
 
 -- 结束 App 声明
@@ -562,6 +576,95 @@ local function gen_app_update(app_name, reg)
         emit(("  -- [static] %s: 静态文本，由用户在 App:init 后手动调用 set_text 初始化"):format(txt.name))
       end
     end
+  end
+
+  -- ★ Phase 3.12: 响应式重排——分段线性插値更新代码
+  -- 当检测到 input.viewport_resized 时，使用预计算的分段系数重新计算组件坐标
+  if reg.layout_segments and #reg.layout_segments.segments > 0 then
+    local segs = reg.layout_segments.segments
+    emit("")
+    emit("  -- ★ Phase 3.12: 响应式重排（分段线性插値）")
+    emit("  if input.viewport_resized then")
+    emit("    self.vw = input.viewport_w")
+    emit("    self.vh = input.viewport_h")
+    emit("    -- 更新所有管线的视口 Uniform")
+    local updated_pipes = {}
+    for vt, group in pairs(reg.type_groups) do
+      if not updated_pipes[group.pipeline_name] then
+        emit(("    self.pipe_%s:update_viewport(self.renderer, input.viewport_w, input.viewport_h)"):format(group.base:lower()))
+        updated_pipes[group.pipeline_name] = true
+      end
+    end
+    emit("    -- 分段线性插値：根据视口尺寸选择对应系数段重新计算组件坐标")
+
+    -- 生成分段 if-elseif-else 结构
+    -- 分段按 threshold_h 降序排列（最高的临界点对应最后一个分段）
+    -- 第一段（threshold_h = nil）是默认分段（else 分支）
+    local normal_segs = {}
+    local default_seg = nil
+    for _, seg in ipairs(segs) do
+      if seg.threshold_h ~= nil or seg.threshold_w ~= nil then
+        table.insert(normal_segs, seg)
+      else
+        default_seg = seg
+      end
+    end
+
+    -- 按 threshold_h 降序排列，确保 if-elseif 按临界点从大到小检查
+    table.sort(normal_segs, function(a, b)
+      local ta = a.threshold_h or a.threshold_w or 0
+      local tb = b.threshold_h or b.threshold_w or 0
+      return ta > tb
+    end)
+
+    local first_branch = true
+    for _, seg in ipairs(normal_segs) do
+      local cond
+      if seg.threshold_h then
+        cond = ("input.viewport_h >= %.1f"):format(seg.threshold_h)
+      else
+        cond = ("input.viewport_w >= %.1f"):format(seg.threshold_w)
+      end
+      if first_branch then
+        emit(("    if %s then"):format(cond))
+        first_branch = false
+      else
+        emit(("    elseif %s then"):format(cond))
+      end
+      -- 生成该分段的组件坐标赋値
+      for _, comp in ipairs(reg.components) do
+        local c = seg.coeffs[comp.name]
+        if c then
+          emit(("      -- [seg th_h=%.0f] %s"):format(seg.threshold_h or 0, comp.name))
+          emit(("      self.%s.visual.pos.x  = %.6f * input.viewport_w + %.6f"):format(comp.name, c.cx_vw, c.cx_c))
+          emit(("      self.%s.visual.pos.y  = %.6f * input.viewport_h + %.6f"):format(comp.name, c.cy_vh, c.cy_c))
+          emit(("      self.%s.visual.size.x = %.6f * input.viewport_w + %.6f"):format(comp.name, c.cw_vw, c.cw_c))
+          emit(("      self.%s.visual.size.y = %.6f * input.viewport_h + %.6f"):format(comp.name, c.ch_vh, c.ch_c))
+        end
+      end
+    end
+
+    -- 生成默认分段（最小视口，即溢出区域）
+    if default_seg then
+      if #normal_segs > 0 then
+        emit("    else")
+      end
+      for _, comp in ipairs(reg.components) do
+        local c = default_seg.coeffs[comp.name]
+        if c then
+          emit(("      -- [seg default] %s"):format(comp.name))
+          emit(("      self.%s.visual.pos.x  = %.6f * input.viewport_w + %.6f"):format(comp.name, c.cx_vw, c.cx_c))
+          emit(("      self.%s.visual.pos.y  = %.6f * input.viewport_h + %.6f"):format(comp.name, c.cy_vh, c.cy_c))
+          emit(("      self.%s.visual.size.x = %.6f * input.viewport_w + %.6f"):format(comp.name, c.cw_vw, c.cw_c))
+          emit(("      self.%s.visual.size.y = %.6f * input.viewport_h + %.6f"):format(comp.name, c.ch_vh, c.ch_c))
+        end
+      end
+    end
+
+    if #normal_segs > 0 then
+      emit("    end")
+    end
+    emit("  end  -- viewport_resized")
   end
 
   emit("end")
@@ -793,4 +896,4 @@ function nebula_app_generate(app_name)
   return source
 end
 
-return "nebula_app_factory_v0.5_phase3.11"
+return "nebula_app_factory_v0.6_phase3.12"

@@ -27,12 +27,30 @@ global _nebula_key_head:    uint8 = 0
 global _nebula_key_tail:    uint8 = 0
 
 -- =============================================================================
+-- ★ Phase 3.12: 内部全局：视口 Resize 状态
+-- =============================================================================
+global _nebula_viewport_w:       float32 = 0.0
+global _nebula_viewport_h:       float32 = 0.0
+global _nebula_viewport_resized: boolean = false
+
+-- =============================================================================
 -- GLFW 回调：鼠标滚动
 -- =============================================================================
 global _nebula_scroll_dy: float32 = 0.0
 
 global function _nebula_scroll_callback(window: GLFWwindow, xoffset: float64, yoffset: float64): void
   _nebula_scroll_dy = _nebula_scroll_dy + (@float32)(yoffset)
+end
+
+-- =============================================================================
+-- ★ Phase 3.12: GLFW 回调： Framebuffer Resize
+-- 由 GLFW 在窗口尺寸变化时自动调用。
+-- 写入全局状态，由 nebula_collect_input 在下一帧读取。
+-- =============================================================================
+global function _nebula_framebuffer_size_callback(window: GLFWwindow, width: int32, height: int32): void
+  _nebula_viewport_w       = (@float32)(width)
+  _nebula_viewport_h       = (@float32)(height)
+  _nebula_viewport_resized = true
 end
 
 -- =============================================================================
@@ -97,6 +115,8 @@ global function nebula_input_install_callbacks(window: GLFWwindow): void
   glfwSetCharCallback(window, _nebula_char_callback)
   glfwSetKeyCallback(window,  _nebula_key_callback)
   glfwSetScrollCallback(window, _nebula_scroll_callback)
+  -- ★ Phase 3.12: 注册 framebuffer resize 回调
+  glfwSetFramebufferSizeCallback(window, _nebula_framebuffer_size_callback)
 end
 
 -- nebula_collect_input: 每帧输入快照
@@ -147,6 +167,15 @@ global function nebula_collect_input(
                    (glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS)
   input.mod_alt   = (glfwGetKey(window, GLFW_KEY_LEFT_ALT)     == GLFW_PRESS) or
                    (glfwGetKey(window, GLFW_KEY_RIGHT_ALT)    == GLFW_PRESS)
+
+  -- ---- ★ Phase 3.12: 视口尺寸状态（响应式重排） ----
+  -- 从全局回调状态读取 resize 事件，读取后清除标志位（每帧只触发一次）
+  input.viewport_resized = _nebula_viewport_resized
+  if _nebula_viewport_resized then
+    input.viewport_w = _nebula_viewport_w
+    input.viewport_h = _nebula_viewport_h
+    _nebula_viewport_resized = false  -- 清除标志位，下一帧不再触发
+  end
 end
 
 -- ★ Phase 3.11: nebula_init / nebula_should_close / nebula_shutdown
@@ -178,13 +207,18 @@ global function nebula_init(
     return false
   end
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
-  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
+  -- ★ Phase 3.12: 开启窗口可调整大小，支持响应式重排
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE)
   _nebula_window = glfwCreateWindow(win_w, win_h, title, nilptr, nilptr)
   if _nebula_window == nilptr then
     glfwTerminate()
     return false
   end
   nebula_input_install_callbacks(_nebula_window)
+  -- ★ Phase 3.12: 初始化视口全局状态
+  _nebula_viewport_w = (@float32)(win_w)
+  _nebula_viewport_h = (@float32)(win_h)
+  _nebula_viewport_resized = false
   if not renderer:init(_nebula_window, (@float32)(win_w), (@float32)(win_h)) then
     glfwDestroyWindow(_nebula_window)
     glfwTerminate()

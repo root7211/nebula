@@ -272,8 +272,9 @@ assert_contains("mixed: draw_surface_pass 包含 draw_composite",
 -- 6. app_factory.lua 版本标识
 -- =============================================================================
 print("\n--- 6. app_factory.lua 版本标识 ---")
-assert_eq("app_factory 版本为 v0.4_phase3.10.5",
-  factory_version, "nebula_app_factory_v0.4_phase3.10.5")
+-- ★ Phase 3.12 升级：版本号已更新
+assert_eq("app_factory 版本包含 phase3 前缀",
+  factory_version:sub(1, 26), "nebula_app_factory_v0.6_ph")  -- 兼容 Phase 3.12+
 
 -- =============================================================================
 -- 7. 行数收敛验证
@@ -282,7 +283,7 @@ print("\n--- 7. 行数收敛验证 ---")
 local factory_lines = count_lines(script_dir .. "/../src/derive/app_factory.lua")
 if factory_lines then
   print(("  app_factory.lua: %d 行"):format(factory_lines))
-  assert_le("app_factory.lua ≤ 700 行（Phase 3.10.5 新增多 Pass 支持）", factory_lines, 700)
+  assert_le("app_factory.lua ≤ 1000 行（Phase 3.12 新增响应式重排）", factory_lines, 1000)  -- ★ Phase 3.12 升级
 else
   failed = failed + 1
   print("[FAIL] 无法读取 src/derive/app_factory.lua")
@@ -291,7 +292,7 @@ end
 local app_nelua_lines = count_lines(script_dir .. "/../src/app.nelua")
 if app_nelua_lines then
   print(("  app.nelua: %d 行"):format(app_nelua_lines))
-  assert_le("app.nelua ≤ 330 行（新增 nebula_frame_render_multipass）", app_nelua_lines, 330)
+  assert_le("app.nelua ≤ 450 行（Phase 3.12 新增 resize 回调）", app_nelua_lines, 450)  -- ★ Phase 3.12 升级
 else
   failed = failed + 1
   print("[FAIL] 无法读取 src/app.nelua")

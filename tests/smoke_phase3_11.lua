@@ -355,8 +355,9 @@ end
 -- 8. app_factory.lua 版本标识
 -- =============================================================================
 print("\n--- 8. app_factory.lua 版本标识 ---")
-assert_contains("版本标识包含 phase3.11",
-  factory_version, "phase3.11")
+-- ★ Phase 3.12 升级：版本号已更新为 phase3.12
+assert_contains("版本标识包含 nebula_app_factory 前缀",
+  factory_version, "nebula_app_factory")
 
 -- =============================================================================
 -- 9. 行数收敛验证

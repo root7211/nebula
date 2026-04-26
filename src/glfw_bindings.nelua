@@ -75,3 +75,16 @@ global function glfwSetCharCallback(window: GLFWwindow, callback: GLFWcharfun): 
 -- 滚动回调
 global GLFWscrollfun <cimport, nodecl> = @function(window: GLFWwindow, xoffset: float64, yoffset: float64): void
 global function glfwSetScrollCallback(window: GLFWwindow, callback: GLFWscrollfun): GLFWscrollfun <cimport, nodecl> end
+
+-- =============================================================================
+-- ★ Phase 3.12: Framebuffer Resize 回调绑定
+-- =============================================================================
+
+-- framebuffer size 回调类型（像素尺寸，与窗口逻辑尺寸不同）
+global GLFWframebuffersizefun <cimport, nodecl> = @function(window: GLFWwindow, width: int32, height: int32): void
+
+-- 注册 framebuffer resize 回调
+global function glfwSetFramebufferSizeCallback(window: GLFWwindow, callback: GLFWframebuffersizefun): GLFWframebuffersizefun <cimport, nodecl> end
+
+-- 获取 framebuffer 像素尺寸
+global function glfwGetFramebufferSize(window: GLFWwindow, width: *int32, height: *int32): void <cimport, nodecl> end
