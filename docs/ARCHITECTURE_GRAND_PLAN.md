@@ -267,3 +267,14 @@ main()
 | [Sluggish (GitHub)](https://github.com/mightycow/Sluggish) | Slug 的 band-data / curve-data 纹理生成工具 |
 | [HarfBuzz (GitHub)](https://github.com/harfbuzz/harfbuzz) | 文本 shaping 引擎，用于字距调整和连字替换 |
 | [Slug JCGT Paper](https://jcgt.org/published/0006/02/02/) | Slug 算法的原始学术论文（2017） |
+
+### 4.8 Phase 4.4：可编程 GUI 编译器与自定义原语
+
+**目标**：将 Nebula 从“提供预设组件的工具库”升维为“生成组件的元系统”。
+
+**技术选型**：
+1. **API 暴露**：提供 `nebula_register_primitive` 接口，允许界面开发者在 S1 编译期安全地注入自定义交互逻辑（如 `draggable`、`scrollable`）。
+2. **宏观原语 + 正交修饰**：通过元数据驱动的 Hook 机制，实现功能闭环的子系统（如 `multiline_editable`）与正交修饰原语（如 `clipboard_aware`）的组合。
+3. **编译期静态契约**：在 `axiom_validator.lua` 中扩展校验规则，确保自定义原语的组合安全，防止字段冲突和非法的状态访问。
+
+**实施路径**：详见 `docs/PLAN_PHASE4_4.md`。
