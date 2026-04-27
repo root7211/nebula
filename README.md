@@ -8,9 +8,17 @@ Nebula 不是运行时框架，不是响应式引擎，也不是场景图。它�
 
 ---
 
-### 当前状态：Phase 4.1 已完成 → 进入 Phase 4.2.1 (PAL) + 4.2.2 (Slug 生产级化) 并行推进
+### 当前状态：Phase 4.2.1 (PAL 骨架) 进行中
 
-**Phase 3.6.2 至 Phase 4.1 已全部合入主线**，全量回归测试（包含 Lua 凒烟测试和编译测试）**全部通过**。
+**Phase 3.6.2 至 Phase 4.2.1 已全部合入主线**，全量回归测试（包含 Lua 冒烟测试和编译测试）**全部通过**。
+
+Phase 4.2.1 交付了 **跨平台 PAL (Platform Abstraction Layer) 骨架**，为 Nebula 建立了跨 Linux X11 / Linux Wayland / Windows / Web 四端的编译期平台抽象：
+
+- **平台检测**：`nebula_core.nelua` 引入 `NEBULA_TARGET`（linux/windows/wasm）和 `NEBULA_LINUX_DISPLAY`（x11/wayland）编译期变量，支持三级优先级（`-D` 传参 > 环境变量 > 自动检测），非法值触发 S1 阶段断言。
+- **Surface 创建抽象**：`renderer.nelua` 将 Surface 创建从单一 X11 路径扩展为四路条件编译（X11 / Wayland / Windows HWND / Web Canvas），修正了 SType 值为 webgpu-headers 官方规范值，修正了 Windows `hinstance` 获取方式（改用 `GetModuleHandleA(nilptr)`）。
+- **GLFW 绑定条件化**：`glfw_bindings.nelua` 将 native 函数绑定改为条件化导入，新增 Wayland / Win32 / Emscripten 函数绑定，移除硬编码的 `GLFW_EXPOSE_NATIVE_X11`。
+- **主循环宏**：`app.nelua` 引入 `nebula_main_loop` 宏，封装 Native（阻塞式 while）与 Web（Emscripten 回调）的循环差异，公理 A 合规（所有分支在 S1 阶段消解）。
+- **构建系统升级**：`build.sh` 支持 `--target=linux|windows|wasm` 和 `--display=x11|wayland` 参数，自动配置对应编译标志。
 
 Phase 4.1 交付了 **Slug 文本渲染引擎 MVP**，将 Nebula 的文本渲染从 ASCII-only SDF 升级为基于贝塞尔曲线的纯数学矢量渲染。**作为 MVP，它有意识地引入了三项内核债务**（均匀 Band、跳过 Jacobian、Storage Buffer 路径），这些债务已登记于 [ARCHITECTURE_GRAND_PLAN.md §5.2](docs/ARCHITECTURE_GRAND_PLAN.md)，并计划在 Phase 4.2.2 / 4.2.3 清算。MVP 的核心实现如下：
 
@@ -186,8 +194,20 @@ nebula/
 ```bash
 chmod +x build.sh
 
-# 核心 Demo
-./build.sh form_demo            # 文本一等公民表单演示
+# Linux X11（默认）
+./build.sh form_demo
+./build.sh form_demo --target=linux --display=x11
+
+# Linux Wayland
+./build.sh form_demo --target=linux --display=wayland
+
+# Windows（需在 Windows 环境或交叉编译工具链下执行）
+./build.sh form_demo --target=windows
+
+# Web / Wasm（需安装 Emscripten）
+./build.sh form_demo --target=wasm
+
+# 其他可用 Demo
 ./build.sh dynamic_list_demo    # Slot Producer 动态列表（10,000 项）
 ./build.sh login_demo           # 登录框演示（密码掩码）
 ./build.sh button_demo          # 按钮演示（最简入门）
@@ -210,12 +230,17 @@ DISPLAY=:99 LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/form_demo
 ### 运行测试
 
 ```bash
-# 单项冒烟测试（无需 GPU）
-nelua-lua tests/smoke_phase3_12.lua   # Phase 3.12 响应式重排专项（60 项）
-nelua-lua tests/smoke_phase3_11.lua   # Phase 3.11 30 行愿景专项
+# Phase 4.2.1 PAL 骨架专项冒烟测试（无需 GPU，43 项断言）
+nelua-lua tests/smoke_phase4_2_1.lua
+
+# Phase 4.1 Slug 文本渲染专项（47 项）
+nelua-lua tests/smoke_phase4_1.lua
+
+# Phase 3.12 响应式重排专项（60 项）
+nelua-lua tests/smoke_phase3_12.lua
 
 # 全量回归测试（含编译回归）
-bash tools/run_all_tests.sh           # 28/28 测试套件执行
+bash tools/run_all_tests.sh
 ```
 
 ---
@@ -224,5 +249,6 @@ bash tools/run_all_tests.sh           # 28/28 测试套件执行
 
 | 文档 | 说明 |
 | :--- | :--- |
-| [`docs/ARCHITECTURE_GRAND_PLAN.md`](docs/ARCHITECTURE_GRAND_PLAN.md) | 架构总纲领 v2：三大公理、路线图 |
+| [`docs/ARCHITECTURE_GRAND_PLAN.md`](docs/ARCHITECTURE_GRAND_PLAN.md) | 架构总纲领 v3.1：三大公理、路线图、技术债登记表 |
+| [`docs/IMPL_PHASE4_2_1_PAL.md`](docs/IMPL_PHASE4_2_1_PAL.md) | Phase 4.2.1 PAL 骨架实施方案（含研究结论与架构决策） |
 | [`docs/REPORT_DEAD_CODE_AUDIT.md`](docs/REPORT_DEAD_CODE_AUDIT.md) | 死代码审查与清理报告（Phase 3.7） |
