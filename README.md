@@ -8,11 +8,11 @@ Nebula 不是运行时框架，不是响应式引擎，也不是场景图。它�
 
 ---
 
-### 当前状态：Phase 4.1
+### 当前状态：Phase 4.1 已完成 → 进入 Phase 4.2.1 (PAL) + 4.2.2 (Slug 生产级化) 并行推进
 
 **Phase 3.6.2 至 Phase 4.1 已全部合入主线**，全量回归测试（包含 Lua 凒烟测试和编译测试）**全部通过**。
 
-Phase 4.1 实现了 **Slug 文本渲染引擎**，将 Nebula 的文本渲染从 ASCII-only SDF 升级为支持全量 Unicode（包括 CJK）的纯数学矢量渲染，且不违反公理 A：
+Phase 4.1 交付了 **Slug 文本渲染引擎 MVP**，将 Nebula 的文本渲染从 ASCII-only SDF 升级为基于贝塞尔曲线的纯数学矢量渲染。**作为 MVP，它有意识地引入了三项内核债务**（均匀 Band、跳过 Jacobian、Storage Buffer 路径），这些债务已登记于 [ARCHITECTURE_GRAND_PLAN.md §5.2](docs/ARCHITECTURE_GRAND_PLAN.md)，并计划在 Phase 4.2.2 / 4.2.3 清算。MVP 的核心实现如下：
 
 - **S0 阶段（字体预处理器扩展）**：`font_preprocessor_slug.nelua` 在编译期提取 95 个字形的 2328 条贝塞尔曲线和 8811 条 Band 引用，生成 `liberation_sans_slug_metrics.nelua`。
 - **S1 阶段（着色器与管线生成）**：`shader_compose.lua` 新增 `nebula_compose_slug_shader`，生成包含 Slug 覆盖率计算的 WGSL 着色器；`pipeline_factory.lua` 新增 `gen_pipeline_slug_text` 路径；`app_factory.lua` 支持 `text_mode=slug` 配置。
@@ -90,14 +90,21 @@ Nebula 的全部设计决策由三条公理驱动，三者作用于正交维度�
 | 3.11 | Layout-App 统一注册 | T8 | **已完成** |
 | 3.12 | 响应式重排 (Responsive Reflow) | 视口自适应 | 已完成 |
 | **4.0** | **编译期公理校验器** | **防止回退** | **已完成** |
-| **4.1** | **Slug 文本渲染引擎** | **Unicode 全量** | **已完成（当前）** |
-| 4.2 | CJK 字体预处理 | CJK 支持 | 规划中 |
-| 4.3 | 拓扑流渲染 (Indirect Drawing) | 降低 CPU 提交开销 | 规划中 |
-| 5.0 | WASM 后端 | 跨平台 | 规划中 |
+| **4.1** | **Slug 文本渲染引擎 (MVP)** | **Unicode 可行性验证** | **已完成**（引入内核债务 D-4.1-A/B/C） |
+| **4.2.1** | **跨平台 PAL 骨架** | **Linux/Windows/Web 三端源码级对齐** | **进行中（当前）** |
+| 4.2.2 | Slug 渲染内核生产级化 | 清算 D-4.1-A/B，评估 D-4.1-C | 规划中（可与 4.2.1 并行） |
+| 4.2.3 | HarfBuzz + CJK 集成 | 端一致 + 7000 字规模 | 规划中 |
+| 4.3 | 可编程原语注册表 | 引导 Era II | 规划中 |
+| 4.4 | 高级宏观原语库 | multiline/scrollable/clipboard | 规划中 |
+| 4.5 | 小型文本编辑器原型 | Era II 里程碑 | 规划中 |
+| 5.0 | 自动化 CI/CD 与工业化发布 | 三端自动回归 | 规划中 |
 
-**当前（Phase 4.1 已完成）**：Slug 文本渲染引擎已实现，47/47 项回归测试全部通过。实现了纯数学矢量文本渲染，支持全量 Unicode（包括 CJK），且不违反公理 A。
+**当前（Phase 4.1 已完成，进入 Phase 4.2.1）**：Slug 文本渲染引擎 MVP 已交付，47/47 项回归测试全部通过。MVP 限于 95 个 ASCII 字形、均匀 `BAND_COUNT=8`、跳过 Jacobian（详见 [ARCHITECTURE_GRAND_PLAN.md §5.2](docs/ARCHITECTURE_GRAND_PLAN.md) 技术债登记表）。
 
-**下一步（Phase 4.2）**：集成 HarfBuzz 进行 CJK 字体预处理，实现完整的 CJK 字形提取与排版支持。
+**下一步（Phase 4.2.1 + 4.2.2 并行 → 4.2.3）**：
+- **4.2.1 PAL**：完成 `NEBULA_TARGET` 检测、`nebula_main_loop` 宏封装、三端 Surface 描述符分化，验收载体仍为 ASCII。
+- **4.2.2 Slug 生产级化**：清算 D-4.1-A（自适应 band 分割）与 D-4.1-B（Jacobian + SlugDilate），完成 Storage Buffer vs 纹理 benchmark。
+- **4.2.3 HarfBuzz + CJK**：在 4.2.1 + 4.2.2 完成后集成 HarfBuzz，按 charset 声明预计算 shaping 表，验证 7000 常用字在三端的一致性与性能。
 
 ---
 
