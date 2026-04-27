@@ -1,5 +1,6 @@
 require "renderer"
 require "liberation_sans_ascii_48_metrics"
+require "liberation_sans_slug_metrics"  -- ★ BUG-7 修复：Slug 路径所需的 NebulaSlugGlyph 等符号
 
 ## cinclude "<stdio.h>"
 ## cinclude "<string.h>"

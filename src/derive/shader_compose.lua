@@ -429,7 +429,7 @@ struct SlugBandMeta {
 }
 @group(0) @binding(1) var<storage, read> slug_curves:     array<SlugCurveData>;
 @group(0) @binding(2) var<storage, read> slug_band_metas: array<SlugBandMeta>;
-@group(0) @binding(3) var<storage, read> slug_band_refs:  array<u32>;
+@group(0) @binding(3) var<storage, read> slug_band_refs:  array<u16>;  // BUG-6 fix: CPU side is uint16
 
 // ---- 顶点输入/输出 ----
 struct SlugVertexInput {
@@ -536,7 +536,7 @@ fn fs_main(in: SlugVertexOutput) -> @location(0) vec4<f32> {
   let hband_meta_idx = band_base + u32(band_iy);
   let hband = slug_band_metas[hband_meta_idx];
   for (var ci: u32 = 0u; ci < hband.count; ci = ci + 1u) {
-    let curve_idx = slug_band_refs[hband.offset + ci];
+    let curve_idx = u32(slug_band_refs[hband.offset + ci]);  // BUG-6 fix: cast u16 to u32
     let c = slug_curves[curve_idx];
     let p12 = vec4<f32>(c.p0x, c.p0y, c.p1x, c.p1y) - vec4<f32>(render_coord, render_coord);
     let p3  = vec2<f32>(c.p2x, c.p2y) - render_coord;
@@ -562,7 +562,7 @@ fn fs_main(in: SlugVertexOutput) -> @location(0) vec4<f32> {
   let vband_meta_idx = band_base + u32(band_max_y + 1) + u32(band_ix);
   let vband = slug_band_metas[vband_meta_idx];
   for (var ci: u32 = 0u; ci < vband.count; ci = ci + 1u) {
-    let curve_idx = slug_band_refs[vband.offset + ci];
+    let curve_idx = u32(slug_band_refs[vband.offset + ci]);  // BUG-6 fix: cast u16 to u32
     let c = slug_curves[curve_idx];
     let p12 = vec4<f32>(c.p0x, c.p0y, c.p1x, c.p1y) - vec4<f32>(render_coord, render_coord);
     let p3  = vec2<f32>(c.p2x, c.p2y) - render_coord;

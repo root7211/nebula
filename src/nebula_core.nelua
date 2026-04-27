@@ -567,13 +567,13 @@ global ClickableState = @record{
 ## 
 ## -- 加载着色器组合器模块
 ## local shader_compose_mod = require "derive.shader_compose"
-## assert(shader_compose_mod == "nebula_shader_compose_v0.6_phase3.7",
-##   "nebula: failed to load derive/shader_compose.lua")
+## assert(shader_compose_mod == "nebula_shader_compose_v0.7_phase4.1",
+##   "nebula: failed to load derive/shader_compose.lua")  -- ★ Phase 4.1 升级
 ## 
 ## -- ★ Phase 2.3.2: 加载管线工厂模块
 ## local pipeline_factory_mod = require "derive.pipeline_factory"
-## assert(pipeline_factory_mod == "nebula_pipeline_factory_v0.7_phase3.7",
-##   "nebula: failed to load derive/pipeline_factory.lua")
+## assert(pipeline_factory_mod == "nebula_pipeline_factory_v0.8_phase4.1",
+##   "nebula: failed to load derive/pipeline_factory.lua")  -- ★ Phase 4.1 升级
 ## 
 ## -- ★ Phase 2.4: 加载交互原语工厂模块
 ## local interaction_factory_mod = require "derive.interaction_factory"
@@ -587,8 +587,8 @@ global ClickableState = @record{
 ## 
 ## -- ★ Phase 3.5.2: 加载应用编排工厂模块
 ## local app_factory_mod = require "derive.app_factory"
-## assert(app_factory_mod == "nebula_app_factory_v0.6_phase3.12",
-##   "nebula: failed to load derive/app_factory.lua")  -- ★ Phase 3.12 升级
+## assert(app_factory_mod == "nebula_app_factory_v0.7_phase4.1",
+##   "nebula: failed to load derive/app_factory.lua")  -- ★ Phase 4.1 升级
 ## 
 ## -- ★ Phase 4.0: 加载公理校验器模块
 ## local axiom_validator_mod = require "derive.axiom_validator"

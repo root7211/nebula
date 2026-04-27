@@ -44,6 +44,10 @@ local L1_TYPE_ALLOWLIST = {
   ["uint32"]  = true,
   ["int32"]   = true,
 }
+-- ★ BUG-2 修复：动态判断 NebulaBuf{N} 类型是否合法（由 editable 原语的 gap_buffer_factory 生成）
+local function is_nebula_buf_type(type_name)
+  return type_name and type_name:match("^NebulaBuf%d+$") ~= nil
+end
 
 -- 明确禁止的 L2 帧级类型（用于生成更友好的错误信息）
 local L2_FORBIDDEN_TYPES = {
@@ -72,7 +76,7 @@ function nebula_validate_visual_fields(type_name, base_fields, state_fields)
   -- 检查基础字段
   for _, field in ipairs(base_fields) do
     local ftype = field.type
-    if not L1_TYPE_ALLOWLIST[ftype] then
+    if not L1_TYPE_ALLOWLIST[ftype] and not is_nebula_buf_type(ftype) then
       local reason = L2_FORBIDDEN_TYPES[ftype]
         or (is_pointer_type(ftype) and L2_FORBIDDEN_TYPES["pointer"])
         or ("未知类型 '%s'，不在 L1 持久层白名单中"):format(ftype)
@@ -90,7 +94,7 @@ function nebula_validate_visual_fields(type_name, base_fields, state_fields)
     for state_name, fields in pairs(state_fields) do
       for prop_name, field_info in pairs(fields) do
         local ftype = field_info.type
-        if not L1_TYPE_ALLOWLIST[ftype] then
+        if not L1_TYPE_ALLOWLIST[ftype] and not is_nebula_buf_type(ftype) then
           local reason = L2_FORBIDDEN_TYPES[ftype]
             or (is_pointer_type(ftype) and L2_FORBIDDEN_TYPES["pointer"])
             or ("未知类型 '%s'，不在 L1 持久层白名单中"):format(ftype)

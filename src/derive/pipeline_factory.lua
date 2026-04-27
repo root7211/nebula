@@ -510,7 +510,7 @@ local function gen_pipeline_standard_instanced(base, uniforms_record, wgsl_sourc
   emit("  }")
   emit("  entries[1] = WGPUBindGroupLayoutEntry{")
   emit("    nextInChain = nilptr, binding = 1,")
-  emit("    visibility  = (@uint64)(WGPUShaderStage_Fragment),")
+  emit("    visibility  = (@uint64)(WGPUShaderStage_Vertex) | (@uint64)(WGPUShaderStage_Fragment),  -- BUG-4 fix: vertex shader also reads instances[inst]")
   emit("    buffer      = { nextInChain = nilptr, type = (@uint32)(WGPUBufferBindingType_ReadOnlyStorage), hasDynamicOffset = 0, minBindingSize = 0 },")
   emit("    sampler = { nextInChain = nilptr, type = 0 }, texture = { nextInChain = nilptr, sampleType = 0, viewDimension = 0, multisampled = 0 },")
   emit("    storageTexture = { nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0 },")

@@ -497,31 +497,6 @@ global NebulaPosUvVertex = @record{
   uv:       Vec2,
 }
 
-global function nebula_create_vertex_buffer(
-  out_buffer: *WGPUBuffer,
-  renderer:   *NebulaRenderer,
-  data:       pointer,
-  size:       csize,
-  label:      cstring
-): boolean
-  local buf_desc = WGPUBufferDescriptor{
-    nextInChain      = nilptr,
-    label            = wgpu_str(label),
-    usage            = (@uint32)(WGPUBufferUsage_Vertex) | (@uint32)(WGPUBufferUsage_CopyDst),
-    size             = (@uint64)(size),
-    mappedAtCreation = false,
-  }
-  $out_buffer = wgpuDeviceCreateBuffer(renderer.device, &buf_desc)
-  if $out_buffer == nilptr then
-    printf("wgpu: failed to create vertex buffer (%s)\n", label)
-    return false
-  end
-  if data ~= nilptr and size > 0 then
-    wgpuQueueWriteBuffer(renderer.queue, $out_buffer, 0, data, size)
-  end
-  return true
-end
-
 global function nebula_upload_texture(
   out_texture:   *WGPUTexture,
   out_view:      *WGPUTextureView,
@@ -1192,17 +1167,19 @@ end
 --
 -- 返回：成功返回 true
 -- =============================================================================
+-- ★ BUG-5 修复：添加 data 参数，支持创建时上传初始数据
 global function nebula_create_storage_buffer(
   out_buf:  *WGPUBuffer,
   renderer: *NebulaRenderer,
-  size:     uint64,
+  data:     pointer,
+  size:     csize,
   label:    cstring
 ): boolean
   local buf_desc = WGPUBufferDescriptor{
     nextInChain      = nilptr,
     label            = wgpu_str(label),
     usage            = (@uint32)(WGPUBufferUsage_Storage) | (@uint32)(WGPUBufferUsage_CopyDst),
-    size             = size,
+    size             = (@uint64)(size),
     mappedAtCreation = false,
   }
   $out_buf = wgpuDeviceCreateBuffer(renderer.device, &buf_desc)
@@ -1210,7 +1187,36 @@ global function nebula_create_storage_buffer(
     printf("wgpu: failed to create storage buffer (%s)\n", label)
     return false
   end
-  printf("wgpu: storage buffer created (%s, %llu bytes)\n", label, size)
+  if data ~= nilptr and size > 0 then
+    wgpuQueueWriteBuffer(renderer.queue, $out_buf, 0, data, size)
+  end
+  printf("wgpu: storage buffer created (%s, %llu bytes)\n", label, (@uint64)(size))
+  return true
+end
+
+-- =============================================================================
+-- ★ BUG-3 修复：nebula_create_uniform_buffer
+--
+-- 创建一个 Uniform Buffer。Slug 管线的 init 方法需要此函数。
+-- =============================================================================
+global function nebula_create_uniform_buffer(
+  out_buf:  *WGPUBuffer,
+  renderer: *NebulaRenderer,
+  size:     csize,
+  label:    cstring
+): boolean
+  local buf_desc = WGPUBufferDescriptor{
+    nextInChain      = nilptr,
+    label            = wgpu_str(label),
+    usage            = (@uint32)(WGPUBufferUsage_Uniform) | (@uint32)(WGPUBufferUsage_CopyDst),
+    size             = (@uint64)(size),
+    mappedAtCreation = false,
+  }
+  $out_buf = wgpuDeviceCreateBuffer(renderer.device, &buf_desc)
+  if $out_buf == nilptr then
+    printf("wgpu: failed to create uniform buffer (%s)\n", label)
+    return false
+  end
   return true
 end
 
