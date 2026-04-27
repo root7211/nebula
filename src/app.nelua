@@ -418,3 +418,77 @@ global function nebula_frame_render_multipass(
   wgpuTextureViewRelease(view)
   wgpuTextureRelease(surface_tex.texture)
 end
+
+-- =============================================================================
+-- ★ Phase 4.2.1: nebula_main_loop — 跨平台主循环宏
+--
+-- 封装 Native（阻塞式 while）与 Web（emscripten_set_main_loop 回调式）的
+-- 循环结构差异，使 examples/*.nelua 的主循环收缩为单行宏调用。
+--
+-- 公理 A 合规：Native/Web 分支在 S1 阶段消解，生成代码中不存在运行时分支。
+--
+-- 使用方式（替代原来的 while not nebula_should_close() do ... end）：
+--
+--   -- 声明 input 和 prev_time（仍在应用层，保持透明性）
+--   local input: NebulaInputState
+--   local prev_time = glfwGetTime()
+--   nebula_main_loop(&renderer, &form, &input, prev_time, 0.09, 0.09, 0.10)
+--   nebula_shutdown(&renderer)
+--
+-- 参数说明：
+--   renderer_ptr  — *NebulaRenderer
+--   app_ptr       — *AppType（auto 泛型）
+--   input_ptr     — *NebulaInputState
+--   prev_time_ptr — *float64（帧间时间戳，由调用方声明并传入）
+--   clear_r/g/b   — float64，背景清除色
+--
+-- 注意：宏不封装业务逻辑（如 Enter 键打印表单内容），业务逻辑仍保留在应用层。
+-- 如需在帧循环中插入业务逻辑，请继续使用手写 while 循环，或等待 Phase 4.3
+-- 的可编程帧钩子（frame hook）机制。
+-- =============================================================================
+
+## if NEBULA_TARGET == 'wasm' then
+-- Web 端：全局帧状态（Emscripten 回调无法捕获局部变量）
+global _nebula_ml_renderer:  *NebulaRenderer = nilptr
+global _nebula_ml_input:     *NebulaInputState = nilptr
+global _nebula_ml_prev_time: float64 = 0.0
+global _nebula_ml_clear_r:   float64 = 0.0
+global _nebula_ml_clear_g:   float64 = 0.0
+global _nebula_ml_clear_b:   float64 = 0.0
+-- Web 端帧回调（由 emscripten_set_main_loop 注册）
+global function _nebula_wasm_frame(): void
+  glfwPollEvents()
+  local now = glfwGetTime()
+  local dt  = (@float32)(now - _nebula_ml_prev_time)
+  _nebula_ml_prev_time = now
+  nebula_collect_input(_nebula_window, _nebula_ml_input, dt)
+  nebula_frame_render(_nebula_ml_renderer, $(@pointer)(_nebula_ml_renderer), _nebula_ml_input, dt,
+    _nebula_ml_clear_r, _nebula_ml_clear_g, _nebula_ml_clear_b)
+end
+## end
+
+-- nebula_main_loop: 跨平台主循环宏
+-- Native 端展开为阻塞式 while 循环；Web 端注册 Emscripten 回调后立即返回。
+## function nebula_main_loop(renderer_ptr, app_ptr, input_ptr, prev_time_ptr, cr, cg, cb)
+  ## if NEBULA_TARGET == 'wasm' then
+  -- Web: 将帧状态写入全局变量，注册回调，控制权交还浏览器
+  _nebula_ml_renderer  = #[renderer_ptr]#
+  _nebula_ml_input     = #[input_ptr]#
+  _nebula_ml_prev_time = $#[prev_time_ptr]#
+  _nebula_ml_clear_r   = #[cr]#
+  _nebula_ml_clear_g   = #[cg]#
+  _nebula_ml_clear_b   = #[cb]#
+  emscripten_set_main_loop(_nebula_wasm_frame, 0, 1)
+  ## else
+  -- Native: 传统阻塞循环
+  while not nebula_should_close() do
+    glfwPollEvents()
+    local _now = glfwGetTime()
+    local _dt  = (@float32)(_now - $#[prev_time_ptr]#)
+    $#[prev_time_ptr]# = _now
+    nebula_collect_input(_nebula_window, #[input_ptr]#, _dt)
+    nebula_frame_render(#[renderer_ptr]#, #[app_ptr]#, #[input_ptr]#, _dt,
+      #[cr]#, #[cg]#, #[cb]#)
+  end
+  ## end
+## end

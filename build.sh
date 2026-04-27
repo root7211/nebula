@@ -2,67 +2,93 @@
 # =============================================================================
 # Nebula GUI Compiler — Build Script
 #
-# 当前仓库状态：Phase 3.10.5 — 独立文本标签支持 + 多 Pass 渲染兼容
+# 当前仓库状态：Phase 4.2.1 — 跨平台 PAL (Platform Abstraction Layer) 骨架
 #
 # Usage:
-#   ./build.sh                     # 默认构建 button_demo
-#   ./build.sh button_demo         # 构建 Phase 3.9 按钮演示（最简入门）
-#   ./build.sh layout_demo         # 构建 Phase 3.9 编译期 Flexbox 布局演示
-#   ./build.sh login_demo          # 构建 Phase 3.9 登录框演示（文本一等公民）
-#   ./build.sh form_demo           # 构建 Phase 3.9 表单演示（文本一等公民）
-#   ./build.sh dynamic_list_demo   # 构建 Phase 3.9 动态列表演示（Slot Producer）
-#   ./build.sh shadow_demo         # 构建 Phase 3.10.5 阴影演示（已升级到 App 编排体系）
-#   ./build.sh text_demo           # 构建 Phase 3.10.5 文本渲染展示（已升级，支持独立文本标签）
+#   ./build.sh [demo_name] [options]
 #
-# 回归测试：
-#   bash tools/run_all_tests.sh   # 运行全部回归测试
+# Options:
+#   --target=linux|windows|wasm    目标平台 (默认: linux)
+#   --display=x11|wayland          Linux 显示协议 (默认: x11)
+#
+# Examples:
+#   ./build.sh form_demo                          # Linux X11 (默认)
+#   ./build.sh form_demo --target=linux --display=wayland
+#   ./build.sh form_demo --target=windows
+#   ./build.sh form_demo --target=wasm
 # =============================================================================
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENDOR="$SCRIPT_DIR/vendor/wgpu-native"
 
-if [ ! -d "$VENDOR" ]; then
-  echo "[nebula] Error: vendor/wgpu-native not found."
-  echo "         Please download wgpu-native v29.0.0.0 and extract to vendor/wgpu-native/"
-  echo "         See README.md for instructions."
-  exit 1
-fi
+# 默认参数
+DEMO_TARGET="button_demo"
+NEBULA_TARGET="linux"
+NEBULA_DISPLAY="x11"
 
-# 解析目标参数（默认 button_demo）
-TARGET="${1:-button_demo}"
+# 解析参数
+for arg in "$@"; do
+  case "$arg" in
+    --target=*)
+      NEBULA_TARGET="${arg#*=}"
+      ;;
+    --display=*)
+      NEBULA_DISPLAY="${arg#*=}"
+      ;;
+    -*)
+      # 忽略其他选项
+      ;;
+    *)
+      DEMO_TARGET="$arg"
+      ;;
+  esac
+done
 
-case "$TARGET" in
+# 验证 Demo 目标
+case "$DEMO_TARGET" in
   button_demo|layout_demo|login_demo|form_demo|dynamic_list_demo|shadow_demo|text_demo)
-    NEEDS_GPU=1
     ;;
   *)
-    echo "[nebula] Error: unknown target '$TARGET'"
-    echo "         Available targets:"
-    echo "           Phase 3.10.5 (最新 API):"
-    echo "             button_demo, layout_demo, login_demo, form_demo, dynamic_list_demo"
-    echo "           Phase 3.10.5 (新升级):"
-    echo "             shadow_demo, text_demo"
+    echo "[nebula] Error: unknown demo target '$DEMO_TARGET'"
     exit 1
     ;;
 esac
 
-echo "[nebula] Building $TARGET..."
+echo "[nebula] Building $DEMO_TARGET for $NEBULA_TARGET ($NEBULA_DISPLAY)..."
 
-nelua \
-  -L "$SCRIPT_DIR/src" \
-  -L "$SCRIPT_DIR/assets/generated" \
-  --cflags="-I$VENDOR/include" \
-  --ldflags="-L$VENDOR/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,$VENDOR/lib" \
-  "$SCRIPT_DIR/examples/$TARGET.nelua"
+# 根据目标平台配置编译选项
+NELUA_FLAGS="-L $SCRIPT_DIR/src -L $SCRIPT_DIR/assets/generated"
+NELUA_FLAGS="$NELUA_FLAGS -D NEBULA_TARGET=$NEBULA_TARGET"
 
-echo "[nebula] Build complete: ~/.cache/nelua/$TARGET"
-echo ""
+if [ "$NEBULA_TARGET" == "linux" ]; then
+  if [ ! -d "$VENDOR" ]; then
+    echo "[nebula] Error: vendor/wgpu-native not found for linux build."
+    exit 1
+  fi
+  NELUA_FLAGS="$NELUA_FLAGS -D NEBULA_LINUX_DISPLAY=$NEBULA_DISPLAY"
+  CFLAGS="-I$VENDOR/include"
+  LDFLAGS="-L$VENDOR/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,$VENDOR/lib"
+  
+elif [ "$NEBULA_TARGET" == "windows" ]; then
+  # Windows 编译配置 (假设在 Windows 环境或使用交叉编译)
+  CFLAGS="-I$VENDOR/include"
+  LDFLAGS="-L$VENDOR/lib -lwgpu_native -lglfw3 -luser32 -lgdi32 -lshell32"
+  
+elif [ "$NEBULA_TARGET" == "wasm" ]; then
+  # Web (Wasm) 编译配置
+  NELUA_FLAGS="$NELUA_FLAGS --cc emcc"
+  LDFLAGS="-sUSE_WEBGPU=1 -sUSE_GLFW=3 -sALLOW_MEMORY_GROWTH=1"
+  # Wasm 目标通常输出为 .html
+  NELUA_FLAGS="$NELUA_FLAGS -o ~/.cache/nelua/$DEMO_TARGET.html"
+fi
 
-# 运行指引
-echo "To run:"
-echo "  LD_LIBRARY_PATH=$VENDOR/lib ~/.cache/nelua/$TARGET"
-echo ""
-echo "If no display available, use Xvfb:"
-echo "  Xvfb :99 -screen 0 1024x768x24 &"
-echo "  DISPLAY=:99 LD_LIBRARY_PATH=$VENDOR/lib ~/.cache/nelua/$TARGET"
+# 执行编译
+nelua $NELUA_FLAGS --cflags="$CFLAGS" --ldflags="$LDFLAGS" "$SCRIPT_DIR/examples/$DEMO_TARGET.nelua"
+
+echo "[nebula] Build complete."
+if [ "$NEBULA_TARGET" == "wasm" ]; then
+  echo "Output: ~/.cache/nelua/$DEMO_TARGET.html"
+else
+  echo "Output: ~/.cache/nelua/$DEMO_TARGET"
+fi
