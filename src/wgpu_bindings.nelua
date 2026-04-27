@@ -120,8 +120,12 @@ global WGPUColorWriteMask_All <comptime> = (@WGPUColorWriteMask)(0x0000000F)
 
 global WGPUSType = @uint32
 global WGPUSType_ShaderSourceWGSL        <comptime> = (@WGPUSType)(0x00000002)
-global WGPUSType_SurfaceSourceXlibWindow <comptime> = (@WGPUSType)(0x00000006)
-global WGPUSType_InstanceExtras          <comptime> = (@WGPUSType)(0x00030006)
+global WGPUSType_SurfaceSourceMetalLayer           <comptime> = (@WGPUSType)(0x00000004)
+global WGPUSType_SurfaceSourceWindowsHWND          <comptime> = (@WGPUSType)(0x00000005)
+global WGPUSType_SurfaceSourceXlibWindow           <comptime> = (@WGPUSType)(0x00000006)
+global WGPUSType_SurfaceSourceWaylandSurface       <comptime> = (@WGPUSType)(0x00000007)
+global WGPUSType_SurfaceSourceCanvasHTMLSelector   <comptime> = (@WGPUSType)(0x0000000F)
+global WGPUSType_InstanceExtras                    <comptime> = (@WGPUSType)(0x00030006)
 
 -- wgpu-native 扩展：后端选择枚举
 -- 当前使用 WGPUInstanceBackend_All（Vulkan 优先），保留其余值供未来后端切换
@@ -385,11 +389,40 @@ global WGPURenderPipelineDescriptor <cimport, nodecl> = @record{
   fragment:     *WGPUFragmentState,
 }
 
+-- =============================================================================
+-- ★ Phase 4.2.1: Surface 来源结构体（五端）
+--
+-- 每个平台使用不同的 Surface 来源描述符。
+-- 条件编译在 renderer.nelua 中根据 NEBULA_TARGET 选择对应的结构体。
+-- SType 值均来自 webgpu-headers 官方规范：
+--   https://webgpu-native.github.io/webgpu-headers/group__Enumerations.html
+-- =============================================================================
+
 -- Surface 来源（Linux X11）
 global WGPUSurfaceSourceXlibWindow <cimport, nodecl> = @record{
   chain:   WGPUChainedStruct,
   display: pointer,
   window:  uint64,
+}
+
+-- ★ Phase 4.2.1: Surface 来源（Linux Wayland）
+global WGPUSurfaceSourceWaylandSurface <cimport, nodecl> = @record{
+  chain:   WGPUChainedStruct,
+  display: pointer,
+  surface: pointer,
+}
+
+-- ★ Phase 4.2.1: Surface 来源（Windows HWND）
+global WGPUSurfaceSourceWindowsHWND <cimport, nodecl> = @record{
+  chain:     WGPUChainedStruct,
+  hinstance: pointer,
+  hwnd:      pointer,
+}
+
+-- ★ Phase 4.2.1: Surface 来源（Web Canvas HTML Selector）
+global WGPUSurfaceSourceCanvasHTMLSelector <cimport, nodecl> = @record{
+  chain:    WGPUChainedStruct,
+  selector: cstring,
 }
 
 global WGPUSurfaceDescriptor <cimport, nodecl> = @record{

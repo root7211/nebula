@@ -1,12 +1,43 @@
 -- =============================================================================
 -- glfw_bindings.nelua
--- Nebula GUI Compiler — GLFW 3 Nelua 绑定（Phase 0 最小子集）
+-- Nebula GUI Compiler — GLFW 3 Nelua 绑定
+--
+-- ★ Phase 4.2.1: 条件化平台导入（PAL 骨架）
+--   根据 NEBULA_TARGET / NEBULA_LINUX_DISPLAY 选择性暴露 native 访问函数：
+--   - Linux X11:   glfwGetX11Display / glfwGetX11Window
+--   - Linux Wayland: glfwGetWaylandDisplay / glfwGetWaylandWindow
+--   - Windows:     glfwGetWin32Window + Win32 GetModuleHandleA
+--   - Web (Wasm):  emscripten_set_main_loop（为 nebula_main_loop 宏准备）
+--
+-- 公理 A 合规：所有平台分支在 S1 阶段消解，生成代码中不存在运行时平台判断。
 -- =============================================================================
 
 ## linklib "glfw"
 ## cinclude "<GLFW/glfw3.h>"
-## cdefine "GLFW_EXPOSE_NATIVE_X11"
-## cinclude "<GLFW/glfw3native.h>"
+
+-- =============================================================================
+-- ★ Phase 4.2.1: 条件化 native header 导入
+--
+-- Native 端需要 glfw3native.h 获取平台原生句柄；Web 端不需要。
+-- 每个平台只暴露自身所需的 EXPOSE_NATIVE 宏，避免引入不存在的头文件。
+-- =============================================================================
+## if NEBULA_TARGET ~= 'wasm' then
+  ## if NEBULA_TARGET == 'linux' then
+    ## if NEBULA_LINUX_DISPLAY == 'wayland' then
+      ## cdefine "GLFW_EXPOSE_NATIVE_WAYLAND"
+    ## else
+      -- 默认 X11（含 NEBULA_LINUX_DISPLAY == 'x11'）
+      ## cdefine "GLFW_EXPOSE_NATIVE_X11"
+    ## end
+  ## elseif NEBULA_TARGET == 'windows' then
+    ## cdefine "GLFW_EXPOSE_NATIVE_WIN32"
+  ## end
+  ## cinclude "<GLFW/glfw3native.h>"
+## end
+
+-- =============================================================================
+-- 核心窗口与输入 API（所有平台共用）
+-- =============================================================================
 
 global GLFWwindow <cimport, nodecl> = @pointer
 
@@ -33,40 +64,75 @@ global function glfwGetCursorPos(window: GLFWwindow, xpos: *float64, ypos: *floa
 global function glfwGetMouseButton(window: GLFWwindow, button: int32): int32 <cimport, nodecl> end
 global function glfwGetWindowSize(window: GLFWwindow, width: *int32, height: *int32): void <cimport, nodecl> end
 global function glfwSetWindowShouldClose(window: GLFWwindow, value: int32): void <cimport, nodecl> end
-global function glfwGetX11Display(): pointer <cimport, nodecl> end
-global function glfwGetX11Window(window: GLFWwindow): uint64 <cimport, nodecl> end
 global function glfwGetTime(): float64 <cimport, nodecl> end
 global function glfwGetKey(window: GLFWwindow, key: int32): int32 <cimport, nodecl> end
+
+-- =============================================================================
+-- ★ Phase 4.2.1: 平台原生访问函数（条件编译）
+--
+-- 每个平台只绑定自身所需的函数，避免在非目标平台上引用未定义符号。
+-- =============================================================================
+
+-- Linux X11 原生访问
+## if NEBULA_TARGET == 'linux' and NEBULA_LINUX_DISPLAY ~= 'wayland' then
+global function glfwGetX11Display(): pointer <cimport, nodecl> end
+global function glfwGetX11Window(window: GLFWwindow): uint64 <cimport, nodecl> end
+## end
+
+-- Linux Wayland 原生访问
+## if NEBULA_TARGET == 'linux' and NEBULA_LINUX_DISPLAY == 'wayland' then
+global function glfwGetWaylandDisplay(): pointer <cimport, nodecl> end
+-- 返回 wl_surface*，与 WGPUSurfaceSourceWaylandSurface.surface 字段类型一致
+global function glfwGetWaylandWindow(window: GLFWwindow): pointer <cimport, nodecl> end
+## end
+
+-- Windows 原生访问
+## if NEBULA_TARGET == 'windows' then
+global function glfwGetWin32Window(window: GLFWwindow): pointer <cimport, nodecl> end
+-- hinstance 通过 Win32 API 获取（GLFW 未提供此函数）
+## cinclude "<windows.h>"
+global function GetModuleHandleA(lpModuleName: cstring): pointer <cimport, nodecl> end
+## end
+
+-- Web (Wasm) Emscripten 主循环 API（为 nebula_main_loop 宏准备）
+## if NEBULA_TARGET == 'wasm' then
+## cinclude "<emscripten.h>"
+global function emscripten_set_main_loop(
+  func:                  function(): void,
+  fps:                   int32,
+  simulate_infinite_loop: int32
+): void <cimport, nodecl> end
+## end
 
 -- =============================================================================
 -- ★ Phase 3.4.1: 键盘输入绑定
 -- =============================================================================
 
 -- 常用控制键 keycode 常量
-global GLFW_KEY_BACKSPACE  <comptime> = 259
-global GLFW_KEY_DELETE     <comptime> = 261
-global GLFW_KEY_ENTER      <comptime> = 257
-global GLFW_KEY_KP_ENTER   <comptime> = 335
-global GLFW_KEY_TAB        <comptime> = 258
-global GLFW_KEY_ESCAPE     <comptime> = 256
-global GLFW_KEY_LEFT       <comptime> = 263
-global GLFW_KEY_RIGHT      <comptime> = 262
-global GLFW_KEY_HOME       <comptime> = 268
-global GLFW_KEY_END        <comptime> = 269
-global GLFW_KEY_LEFT_SHIFT <comptime> = 340
+global GLFW_KEY_BACKSPACE   <comptime> = 259
+global GLFW_KEY_DELETE      <comptime> = 261
+global GLFW_KEY_ENTER       <comptime> = 257
+global GLFW_KEY_KP_ENTER    <comptime> = 335
+global GLFW_KEY_TAB         <comptime> = 258
+global GLFW_KEY_ESCAPE      <comptime> = 256
+global GLFW_KEY_LEFT        <comptime> = 263
+global GLFW_KEY_RIGHT       <comptime> = 262
+global GLFW_KEY_HOME        <comptime> = 268
+global GLFW_KEY_END         <comptime> = 269
+global GLFW_KEY_LEFT_SHIFT  <comptime> = 340
 global GLFW_KEY_RIGHT_SHIFT <comptime> = 344
-global GLFW_KEY_LEFT_CONTROL <comptime> = 341
+global GLFW_KEY_LEFT_CONTROL  <comptime> = 341
 global GLFW_KEY_RIGHT_CONTROL <comptime> = 345
-global GLFW_KEY_LEFT_ALT   <comptime> = 342
-global GLFW_KEY_RIGHT_ALT  <comptime> = 346
+global GLFW_KEY_LEFT_ALT    <comptime> = 342
+global GLFW_KEY_RIGHT_ALT   <comptime> = 346
 
 -- 修饰键 mods 位掩码
-global GLFW_MOD_SHIFT    <comptime> = 0x0001
-global GLFW_MOD_CONTROL  <comptime> = 0x0002
+global GLFW_MOD_SHIFT   <comptime> = 0x0001
+global GLFW_MOD_CONTROL <comptime> = 0x0002
 
 -- 回调函数类型（C 函数指针）
-global GLFWkeyfun    <cimport, nodecl> = @function(window: GLFWwindow, key: int32, scancode: int32, action: int32, mods: int32): void
-global GLFWcharfun   <cimport, nodecl> = @function(window: GLFWwindow, codepoint: uint32): void
+global GLFWkeyfun  <cimport, nodecl> = @function(window: GLFWwindow, key: int32, scancode: int32, action: int32, mods: int32): void
+global GLFWcharfun <cimport, nodecl> = @function(window: GLFWwindow, codepoint: uint32): void
 
 -- 注册回调
 global function glfwSetKeyCallback(window: GLFWwindow, callback: GLFWkeyfun): GLFWkeyfun <cimport, nodecl> end

@@ -2,13 +2,18 @@
 -- renderer.nelua
 -- Nebula GUI Compiler — WebGPU 渲染层
 --
+-- ★ Phase 4.2.1: 跨平台 Surface 创建与 Instance 初始化
+--   通过 NEBULA_TARGET + NEBULA_LINUX_DISPLAY 条件编译，在 S1 阶段消解平台分支：
+--   - Linux (X11):     XlibWindow Surface + wgpu-native InstanceExtras
+--   - Linux (Wayland): WaylandSurface + wgpu-native InstanceExtras
+--   - Windows:         HWND Surface + Win32 GetModuleHandleA + wgpu-native InstanceExtras
+--   - Web (Wasm):      Canvas HTML Selector + 标准 WebGPU API
+--
 -- Phase 2.3.1: 抽取公共 API `nebula_pipeline_base_init`
 --   封装 WGPU 管线、BindGroupLayout、Uniform Buffer 的创建逻辑。
---   所有派生的 <T>Pipeline:init 都将委托调用此函数，从而消除每个
---   派生管线中重复的 ~200 行 WGPU 样板代码。
 --
 -- Phase 2.3.3: 移除硬编码的 NebulaRectUniforms / RECT_SHADER_WGSL /
---   NebulaRectPipeline，彻底实现"形即渲染"架构。
+--   NebulaRectPipeline，彻底实现“形即渲染”架构。
 -- =============================================================================
 
 require "nebula_core"
@@ -60,7 +65,10 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   self.width  = w
   self.height = h
 
-  -- 1. 创建 Instance（使用默认后端选择，Vulkan 优先）
+  -- 1. 创建 Instance（★ Phase 4.2.1: 条件链接 wgpu-native 扩展）
+  --    Native 端使用 WGPUInstanceExtras 选择后端；Web 端直接使用标准 WebGPU C API。
+  ## if NEBULA_TARGET ~= 'wasm' then
+  -- Native (Linux/Windows): 使用 wgpu-native 扩展，Vulkan/Dx12 优先
   local inst_extras = WGPUInstanceExtras{
     chain    = WGPUChainedStruct{ next = nilptr, sType = WGPUSType_InstanceExtras },
     backends = WGPUInstanceBackend_All,
@@ -77,13 +85,23 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   local inst_desc = WGPUInstanceDescriptor{
     nextInChain = (@pointer)(&inst_extras)
   }
+  ## else
+  -- Web (Wasm): 标准 WebGPU API，无需 wgpu-native 扩展
+  local inst_desc = WGPUInstanceDescriptor{
+    nextInChain = nilptr
+  }
+  ## end
   self.instance = wgpuCreateInstance(&inst_desc)
   if self.instance == nilptr then
     printf("wgpu: failed to create instance\n")
     return false
   end
 
-  -- 2. 创建 Surface（Linux X11 / WSLg）
+  -- 2. 创建 Surface（★ Phase 4.2.1: 四路跨平台条件编译）
+  --    公理 A 合规：平台分支在 S1 阶段全部消解，生成代码中仅包含目标平台的单一路径。
+  --    SType 均来自 webgpu-headers 官方规范。
+  ## if NEBULA_TARGET == 'linux' and NEBULA_LINUX_DISPLAY ~= 'wayland' then
+  -- Linux (X11) 路径
   local xlib_src = WGPUSurfaceSourceXlibWindow{
     chain   = WGPUChainedStruct{
       next  = nilptr,
@@ -96,6 +114,51 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
     nextInChain = (@*WGPUChainedStruct)(&xlib_src),
     label       = wgpu_str_null(),
   }
+  ## elseif NEBULA_TARGET == 'linux' and NEBULA_LINUX_DISPLAY == 'wayland' then
+  -- Linux (Wayland) 路径
+  local wl_src = WGPUSurfaceSourceWaylandSurface{
+    chain   = WGPUChainedStruct{
+      next  = nilptr,
+      sType = WGPUSType_SurfaceSourceWaylandSurface,
+    },
+    display = glfwGetWaylandDisplay(),
+    surface = glfwGetWaylandWindow(window),
+  }
+  local surf_desc = WGPUSurfaceDescriptor{
+    nextInChain = (@*WGPUChainedStruct)(&wl_src),
+    label       = wgpu_str_null(),
+  }
+  ## elseif NEBULA_TARGET == 'windows' then
+  -- Windows (HWND) 路径
+  -- hinstance 使用 Win32 API GetModuleHandleA，而非 GLFW 函数
+  -- （GLFW 未提供获取 HINSTANCE 的公开 API）
+  local hwnd_src = WGPUSurfaceSourceWindowsHWND{
+    chain = WGPUChainedStruct{
+      next  = nilptr,
+      sType = WGPUSType_SurfaceSourceWindowsHWND,
+    },
+    hinstance = GetModuleHandleA(nilptr),
+    hwnd      = glfwGetWin32Window(window),
+  }
+  local surf_desc = WGPUSurfaceDescriptor{
+    nextInChain = (@*WGPUChainedStruct)(&hwnd_src),
+    label       = wgpu_str_null(),
+  }
+  ## elseif NEBULA_TARGET == 'wasm' then
+  -- Web (Canvas HTML Selector) 路径
+  -- selector 对应 HTML 中 <canvas id="nebula-canvas"> 元素
+  local canvas_src = WGPUSurfaceSourceCanvasHTMLSelector{
+    chain = WGPUChainedStruct{
+      next  = nilptr,
+      sType = WGPUSType_SurfaceSourceCanvasHTMLSelector,
+    },
+    selector = "#nebula-canvas",
+  }
+  local surf_desc = WGPUSurfaceDescriptor{
+    nextInChain = (@*WGPUChainedStruct)(&canvas_src),
+    label       = wgpu_str_null(),
+  }
+  ## end
   self.surface = wgpuInstanceCreateSurface(self.instance, &surf_desc)
   if self.surface == nilptr then
     printf("wgpu: failed to create surface\n")

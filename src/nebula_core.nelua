@@ -1,8 +1,9 @@
 -- =============================================================================
 -- nebula_core.nelua
--- Nebula GUI Compiler — Phase 2.4
+-- Nebula GUI Compiler — Phase 4.2.1
 --
 -- 编译期推导引擎：
+--   · ★ Phase 4.2.1 新增：NEBULA_TARGET 平台检测（S1 阶段编译期常量）
 --   · 类型系统（Vec2 / Vec4 / Color / NebulaInputState）
 --   · 注解注册表（nebula_annotate）
 --   · WGSL Uniform 生成器、Uniform 字节大小计算（保留 Phase 0 API）
@@ -14,6 +15,83 @@
 --
 -- 所有 / ##[[ ]] 块中的代码在编译期由 Lua 执行；运行时不存在任何派生开销。
 -- =============================================================================
+
+-- =============================================================================
+-- ★ Phase 4.2.1: NEBULA_TARGET — 平台检测（S1 阶段编译期常量）
+--
+-- 在 S1 阶段确定目标平台，所有后续的条件编译（Surface 创建、主循环结构、
+-- 链接选项）均依赖此全局常量。
+--
+-- 检测优先级：
+--   1. 编译器命令行传入的 -D NEBULA_TARGET=xxx
+--   2. 环境变量 NEBULA_TARGET
+--   3. 自动检测（基于 Nelua 编译器的 ccinfo）
+--
+-- 合法值：
+--   "linux"   — Linux (X11/Wayland)，默认
+--   "windows" — Windows (Win32 HWND)
+--   "wasm"    — Web (Emscripten + WebGPU)
+--
+-- 公理 A 合规性：平台检测是 S1 操作（输入在编译期已知），
+-- 生成的代码中不存在任何运行时 if (platform == ...) 分支。
+-- =============================================================================
+##[[
+  -- 第一优先级：编译器 -D 传入（已在全局表中）
+  if not NEBULA_TARGET then
+    -- 第二优先级：环境变量
+    local env_target = os.getenv("NEBULA_TARGET")
+    if env_target and env_target ~= "" then
+      NEBULA_TARGET = env_target
+    else
+      -- 第三优先级：基于编译器信息自动检测
+      -- ccinfo.is_emscripten 在 Nelua 使用 emcc 时为 true
+      if ccinfo and ccinfo.is_emscripten then
+        NEBULA_TARGET = "wasm"
+      elseif ccinfo and ccinfo.is_windows then
+        NEBULA_TARGET = "windows"
+      else
+        NEBULA_TARGET = "linux"
+      end
+    end
+  end
+
+  -- 验证合法性
+  local valid_targets = { linux = true, windows = true, wasm = true }
+  assert(valid_targets[NEBULA_TARGET],
+    "[nebula] NEBULA_TARGET must be 'linux', 'windows', or 'wasm', got: '" .. tostring(NEBULA_TARGET) .. "'")
+
+  -- 导出为编译期可查询的全局常量
+  -- 后续代码可通过 ## if NEBULA_TARGET == 'xxx' then ... end 进行条件编译
+  print("[nebula] S1: NEBULA_TARGET = " .. NEBULA_TARGET)
+
+  -- ★ Phase 4.2.1: NEBULA_LINUX_DISPLAY — Linux 显示协议子变量
+  --
+  -- 仅在 NEBULA_TARGET == 'linux' 时有意义。
+  -- 公理 A 合规：X11/Wayland 选择在 S1 阶段消解，不引入运行时分支。
+  --
+  -- 检测优先级：
+  --   1. 编译器 -D NEBULA_LINUX_DISPLAY=xxx
+  --   2. 环境变量 NEBULA_LINUX_DISPLAY
+  --   3. 默认値 "x11"
+  --
+  -- 合法値：
+  --   "x11"     — Linux X11（默认）
+  --   "wayland" — Linux Wayland
+  if NEBULA_TARGET == "linux" then
+    if not NEBULA_LINUX_DISPLAY then
+      local env_display = os.getenv("NEBULA_LINUX_DISPLAY")
+      if env_display and env_display ~= "" then
+        NEBULA_LINUX_DISPLAY = env_display
+      else
+        NEBULA_LINUX_DISPLAY = "x11"
+      end
+    end
+    local valid_displays = { x11 = true, wayland = true }
+    assert(valid_displays[NEBULA_LINUX_DISPLAY],
+      "[nebula] NEBULA_LINUX_DISPLAY must be 'x11' or 'wayland', got: '" .. tostring(NEBULA_LINUX_DISPLAY) .. "'")
+    print("[nebula] S1: NEBULA_LINUX_DISPLAY = " .. NEBULA_LINUX_DISPLAY)
+  end
+]]
 
 -- -----------------------------------------------------------------------------
 -- 第一层：语义类型系统（Semantic Type System）
