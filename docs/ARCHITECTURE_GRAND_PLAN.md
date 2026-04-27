@@ -122,7 +122,7 @@ Nebula 的发展并非线性，而是遵循着从“形即外观”到“形即�
 | **4.3** | **可编程原语注册表** | **暴露 `nebula_register_primitive` API，允许界面开发者在 S1 编译期安全注入自定义交互逻辑。** | **规划中** |
 | 4.4 | 高级宏观原语库 | 基于可编程原语注册表，实现 `multiline_editable`、`scrollable_y`、`clipboard_aware` 等高级宏观原语。 | 规划中 |
 | 4.5 | 小型文本编辑器原型 | 作为 Era II 的里程碑验证，使用自定义原语构建一个功能完备的小型文本编辑器原型。 | 规划中 |
-| 5.0 | 自动化 CI/CD 与工业化发布 | 确保 Linux、Windows、Web 三端代码在每次提交时都能自动编译并通过全量回归测试，建立工业级的发布流程。 | 规划中 |
+| 5.0 | 自动化 CI/CD 与工业化发布 | 确保 Linux、Windows、Web 三端代码在每次提交时都能自动编译并通过全量回归测试，建立工业级的发布流程。**wasm 端到端验证**包含在本阶段：安装 Emscripten 工具链（emsdk）并纳入 CI；确认 wgpu-native wasm 构建产物（静态库或 Emscripten port）；提供包含 `<canvas id="nebula-canvas">` 的 HTML 宿主模板；验证浏览器原生 WebGPU 兼容性（Chrome 113+ / Firefox Nightly）。注：wasm 的编译期骨架（`NEBULA_TARGET`、四路 Surface、`nebula_main_loop` 宏）已在 Phase 4.2.1 完成，本阶段仅补完环境与部署验证。 | 规划中 |
 
 ### Era III：计算统一 (Unified Computation) — Phase 6.0+（远期愿景）
 
