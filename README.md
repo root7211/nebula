@@ -8,7 +8,7 @@ Nebula 不是运行时框架，不是响应式引擎，也不是场景图。它�
 
 ---
 
-### 当前状态：Phase 4.2.1 (PAL 骨架) 进行中
+### 当前状态：Phase 4.2.1 (PAL 骨架) 已完成 → 进入 Phase 4.2.2 (Slug 生产级化)
 
 **Phase 3.6.2 至 Phase 4.2.1 已全部合入主线**，全量回归测试（包含 Lua 冒烟测试和编译测试）**全部通过**。
 
@@ -99,19 +99,18 @@ Nebula 的全部设计决策由三条公理驱动，三者作用于正交维度�
 | 3.12 | 响应式重排 (Responsive Reflow) | 视口自适应 | 已完成 |
 | **4.0** | **编译期公理校验器** | **防止回退** | **已完成** |
 | **4.1** | **Slug 文本渲染引擎 (MVP)** | **Unicode 可行性验证** | **已完成**（引入内核债务 D-4.1-A/B/C） |
-| **4.2.1** | **跨平台 PAL 骨架** | **Linux/Windows/Web 三端源码级对齐** | **进行中（当前）** |
-| 4.2.2 | Slug 渲染内核生产级化 | 清算 D-4.1-A/B，评估 D-4.1-C | 规划中（可与 4.2.1 并行） |
+| **4.2.1** | **跨平台 PAL 骨架** | **Linux/Windows/Web 三端源码级对齐** | **已完成**（43/43 项冒烟测试通过） |
+| **4.2.2** | **Slug 渲染内核生产级化** | **清算 D-4.1-A/B，评估 D-4.1-C** | **进行中（当前）** |
 | 4.2.3 | HarfBuzz + CJK 集成 | 端一致 + 7000 字规模 | 规划中 |
 | 4.3 | 可编程原语注册表 | 引导 Era II | 规划中 |
 | 4.4 | 高级宏观原语库 | multiline/scrollable/clipboard | 规划中 |
 | 4.5 | 小型文本编辑器原型 | Era II 里程碑 | 规划中 |
 | 5.0 | 自动化 CI/CD 与工业化发布 | 三端自动回归 | 规划中 |
 
-**当前（Phase 4.1 已完成，进入 Phase 4.2.1）**：Slug 文本渲染引擎 MVP 已交付，47/47 项回归测试全部通过。MVP 限于 95 个 ASCII 字形、均匀 `BAND_COUNT=8`、跳过 Jacobian（详见 [ARCHITECTURE_GRAND_PLAN.md §5.2](docs/ARCHITECTURE_GRAND_PLAN.md) 技术债登记表）。
+**当前（Phase 4.2.1 已完成，进入 Phase 4.2.2）**：PAL 骨架已交付，43/43 项专项冒烟测试全部通过。四路 Surface 创建（X11/Wayland/Windows/Web）、`nebula_main_loop` 宏、`build.sh` 多端编译参数均已合入主线。
 
-**下一步（Phase 4.2.1 + 4.2.2 并行 → 4.2.3）**：
-- **4.2.1 PAL**：完成 `NEBULA_TARGET` 检测、`nebula_main_loop` 宏封装、三端 Surface 描述符分化，验收载体仍为 ASCII。
-- **4.2.2 Slug 生产级化**：清算 D-4.1-A（自适应 band 分割）与 D-4.1-B（Jacobian + SlugDilate），完成 Storage Buffer vs 纹理 benchmark。
+**下一步（Phase 4.2.2 → 4.2.3）**：
+- **4.2.2 Slug 生产级化**：清算 D-4.1-A（自适应 band 分割与等价子集合并）与 D-4.1-B（Jacobian + SlugDilate），完成 Storage Buffer vs 纹理 benchmark，字形覆盖扩展至 Latin Extended-A（~384 字形）。
 - **4.2.3 HarfBuzz + CJK**：在 4.2.1 + 4.2.2 完成后集成 HarfBuzz，按 charset 声明预计算 shaping 表，验证 7000 常用字在三端的一致性与性能。
 
 ---
@@ -122,7 +121,7 @@ Nebula 的全部设计决策由三条公理驱动，三者作用于正交维度�
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | 核心推导 | Gap Buffer + 选区 | 管线收敛 + 循环封装 | 文本一等公民 + Slot | 原语注册中心 + 独立文本 | Layout-App 统一注册 + 响应式重排 | **公理校验器（任务 A/B/C）** | **Slug 文本渲染引擎（S0/S1/S2）** |
 | 渲染技术 | L1/L2 分层 + 栈上排版 | 3 着色器 + 1 行样板 | 文本管线自动注入 | 元数据驱动 + 多 Pass 阴影 | 编译期分段系数推导 + 运行时扁平插小 | **只读断言模式，不修改状态** | **Slug 算法：贝塞尔曲线 + Band 索引 + Storage Buffer** |
-| 质量保障 | 260+ 项断言 | 专项测试 | 25/25 通过 | 27/27 通过，含注册表专项 | 全量回归通过，含 60 项响应式专项 | **28/28 通过，含任务 A/B/C 全覆盖** | **47/47 通过，含 S0/S1/S2 全阶段覆盖** |
+| 质量保障 | 260+ 项断言 | 专项测试 | 25/25 通过 | 27/27 通过，含注册表专项 | 全量回归通过，含 60 项响应式专项 | **28/28 通过，含任务 A/B/C 全覆盖** | **47/47 通过，含 S0/S1/S2 全阶段覆盖** | **43/43 通过，含四路 Surface + PAL 公理 A 合规** |
 
 ---
 
@@ -159,13 +158,17 @@ nebula/
 │   └── text_demo.nelua             # 文本渲染展示
 ├── tests/
 │   ├── smoke_phase3_12.lua         # Phase 3.12: 响应式重排专项（60 项断言）
+│   ├── smoke_phase4_2_1.lua        # ★ Phase 4.2.1: PAL 骨架专项（43 项断言）
 │   ├── smoke_phase4_1.lua          # ★ Phase 4.1: Slug 文本渲染引擎专项（47 项断言）
 │   ├── smoke_phase4_0.lua          # ★ Phase 4.0: 公理校验器专项（28 项断言）
 │   ├── smoke_phase3_11.lua         # Phase 3.11: 30 行愿景专项
 │   ├── smoke_phase3_10_5.lua       # Phase 3.10.5: 独立文本 + 多 Pass 专项
-│   └── ... (共 28 个测试，含编译回归)
+│   └── ... (共 29 个测试，含编译回归)
 ├── docs/
-│   ├── ARCHITECTURE_GRAND_PLAN.md  # ★ Nebula 架构总纲领 v2（三大公理、路线图）
+│   ├── ARCHITECTURE_GRAND_PLAN.md  # ★ Nebula 架构总纲领 v3.1（三大公理、路线图、技术债登记表）
+│   ├── IMPL_PHASE4_2_1_PAL.md      # ★ Phase 4.2.1: PAL 实施方案（含 glfw3webgpu 研究结论）
+│   ├── PLAN_PHASE4_2_2_SLUG.md     # Phase 4.2.2: Slug 生产级化计划（D-4.1-A/B/C 清算路径）
+│   ├── PLAN_PHASE4_2_3_CJK.md      # Phase 4.2.3: HarfBuzz + CJK 集成计划
 │   ├── PHASE3_12_*.md              # ★ Phase 3.12: 方案评估、公理审查与实现指南
 │   └── PLAN_PHASE*.md              # 各 Phase 历史计划文档
 ├── assets/
