@@ -486,6 +486,7 @@ global function wgpuRenderPassEncoderSetPipeline(pass: WGPURenderPassEncoder, pi
 global function wgpuRenderPassEncoderSetBindGroup(pass: WGPURenderPassEncoder, groupIndex: uint32, group: WGPUBindGroup, dynamicOffsetCount: csize, dynamicOffsets: pointer): void <cimport, nodecl> end
 global function wgpuRenderPassEncoderSetVertexBuffer(pass: WGPURenderPassEncoder, slot: uint32, buffer: WGPUBuffer, offset: uint64, size: uint64): void <cimport, nodecl> end
 global function wgpuRenderPassEncoderDraw(pass: WGPURenderPassEncoder, vertexCount: uint32, instanceCount: uint32, firstVertex: uint32, firstInstance: uint32): void <cimport, nodecl> end
+global function wgpuRenderPassEncoderSetScissorRect(pass: WGPURenderPassEncoder, x: uint32, y: uint32, width: uint32, height: uint32): void <cimport, nodecl> end
 global function wgpuRenderPassEncoderEnd(pass: WGPURenderPassEncoder): void <cimport, nodecl> end
 global function wgpuRenderPassEncoderRelease(pass: WGPURenderPassEncoder): void <cimport, nodecl> end
 global WGPUCommandBufferDescriptor <cimport, nodecl> = @record{

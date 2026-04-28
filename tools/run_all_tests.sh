@@ -118,6 +118,10 @@ run_test "smoke_phase3_12 (Phase 3.12 — 响应式重排 & Clamp 感知分段�
 run_test "smoke_phase4_3 (Phase 4.3 — 可编程原语注册表 & 参数校验)" \
   nelua-lua tests/smoke_phase4_3.lua
 
+# ★ Phase 4.4 S1: scrollable 原语注册 + scissor rect API 验证
+run_test "smoke_phase4_4_s1 (Phase 4.4 S1 — scrollable 原语注册 & 滚动逻辑验证)" \
+  nelua-lua tests/smoke_phase4_4_s1.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="
@@ -172,6 +176,13 @@ run_test "compile slider_demo (Phase 4.3 — 可编程原语 register_primitive 
   --cflags="-I./vendor/wgpu-native/include" \
   --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
   examples/slider_demo.nelua -o ~/.cache/nelua/slider_demo
+
+# ★ Phase 4.4 S1 新增：scrollable_demo 编译回归（scrollable 原语 + scissor rect 裁剪）
+run_test "compile scrollable_demo (Phase 4.4 S1 — scrollable 原语 + container + scissor rect)" \
+  nelua -c -L src -L assets/generated --add-path . --add-path examples --add-path assets/generated \
+  --cflags="-I./vendor/wgpu-native/include" \
+  --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
+  examples/scrollable_demo.nelua -o ~/.cache/nelua/scrollable_demo
 
 # ---- 总结 ----
 echo ""
