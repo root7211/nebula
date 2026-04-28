@@ -567,8 +567,8 @@ global ClickableState = @record{
 ## 
 ## -- 加载着色器组合器模块
 ## local shader_compose_mod = require "derive.shader_compose"
-## assert(shader_compose_mod == "nebula_shader_compose_v0.7_phase4.1",
-##   "nebula: failed to load derive/shader_compose.lua")  -- ★ Phase 4.1 升级
+## assert(shader_compose_mod == "nebula_shader_compose_v0.8_phase4.2.2",
+##   "nebula: failed to load derive/shader_compose.lua")  -- ★ Phase 4.2.2 升级
 ## 
 ## -- ★ Phase 2.3.2: 加载管线工厂模块
 ## local pipeline_factory_mod = require "derive.pipeline_factory"

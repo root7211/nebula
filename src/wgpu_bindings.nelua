@@ -87,11 +87,12 @@ global WGPUBufferUsage_QueryResolve <comptime> = (@WGPUBufferUsage)(0x00000200)
 
 global WGPUVertexFormat = @uint32
 global WGPUVertexFormat_Float32x2 <comptime> = (@WGPUVertexFormat)(0x0000001D)
+global WGPUVertexFormat_Float32x4 <comptime> = (@WGPUVertexFormat)(0x0000001F)
 
 global WGPUVertexStepMode = @uint32
-global WGPUVertexStepMode_Undefined <comptime> = (@WGPUVertexStepMode)(0x00000000)
-global WGPUVertexStepMode_Vertex    <comptime> = (@WGPUVertexStepMode)(0x00000001)
-global WGPUVertexStepMode_Instance  <comptime> = (@WGPUVertexStepMode)(0x00000002)
+global WGPUVertexStepMode_Undefined <comptime> = (@WGPUVertexStepMode)(0x00000001)
+global WGPUVertexStepMode_Vertex    <comptime> = (@WGPUVertexStepMode)(0x00000002)
+global WGPUVertexStepMode_Instance  <comptime> = (@WGPUVertexStepMode)(0x00000003)
 
 global WGPUShaderStage = @uint32
 global WGPUShaderStage_Vertex   <comptime> = (@WGPUShaderStage)(0x00000001)
@@ -222,10 +223,8 @@ global WGPUInstanceExtras <cimport, nodecl> = @record{
   glFenceBehaviour:   uint32,
   dxcPath:            WGPUStringView,
   dxcMaxShaderModel:  uint32,
-  dx12PresentationSystem: uint32,
   budgetForDeviceCreation: pointer,
   budgetForDeviceLoss:     pointer,
-  displayHandle:      record{ type_: uint32, data: [24]uint8 },
 }
 
 global WGPURequestAdapterOptions <cimport, nodecl> = @record{
@@ -275,7 +274,6 @@ global WGPUBindGroupLayoutEntry <cimport, nodecl> = @record{
   nextInChain:      pointer,
   binding:          uint32,
   visibility:       uint64,   -- WGPUShaderStage = WGPUFlags = uint64_t
-  bindingArraySize: uint32,
   buffer:           record{
     nextInChain:      pointer,
     type:             uint32,
@@ -573,14 +571,12 @@ global WGPUTexelCopyBufferLayout <cimport, nodecl> = @record{
 }
 
 global WGPUVertexAttribute <cimport, nodecl> = @record{
-  nextInChain:    pointer,
   format:         WGPUVertexFormat,
   offset:         uint64,
   shaderLocation: uint32,
 }
 
 global WGPUVertexBufferLayout <cimport, nodecl> = @record{
-  nextInChain:   pointer,
   stepMode:      WGPUVertexStepMode,
   arrayStride:   uint64,
   attributeCount: csize,

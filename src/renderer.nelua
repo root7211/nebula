@@ -78,7 +78,6 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
     glFenceBehaviour   = 0,
     dxcPath   = wgpu_str_null(),
     dxcMaxShaderModel  = 0,
-    dx12PresentationSystem = 0,
     budgetForDeviceCreation = nilptr,
     budgetForDeviceLoss     = nilptr,
   }
@@ -244,8 +243,8 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
 
   local i: uint32 = 0
   while i < caps.formatCount do
-    if fmt_ptr[i] == 27 then  -- WGPUTextureFormat_BGRA8Unorm
-      self.format = 27
+    if fmt_ptr[i] == WGPUTextureFormat_BGRA8Unorm then
+      self.format = WGPUTextureFormat_BGRA8Unorm
       found_preferred = true
       break
     end
@@ -255,8 +254,8 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   if not found_preferred then
     i = 0
     while i < caps.formatCount do
-      if fmt_ptr[i] == 22 then  -- WGPUTextureFormat_RGBA8Unorm
-        self.format = 22
+      if fmt_ptr[i] == WGPUTextureFormat_RGBA8Unorm then
+        self.format = WGPUTextureFormat_RGBA8Unorm
         found_preferred = true
         break
       end
@@ -265,7 +264,7 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   end
 
   if not found_preferred then
-    self.format = 27  -- 回退：强制尝试 BGRA8Unorm
+    self.format = WGPUTextureFormat_BGRA8Unorm  -- 回退
   end
 
   printf("wgpu: surface format = %u (non-sRGB)\n", self.format)
@@ -571,20 +570,17 @@ global function nebula_init_pos_uv_vertex_layout(
 ): void
   local attrs_ptr = (@*[0]WGPUVertexAttribute)(attrs)
   attrs_ptr[0] = WGPUVertexAttribute{
-    nextInChain    = nilptr,
-    format         = WGPUVertexFormat_Float32x2,
+        format         = WGPUVertexFormat_Float32x2,
     offset         = 0,
     shaderLocation = 0,
   }
   attrs_ptr[1] = WGPUVertexAttribute{
-    nextInChain    = nilptr,
-    format         = WGPUVertexFormat_Float32x2,
+        format         = WGPUVertexFormat_Float32x2,
     offset         = (@uint64)(#Vec2),
     shaderLocation = 1,
   }
   $out_layout = WGPUVertexBufferLayout{
-    nextInChain    = nilptr,
-    stepMode       = WGPUVertexStepMode_Vertex,
+        stepMode       = WGPUVertexStepMode_Vertex,
     arrayStride    = (@uint64)(#NebulaPosUvVertex),
     attributeCount = 2,
     attributes     = (@*WGPUVertexAttribute)(attrs_ptr),
@@ -1265,42 +1261,36 @@ global function nebula_init_slug_vertex_layout(
   local attrs_ptr = (@*[0]WGPUVertexAttribute)(attrs)
   -- attr0: pos (vec4<f32>)
   attrs_ptr[0] = WGPUVertexAttribute{
-    nextInChain    = nilptr,
-    format         = WGPUVertexFormat_Float32x4,
+        format         = WGPUVertexFormat_Float32x4,
     offset         = 0,
     shaderLocation = 0,
   }
   -- attr1: tex (vec4<f32>)
   attrs_ptr[1] = WGPUVertexAttribute{
-    nextInChain    = nilptr,
-    format         = WGPUVertexFormat_Float32x4,
+        format         = WGPUVertexFormat_Float32x4,
     offset         = 16,
     shaderLocation = 1,
   }
   -- attr2: bnd (vec4<f32>)
   attrs_ptr[2] = WGPUVertexAttribute{
-    nextInChain    = nilptr,
-    format         = WGPUVertexFormat_Float32x4,
+        format         = WGPUVertexFormat_Float32x4,
     offset         = 32,
     shaderLocation = 2,
   }
   -- attr3: jac (vec4<f32>) — Phase 4.2.2 D-4.1-B: Jacobian inverse
   attrs_ptr[3] = WGPUVertexAttribute{
-    nextInChain    = nilptr,
-    format         = WGPUVertexFormat_Float32x4,
+        format         = WGPUVertexFormat_Float32x4,
     offset         = 48,
     shaderLocation = 3,
   }
   -- attr4: col (vec4<f32>)
   attrs_ptr[4] = WGPUVertexAttribute{
-    nextInChain    = nilptr,
-    format         = WGPUVertexFormat_Float32x4,
+        format         = WGPUVertexFormat_Float32x4,
     offset         = 64,
     shaderLocation = 4,
   }
   $out_layout = WGPUVertexBufferLayout{
-    nextInChain    = nilptr,
-    stepMode       = WGPUVertexStepMode_Vertex,
+        stepMode       = WGPUVertexStepMode_Vertex,
     arrayStride    = 80,  -- 5 x vec4<f32> = 80 bytes
     attributeCount = 5,
     attributes     = (@*WGPUVertexAttribute)(attrs_ptr),
