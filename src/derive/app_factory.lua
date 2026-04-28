@@ -430,6 +430,10 @@ local function gen_app_record(app_name, reg)
   emit("  -- ★ Phase 3.8: FrameArena（内嵌后备内存，无堆分配）")
   emit("  arena: NebulaArena,")
   emit(("  _arena_backing: [%d]uint8,"):format(reg.arena_size))
+  -- ★ Phase 3.11: 延迟布局注入标志
+  if reg.layout_results and next(reg.layout_results) then
+    emit("  _layout_injected: boolean,")
+  end
   emit("}")
 
   return table.concat(L, "\n")
@@ -516,21 +520,12 @@ local function gen_app_init(app_name, reg)
   emit("  -- ★ Phase 3.8: 初始化 FrameArena（绑定内嵌后备内存）")
   emit(("  nebula_arena_init(&self.arena, &self._arena_backing[0], %d)"):format(reg.arena_size))
 
-  -- ★ Phase 3.11: 注入编译期布局坐标
+  -- ★ Phase 3.11: 延迟布局坐标注入标志
+  -- pos/size 将在 update 第一帧执行，确保在用户 Context_init 之后注入
   if reg.layout_results and next(reg.layout_results) then
     emit("")
-    emit("  -- ★ Phase 3.11: 编译期布局坐标注入（由 layout_engine 解算，消除手写魔法数字）")
-    for _, comp in ipairs(reg.components) do
-      local r = reg.layout_results[comp.name]
-      if r then
-        emit(("  -- [layout] %s: pos=(%.1f, %.1f) size=(%.1f x %.1f)"):format(
-          comp.name, r.x, r.y, r.w, r.h))
-        emit(("  self.%s.visual.pos  = Vec2{ x = %.1f, y = %.1f }"):format(
-          comp.name, r.x, r.y))
-        emit(("  self.%s.visual.size = Vec2{ x = %.1f, y = %.1f }"):format(
-          comp.name, r.w, r.h))
-      end
-    end
+    emit("  -- ★ Phase 3.11: 延迟布局注入标志（在 update 第一帧执行）")
+    emit("  self._layout_injected = false")
   end
 
   emit("  return true")
@@ -549,6 +544,35 @@ local function gen_app_update(app_name, reg)
   emit(("function %s:update(input: *NebulaInputState, dt: float32): void"):format(app_name))
   emit("  -- ★ Phase 3.8: 每帧开始时重置 Arena（O(1)，仅移动游标）")
   emit("  nebula_arena_reset(&self.arena)")
+
+  -- ★ Phase 3.11: 延迟布局坐标注入（第一帧执行一次，在 Context_init 之后）
+  if reg.layout_results and next(reg.layout_results) then
+    emit("")
+    emit("  -- ★ Phase 3.11: 延迟布局坐标注入（第一帧，在 Context_init 之后）")
+    emit("  if not self._layout_injected then")
+    emit("    self._layout_injected = true")
+    for _, comp in ipairs(reg.components) do
+      local r = reg.layout_results[comp.name]
+      if r then
+        emit(("    -- [layout] %s: pos=(%.1f, %.1f) size=(%.1f x %.1f)"):format(
+          comp.name, r.x, r.y, r.w, r.h))
+        emit(("    self.%s.visual.pos  = Vec2{ x = %.1f, y = %.1f }"):format(
+          comp.name, r.x, r.y))
+        emit(("    self.%s.visual.size = Vec2{ x = %.1f, y = %.1f }"):format(
+          comp.name, r.w, r.h))
+      end
+    end
+    -- Also inject viewport uniform update for first frame
+    local updated_pipes = {}
+    for vt, group in pairs(reg.type_groups) do
+      if not updated_pipes[group.pipeline_name] then
+        emit(("    self.pipe_%s:update_viewport(self.renderer, self.vw, self.vh)"):format(group.base:lower()))
+        updated_pipes[group.pipeline_name] = true
+      end
+    end
+    emit("  end")
+  end
+
   emit("  -- 按注册顺序显式更新所有静态组件")
   for _, comp in ipairs(reg.components) do
     emit(("  self.%s:update(input, dt)"):format(comp.name))
