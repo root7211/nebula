@@ -1,0 +1,183 @@
+-- =============================================================================
+-- slider_demo.nelua
+-- Nebula GUI Compiler — Custom Primitive Demo
+--
+-- Demonstrates nebula_register_primitive() API:
+--   Register a "draggable_value" primitive, then use it in SliderVisual
+--   alongside the built-in "hoverable" and "clickable" primitives.
+--
+-- The slider value changes from 0.0 to 1.0 as the user drags the knob.
+-- =============================================================================
+## cinclude "<stdio.h>"
+
+require "nebula_core"
+require "glfw_bindings"
+require "wgpu_bindings"
+require "renderer"
+require "app"
+require "nebula_arena"
+
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+
+local WIN_W <comptime> = 800
+local WIN_H <comptime> = 600
+
+-- =============================================================================
+-- ★ Register custom "draggable_value" primitive (before nebula_annotate)
+-- =============================================================================
+##[[
+local _slider_fields = {
+  {name="value", type="float32"},
+  {name="prev_mouse_x", type="float32"},
+  {name="is_dragging", type="boolean"},
+}
+local _slider_body = function(spec, lines)
+  table.insert(lines, "  -- draggable_value: track drag state")
+  table.insert(lines, "  if self.click.just_clicked then")
+  table.insert(lines, "    self.is_dragging = true")
+  table.insert(lines, "    self.prev_mouse_x = input.mouse_x")
+  table.insert(lines, "  elseif not input.mouse_left_down then")
+  table.insert(lines, "    self.is_dragging = false")
+  table.insert(lines, "  end")
+  table.insert(lines, "  if self.is_dragging then")
+  table.insert(lines, "    local dx = input.mouse_x - self.prev_mouse_x")
+  table.insert(lines, "    self.value = self.value + dx / self.visual.size.x")
+  table.insert(lines, "    if self.value < 0.0 then self.value = 0.0 end")
+  table.insert(lines, "    if self.value > 1.0 then self.value = 1.0 end")
+  table.insert(lines, "    self.prev_mouse_x = input.mouse_x")
+  table.insert(lines, "  end")
+end
+local _slider_transitions = {
+  {guard="self.is_dragging", target="Dragging", priority=40},
+}
+nebula_register_primitive("draggable_value", {
+  dependencies      = {"clickable"},
+  context_fields    = _slider_fields,
+  process_body      = _slider_body,
+  state_transitions = _slider_transitions,
+})
+]]
+
+-- =============================================================================
+-- Visual specification + annotate + derive
+-- =============================================================================
+global SliderVisual = @record{
+  pos:    Vec2,
+  size:   Vec2,
+  radius: float32,
+
+  default_bg_color:     Color,
+  default_border_color: Color,
+  default_border_width: float32,
+  default_knob_color:   Color,
+
+  hovered_bg_color:     Color,
+  hovered_border_color: Color,
+  hovered_border_width: float32,
+  hovered_knob_color:   Color,
+
+  dragging_bg_color:    Color,
+  dragging_border_color: Color,
+  dragging_border_width: float32,
+  dragging_knob_color:   Color,
+}
+
+##[[
+nebula_annotate("SliderVisual", {
+  states     = {"default", "hovered", "dragging"},
+  primitives = {"hoverable", "clickable", "draggable_value"},
+  transitions = {
+    {from="default", to="hovered", on="hover_enter"},
+    {from="hovered", to="default", on="hover_leave"},
+    {from="hovered", to="dragging", on="drag_start"},
+    {from="dragging", to="hovered", on="drag_end"},
+  },
+})
+]]
+## nebula_derive("SliderVisual")
+
+-- =============================================================================
+-- ★ Derive SliderApp
+-- =============================================================================
+##[[
+  nebula_app_begin("SliderApp")
+    nebula_app_register_component("slider", "SliderVisual")
+  nebula_app_end()
+]]
+## nebula_derive_app("SliderApp")
+
+-- =============================================================================
+-- Main program
+-- =============================================================================
+local function main(): int32
+  if glfwInit() == 0 then printf("glfw: init failed\n") return 1 end
+  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
+
+  local window = glfwCreateWindow(WIN_W, WIN_H, "Nebula — Slider Demo (custom primitive)", nilptr, nilptr)
+  if window == nilptr then printf("glfw: window creation failed\n") return 1 end
+
+  nebula_input_install_callbacks(window)
+
+  local renderer: NebulaRenderer
+  if not renderer:init(window, WIN_W, WIN_H) then return 1 end
+
+  -- SliderApp:init automatically initializes SliderPipeline + embedded FrameArena
+  local app: SliderApp
+  if not app:init(&renderer, WIN_W, WIN_H) then return 1 end
+
+  -- Initialize slider visual specification
+  app.slider:init(SliderVisual{
+    pos    = Vec2{ x = 250.0, y = 280.0 },
+    size   = Vec2{ x = 300.0, y = 40.0 },
+    radius = 8.0,
+
+    default_bg_color     = Color{ r=0.18, g=0.18, b=0.22, a=1.0 },
+    default_border_color = Color{ r=0.35, g=0.35, b=0.40, a=1.0 },
+    default_border_width = 1.0,
+    default_knob_color   = Color{ r=0.50, g=0.50, b=0.55, a=1.0 },
+
+    hovered_bg_color     = Color{ r=0.22, g=0.22, b=0.28, a=1.0 },
+    hovered_border_color = Color{ r=0.40, g=0.60, b=1.00, a=1.0 },
+    hovered_border_width = 2.0,
+    hovered_knob_color   = Color{ r=0.60, g=0.70, b=1.00, a=1.0 },
+
+    dragging_bg_color    = Color{ r=0.25, g=0.25, b=0.32, a=1.0 },
+    dragging_border_color = Color{ r=0.50, g=0.80, b=1.00, a=1.0 },
+    dragging_border_width = 2.5,
+    dragging_knob_color   = Color{ r=0.70, g=0.85, b=1.00, a=1.0 },
+  })
+
+  local input: NebulaInputState
+  local prev_time = glfwGetTime()
+
+  -- =============================================================================
+  -- Main loop
+  -- =============================================================================
+  while glfwWindowShouldClose(window) == 0 do
+    glfwPollEvents()
+    local now = glfwGetTime()
+    local dt  = (@float32)(now - prev_time)
+    prev_time = now
+    nebula_collect_input(window, &input, dt)
+
+    -- Business logic: report slider value while dragging
+    if app.slider.is_dragging then
+      printf("slider value: %.3f\n", app.slider.value)
+    end
+
+    -- nebula_frame_render encapsulates all rendering
+    nebula_frame_render(&renderer, &app, &input, dt, 0.09, 0.09, 0.10)
+  end
+
+  wgpuSurfaceRelease(renderer.surface)
+  wgpuDeviceRelease(renderer.device)
+  wgpuAdapterRelease(renderer.adapter)
+  wgpuInstanceRelease(renderer.instance)
+  glfwDestroyWindow(window)
+  glfwTerminate()
+  printf("nebula: clean exit\n")
+  return 0
+end
+
+main()

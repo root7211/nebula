@@ -114,7 +114,11 @@ run_test "smoke_phase3_11 (Phase 3.11 — Layout-App 统一注册 & 30 行愿景
 run_test "smoke_phase3_12 (Phase 3.12 — 响应式重排 & Clamp 感知分段插值验证)" \
   nelua-lua tests/smoke_phase3_12.lua
 
-# ---- Part 2: 编译回归测试（Nelua → C → 二进制） ----
+# ★ Phase 4.3 专项测试（可编程原语注册表 — register_primitive API 验证）
+run_test "smoke_phase4_3 (Phase 4.3 — 可编程原语注册表 & 参数校验)" \
+  nelua-lua tests/smoke_phase4_3.lua
+
+# ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="
 
@@ -161,6 +165,13 @@ run_test "compile text_demo (Phase 3.10.5 — 独立文本标签已支持)" \
   --cflags="-I./vendor/wgpu-native/include" \
   --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
   examples/text_demo.nelua -o ~/.cache/nelua/text_demo
+
+# ★ Phase 4.3 新增：slider_demo 编译回归（可编程原语 register_primitive DX 验证）
+run_test "compile slider_demo (Phase 4.3 — 可编程原语 register_primitive DX 验证)" \
+  nelua -c -L src -L assets/generated --add-path . --add-path examples --add-path assets/generated \
+  --cflags="-I./vendor/wgpu-native/include" \
+  --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
+  examples/slider_demo.nelua -o ~/.cache/nelua/slider_demo
 
 # ---- 总结 ----
 echo ""

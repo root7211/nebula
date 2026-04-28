@@ -245,7 +245,40 @@ function nebula_register_primitive(name, spec)
   assert(type(spec) == "table",
     "nebula_register_primitive: spec must be a table")
   assert(not NEBULA_PRIMITIVES[name],
-    ("nebula_register_primitive: primitive '%s' is already registered (built-in)"):format(name))
+    ("nebula_register_primitive: primitive '%s' is already registered (built-in or custom)"):format(name))
+
+  -- ★ Phase 4.3 S2: 基础参数校验
+  -- 依赖存在性检查：所有依赖必须已注册
+  for _, dep in ipairs(spec.dependencies or {}) do
+    assert(NEBULA_PRIMITIVES[dep],
+      ("nebula_register_primitive: dependency '%s' for primitive '%s' is not registered"):format(dep, name))
+  end
+
+  -- context_fields 格式校验：每项必须是 {name=string, type=string}
+  for i, f in ipairs(spec.context_fields or {}) do
+    assert(type(f) == "table",
+      ("nebula_register_primitive: context_fields[%d] for '%s' must be a table"):format(i, name))
+    assert(type(f.name) == "string" and #f.name > 0,
+      ("nebula_register_primitive: context_fields[%d].name for '%s' must be a non-empty string"):format(i, name))
+    assert(type(f.type) == "string" and #f.type > 0,
+      ("nebula_register_primitive: context_fields[%d].type for '%s' must be a non-empty string"):format(i, name))
+  end
+
+  -- state_transitions 格式校验
+  for i, tr in ipairs(spec.state_transitions or {}) do
+    assert(type(tr) == "table",
+      ("nebula_register_primitive: state_transitions[%d] for '%s' must be a table"):format(i, name))
+    assert(type(tr.guard) == "string" and #tr.guard > 0,
+      ("nebula_register_primitive: state_transitions[%d].guard for '%s' must be a non-empty string"):format(i, name))
+    assert(type(tr.target) == "string" and #tr.target > 0,
+      ("nebula_register_primitive: state_transitions[%d].target for '%s' must be a non-empty string"):format(i, name))
+  end
+
+  -- process_body 格式校验
+  if spec.process_body ~= nil then
+    assert(type(spec.process_body) == "function",
+      ("nebula_register_primitive: process_body for '%s' must be a function"):format(name))
+  end
 
   NEBULA_PRIMITIVES[name] = {
     name              = name,
