@@ -649,7 +649,7 @@ end
 -- 请使用 gen_pipeline_standard_instanced（通过 nebula_derive 自动派生）
 
 -- =============================================================================
--- ★ Phase 4.1: Slug 文本管线生成（必须在 nebula_gen_pipeline_source 之前定义）
+-- ★ Phase 4.2.2: Slug 文本管线生成（必须在 nebula_gen_pipeline_source 之前定义）
 --
 -- 生成支持 Slug 算法的 <T>Pipeline 源码。
 -- 绑定布局：
@@ -657,7 +657,7 @@ end
 --   Binding 1: Storage Buffer (曲线数据，只读)
 --   Binding 2: Storage Buffer (Band 元数据，只读)
 --   Binding 3: Storage Buffer (Band 曲线引用索引，只读)
--- 顶点格式： NebulaSlugVertex (4 x vec4<f32> = 64 bytes/vertex)
+-- 顶点格式： NebulaSlugVertex (5 x vec4<f32> = 80 bytes/vertex)
 -- =============================================================================
 local function gen_pipeline_slug_text(base, uniforms_record, wgsl_source)
   local pipe = base .. "Pipeline"
@@ -691,7 +691,7 @@ local function gen_pipeline_slug_text(base, uniforms_record, wgsl_source)
   emit("  nebula_bgl_entry_storage_ro(&bgl_entries[3], 3)")
   emit(("  self.bind_layout = nebula_create_bind_group_layout(renderer, &bgl_entries[0], 4, \"nebula-%s-slug-bgl\")"):format(base:lower()))
   emit("  if self.bind_layout == nilptr then return false end")
-  emit("  local attrs: [4]WGPUVertexAttribute")
+  emit("  local attrs: [5]WGPUVertexAttribute")
   emit("  local vlayout: WGPUVertexBufferLayout")
   emit("  nebula_init_slug_vertex_layout(&vlayout, &attrs[0])")
   emit(("  self.pipeline = nebula_create_render_pipeline_with_layout(renderer, self.bind_layout, %s, #%s, renderer.format, &vlayout, \"nebula-%s-slug-pipeline\")"):format(wgsl_const, wgsl_const, base:lower()))

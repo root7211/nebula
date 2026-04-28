@@ -1,18 +1,19 @@
 -- =============================================================================
 -- tools/font_preprocessor_slug.nelua
--- Nebula GUI Compiler — Phase 4.1 (S0)
+-- Nebula GUI Compiler — Phase 4.2.2 (S0)
 --
 -- Slug 模式字体预处理工具：
 --   · 通过 stb_truetype 读取 TTF，提取每个字形的二次贝塞尔曲线轮廓
 --   · 将直线段转换为退化二次贝塞尔（含对角线微扰，防止 Slug 根判定失效）
 --   · 将三次贝塞尔在中点处分裂为两段二次贝塞尔
---   · 按 Slug 算法要求，将曲线打包为水平/垂直 Band 索引结构
+--   · ★ Phase 4.2.2 D-4.1-A: 自适应 Band 数量 + 等价子集哈希合并
 --   · 导出 liberation_sans_slug_metrics.nelua（编译期常量数组）
 --
 -- 输出格式：
 --   · NebulaSlugCurve  — 每条二次贝塞尔的 3 个控制点（em 空间，font units）
 --   · NebulaSlugBand   — 每个 Band 的曲线索引列表（offset + count）
 --   · NebulaSlugGlyph  — 每个字形的 Band 起始偏移、曲线起始偏移、边界框、advance
+--     ★ 新增 h_band_count, v_band_count 字段（per-glyph 非均匀 band 数量）
 --
 -- 用法：
 --   mkdir -p assets/generated
@@ -55,10 +56,11 @@ local OUTPUT_METRICS <const>  = "assets/generated/liberation_sans_slug_metrics.n
 local FIRST_CODEPOINT <comptime> = 32    -- ASCII space
 local LAST_CODEPOINT  <comptime> = 126   -- ASCII ~
 local GLYPH_COUNT     <comptime> = LAST_CODEPOINT - FIRST_CODEPOINT + 1
-local BAND_COUNT      <comptime> = 8     -- 每轴 8 个 Band（水平 + 垂直）
+-- ★ Phase 4.2.2: 移除固定 BAND_COUNT，改为自适应
+local MAX_BAND_COUNT  <comptime> = 32    -- 单轴最大 Band 数量
 local LINE_EPSILON    <const>    = 0.125 -- 对角线微扰量（防止退化二次贝塞尔失效）
 local MAX_CURVES_PER_GLYPH <comptime> = 512
-local MAX_BANDS_PER_GLYPH  <comptime> = BAND_COUNT * 2  -- h-bands + v-bands
+local MAX_BANDS_PER_GLYPH  <comptime> = MAX_BAND_COUNT * 2  -- h-bands + v-bands
 local MAX_BAND_CURVE_REFS  <comptime> = MAX_CURVES_PER_GLYPH * 4  -- 每条曲线最多跨 4 个 band
 
 -- =============================================================================
@@ -82,13 +84,15 @@ local BandMeta = @record{
   count:  uint16,  -- 该 Band 包含的曲线数量
 }
 
--- 字形元数据
+-- ★ Phase 4.2.2: 字形元数据（新增 h_band_count / v_band_count）
 local GlyphMeta = @record{
   codepoint:    cint,
   curve_offset: uint32,   -- 在全局 curves 数组中的偏移
   curve_count:  uint16,   -- 本字形的曲线数量
-  band_offset:  uint32,   -- 在全局 band_meta 数组中的偏移（共 BAND_COUNT*2 个 BandMeta）
+  band_offset:  uint32,   -- 在全局 band_meta 数组中的偏移
   ref_offset:   uint32,   -- 在全局 band_curve_refs 数组中的偏移（本字形的 refs 起始）
+  h_band_count: uint16,   -- ★ Phase 4.2.2: 水平 Band 数量（合并后）
+  v_band_count: uint16,   -- ★ Phase 4.2.2: 垂直 Band 数量（合并后）
   x_min: float32, y_min: float32,
   x_max: float32, y_max: float32,
   advance: float32,
@@ -234,7 +238,90 @@ local function extract_glyph_curves(
 end
 
 -- =============================================================================
--- Band 构建：将曲线按水平/垂直 Band 分区
+-- ★ Phase 4.2.2 D-4.1-A: 自适应 Band 数量
+-- 根据字形曲线密度动态确定每轴 Band 数量
+-- =============================================================================
+local function adaptive_band_count(ncurves: uint16): uint16
+  if ncurves < 20 then
+    return 4
+  elseif ncurves <= 80 then
+    return 8
+  else
+    return 16
+  end
+end
+
+-- =============================================================================
+-- ★ Phase 4.2.2 D-4.1-A: 等价子集哈希合并
+-- 对相邻 band 计算曲线索引集合的哈希签名，签名相同则合并
+-- 返回合并后的 band 数量
+-- =============================================================================
+local function merge_equivalent_bands(
+  band_counts: *[MAX_BAND_COUNT]uint16,
+  band_refs:   *[MAX_BAND_COUNT][MAX_CURVES_PER_GLYPH]uint16,
+  raw_band_count: uint16
+): uint16
+  if raw_band_count <= 1 then return raw_band_count end
+
+  -- 为每个 band 计算哈希签名（基于曲线索引集合）
+  local hashes: [MAX_BAND_COUNT]uint32
+  local b: uint16 = 0
+  while b < raw_band_count do
+    local h: uint32 = 0x811c9dc5  -- FNV-1a 初始值
+    local c: uint16 = 0
+    while c < band_counts[b] do
+      local idx = (@uint32)(band_refs[b][c])
+      h = (h ~ idx) * 0x01000193
+      c = c + 1
+    end
+    -- 也将 count 纳入哈希，确保空 band 和非空 band 不会被误合并
+    h = (h ~ (@uint32)(band_counts[b])) * 0x01000193
+    hashes[b] = h
+    b = b + 1
+  end
+
+  -- 合并相邻的等价 band
+  -- merged_map[i] = 合并后 band i 对应的原始 band 索引（取第一个）
+  local merged_count: uint16 = 1
+  local merged_src: [MAX_BAND_COUNT]uint16  -- 合并后每个 band 使用哪个原始 band 的数据
+  merged_src[0] = 0
+
+  b = 1
+  while b < raw_band_count do
+    if hashes[b] ~= hashes[b - 1] or band_counts[b] ~= band_counts[merged_src[merged_count - 1]] then
+      -- 不等价，新建一个合并 band
+      merged_src[merged_count] = b
+      merged_count = merged_count + 1
+    end
+    -- 等价则跳过（合并到前一个）
+    b = b + 1
+  end
+
+  -- 如果没有合并发生，直接返回
+  if merged_count == raw_band_count then
+    return raw_band_count
+  end
+
+  -- 将合并后的 band 数据写回（原地重排）
+  local m: uint16 = 0
+  while m < merged_count do
+    local src = merged_src[m]
+    if m ~= src then
+      band_counts[m] = band_counts[src]
+      local c: uint16 = 0
+      while c < band_counts[src] do
+        band_refs[m][c] = band_refs[src][c]
+        c = c + 1
+      end
+    end
+    m = m + 1
+  end
+
+  return merged_count
+end
+
+-- =============================================================================
+-- Band 构建：将曲线按水平/垂直 Band 分区（支持自适应 band 数量）
 -- h-bands: 按 y 轴分区（用于水平扫描线）
 -- v-bands: 按 x 轴分区（用于垂直扫描线）
 -- =============================================================================
@@ -243,11 +330,13 @@ local function build_bands(
   ncurves:    uint16,
   x_min: float32, y_min: float32,
   x_max: float32, y_max: float32,
+  h_band_count: uint16,
+  v_band_count: uint16,
   -- 输出：每个 band 的曲线索引列表（临时，栈上分配）
-  h_band_counts: *[BAND_COUNT]uint16,
-  h_band_refs:   *[BAND_COUNT][MAX_CURVES_PER_GLYPH]uint16,
-  v_band_counts: *[BAND_COUNT]uint16,
-  v_band_refs:   *[BAND_COUNT][MAX_CURVES_PER_GLYPH]uint16
+  h_band_counts: *[MAX_BAND_COUNT]uint16,
+  h_band_refs:   *[MAX_BAND_COUNT][MAX_CURVES_PER_GLYPH]uint16,
+  v_band_counts: *[MAX_BAND_COUNT]uint16,
+  v_band_refs:   *[MAX_BAND_COUNT][MAX_CURVES_PER_GLYPH]uint16
 ): void
   local width  = x_max - x_min
   local height = y_max - y_min
@@ -269,10 +358,10 @@ local function build_bands(
     if c.p2x > cx_max then cx_max = c.p2x end
     -- 分配到水平 Band（按 y 轴）
     if height > 0.0 then
-      local b0 = (@cint)(floor((@float64)((cy_min - y_min) / height * BAND_COUNT)))
-      local b1 = (@cint)(floor((@float64)((cy_max - y_min) / height * BAND_COUNT)))
+      local b0 = (@cint)(floor((@float64)((cy_min - y_min) / height * (@float32)(h_band_count))))
+      local b1 = (@cint)(floor((@float64)((cy_max - y_min) / height * (@float32)(h_band_count))))
       if b0 < 0 then b0 = 0 end
-      if b1 >= BAND_COUNT then b1 = BAND_COUNT - 1 end
+      if b1 >= (@cint)(h_band_count) then b1 = (@cint)(h_band_count) - 1 end
       local b = b0
       while b <= b1 do
         local cnt = h_band_counts[b]
@@ -285,10 +374,10 @@ local function build_bands(
     end
     -- 分配到垂直 Band（按 x 轴）
     if width > 0.0 then
-      local b0 = (@cint)(floor((@float64)((cx_min - x_min) / width * BAND_COUNT)))
-      local b1 = (@cint)(floor((@float64)((cx_max - x_min) / width * BAND_COUNT)))
+      local b0 = (@cint)(floor((@float64)((cx_min - x_min) / width * (@float32)(v_band_count))))
+      local b1 = (@cint)(floor((@float64)((cx_max - x_min) / width * (@float32)(v_band_count))))
       if b0 < 0 then b0 = 0 end
-      if b1 >= BAND_COUNT then b1 = BAND_COUNT - 1 end
+      if b1 >= (@cint)(v_band_count) then b1 = (@cint)(v_band_count) - 1 end
       local b = b0
       while b <= b1 do
         local cnt = v_band_counts[b]
@@ -353,10 +442,10 @@ local function main(): cint
 
   -- 临时存储每个字形的曲线（栈上）
   local tmp_curves: [MAX_CURVES_PER_GLYPH]SlugCurve
-  local h_band_counts: [BAND_COUNT]uint16
-  local h_band_refs:   [BAND_COUNT][MAX_CURVES_PER_GLYPH]uint16
-  local v_band_counts: [BAND_COUNT]uint16
-  local v_band_refs:   [BAND_COUNT][MAX_CURVES_PER_GLYPH]uint16
+  local h_band_counts: [MAX_BAND_COUNT]uint16
+  local h_band_refs:   [MAX_BAND_COUNT][MAX_CURVES_PER_GLYPH]uint16
+  local v_band_counts: [MAX_BAND_COUNT]uint16
+  local v_band_refs:   [MAX_BAND_COUNT][MAX_CURVES_PER_GLYPH]uint16
 
   -- 全局曲线缓冲区（堆分配）
   local MAX_TOTAL_CURVES <comptime> = GLYPH_COUNT * MAX_CURVES_PER_GLYPH
@@ -367,8 +456,8 @@ local function main(): cint
     return 1
   end
 
-  -- 全局 BandMeta 缓冲区（每个字形有 BAND_COUNT*2 个 BandMeta）
-  local MAX_TOTAL_BAND_METAS <comptime> = GLYPH_COUNT * BAND_COUNT * 2
+  -- 全局 BandMeta 缓冲区（每个字形最多 MAX_BAND_COUNT*2 个 BandMeta）
+  local MAX_TOTAL_BAND_METAS <comptime> = GLYPH_COUNT * MAX_BAND_COUNT * 2
   local all_band_metas = (@*[0]BandMeta)(malloc(MAX_TOTAL_BAND_METAS * #BandMeta))
   if all_band_metas == nilptr then
     printf("slug_preprocessor: out of memory (band_metas)\n")
@@ -394,16 +483,24 @@ local function main(): cint
     local cp: cint = FIRST_CODEPOINT + gi
     local glyph_idx = stbtt_FindGlyphIndex(&font, cp)
 
+    -- 提取曲线
+    local ncurves = extract_glyph_curves(&font, glyph_idx, &tmp_curves)
+
+    -- ★ Phase 4.2.2: 自适应 Band 数量
+    local h_bc = adaptive_band_count(ncurves)
+    local v_bc = adaptive_band_count(ncurves)
+
     -- 清零临时 Band 计数
-    local b = 0
-    while b < BAND_COUNT do
+    local b: uint16 = 0
+    while b < h_bc do
       h_band_counts[b] = 0
+      b = b + 1
+    end
+    b = 0
+    while b < v_bc do
       v_band_counts[b] = 0
       b = b + 1
     end
-
-    -- 提取曲线
-    local ncurves = extract_glyph_curves(&font, glyph_idx, &tmp_curves)
 
     -- 获取边界框（em 空间）
     local bx0: cint = 0
@@ -421,6 +518,21 @@ local function main(): cint
     local lsb: cint = 0
     stbtt_GetGlyphHMetrics(&font, glyph_idx, &adv, &lsb)
 
+    -- 构建 Band 分区
+    if ncurves > 0 then
+      build_bands(
+        &tmp_curves, ncurves,
+        x_min, y_min, x_max, y_max,
+        h_bc, v_bc,
+        &h_band_counts, &h_band_refs,
+        &v_band_counts, &v_band_refs
+      )
+    end
+
+    -- ★ Phase 4.2.2: 等价子集合并
+    local merged_h_bc = merge_equivalent_bands(&h_band_counts, &h_band_refs, h_bc)
+    local merged_v_bc = merge_equivalent_bands(&v_band_counts, &v_band_refs, v_bc)
+
     -- 记录字形元数据
     glyph_metas[gi] = GlyphMeta{
       codepoint    = cp,
@@ -428,6 +540,8 @@ local function main(): cint
       curve_count  = ncurves,
       band_offset  = total_band_metas,
       ref_offset   = total_band_refs,
+      h_band_count = merged_h_bc,
+      v_band_count = merged_v_bc,
       x_min = x_min, y_min = y_min,
       x_max = x_max, y_max = y_max,
       advance = (@float32)(adv),
@@ -442,23 +556,13 @@ local function main(): cint
     end
     total_curves = total_curves + ncurves
 
-    -- 构建 Band 分区
-    if ncurves > 0 then
-      build_bands(
-        &tmp_curves, ncurves,
-        x_min, y_min, x_max, y_max,
-        &h_band_counts, &h_band_refs,
-        &v_band_counts, &v_band_refs
-      )
-    end
-
     -- 将 Band 元数据和引用写入全局数组
     -- h-bands 先，v-bands 后（与 Slug 着色器约定一致）
     local band_ref_base = total_band_refs
     -- 先计算所有 band 的 offset（相对于本字形 ref_offset 的偏移）
     local local_ref_offset: uint32 = 0
-    local b2 = 0
-    while b2 < BAND_COUNT do
+    local b2: uint16 = 0
+    while b2 < merged_h_bc do
       -- h-band
       all_band_metas[total_band_metas] = BandMeta{
         offset = band_ref_base + local_ref_offset,
@@ -469,7 +573,7 @@ local function main(): cint
       b2 = b2 + 1
     end
     b2 = 0
-    while b2 < BAND_COUNT do
+    while b2 < merged_v_bc do
       -- v-band
       all_band_metas[total_band_metas] = BandMeta{
         offset = band_ref_base + local_ref_offset,
@@ -482,7 +586,7 @@ local function main(): cint
 
     -- 写入 h-band 曲线引用（按 max_x 降序排序，优化 Slug 早退）
     b2 = 0
-    while b2 < BAND_COUNT do
+    while b2 < merged_h_bc do
       -- 对 h_band_refs[b2] 按曲线 max_x 降序排序（插入排序，数量小）
       local cnt = (@cint)(h_band_counts[b2])
       local j = 1
@@ -522,7 +626,7 @@ local function main(): cint
 
     -- 写入 v-band 曲线引用（按 max_y 降序排序）
     b2 = 0
-    while b2 < BAND_COUNT do
+    while b2 < merged_v_bc do
       local cnt = (@cint)(v_band_counts[b2])
       local j = 1
       while j < cnt do
@@ -575,7 +679,7 @@ local function main(): cint
     return 1
   end
 
-  f:write("-- Auto-generated by tools/font_preprocessor_slug.nelua (Phase 4.1)\n")
+  f:write("-- Auto-generated by tools/font_preprocessor_slug.nelua (Phase 4.2.2)\n")
   f:write("-- DO NOT EDIT — regenerate with: nelua -L src tools/font_preprocessor_slug.nelua\n\n")
 
   -- 全局常量
@@ -583,7 +687,7 @@ local function main(): cint
   f:write(("global NEBULA_SLUG_FIRST_CODEPOINT <const> = %d\n"):format(FIRST_CODEPOINT))
   f:write(("global NEBULA_SLUG_LAST_CODEPOINT  <const> = %d\n"):format(LAST_CODEPOINT))
   f:write(("global NEBULA_SLUG_GLYPH_COUNT     <const> = %d\n"):format(GLYPH_COUNT))
-  f:write(("global NEBULA_SLUG_BAND_COUNT       <const> = %d\n"):format(BAND_COUNT))
+  -- ★ Phase 4.2.2: 移除全局 NEBULA_SLUG_BAND_COUNT，改为 per-glyph
   f:write(("global NEBULA_SLUG_ASCENT           <const> = %d\n"):format(ascent))
   f:write(("global NEBULA_SLUG_DESCENT          <const> = %d\n"):format(descent))
   f:write(("global NEBULA_SLUG_LINE_GAP         <const> = %d\n"):format(line_gap))
@@ -604,13 +708,15 @@ local function main(): cint
   f:write("  count:  uint16,\n")
   f:write("}\n\n")
 
-  -- NebulaSlugGlyph 类型定义
+  -- ★ Phase 4.2.2: NebulaSlugGlyph 新增 h_band_count / v_band_count
   f:write("global NebulaSlugGlyph = @record{\n")
   f:write("  codepoint:    cint,\n")
   f:write("  curve_offset: uint32,\n")
   f:write("  curve_count:  uint16,\n")
   f:write("  band_offset:  uint32,\n")
   f:write("  ref_offset:   uint32,\n")
+  f:write("  h_band_count: uint16,\n")
+  f:write("  v_band_count: uint16,\n")
   f:write("  x_min: float32, y_min: float32,\n")
   f:write("  x_max: float32, y_max: float32,\n")
   f:write("  advance: float32,\n")
@@ -647,13 +753,14 @@ local function main(): cint
   end
   f:write("}\n\n")
 
-  -- 字形元数据数组
+  -- ★ Phase 4.2.2: 字形元数据数组（包含 per-glyph band count）
   f:write(("global NEBULA_SLUG_GLYPHS: [%d]NebulaSlugGlyph <const> = {\n"):format(GLYPH_COUNT))
   for gi = 0, GLYPH_COUNT - 1 do
     local g = glyph_metas[gi]
-    f:write(("  { codepoint=%d, curve_offset=%d, curve_count=%d, band_offset=%d, ref_offset=%d, x_min=%.2f, y_min=%.2f, x_max=%.2f, y_max=%.2f, advance=%.2f, lsb=%.2f },\n"):format(
+    f:write(("  { codepoint=%d, curve_offset=%d, curve_count=%d, band_offset=%d, ref_offset=%d, h_band_count=%d, v_band_count=%d, x_min=%.2f, y_min=%.2f, x_max=%.2f, y_max=%.2f, advance=%.2f, lsb=%.2f },\n"):format(
       g.codepoint, (@cint)(g.curve_offset), (@cint)(g.curve_count),
       (@cint)(g.band_offset), (@cint)(g.ref_offset),
+      (@cint)(g.h_band_count), (@cint)(g.v_band_count),
       g.x_min, g.y_min, g.x_max, g.y_max,
       g.advance, g.lsb))
   end

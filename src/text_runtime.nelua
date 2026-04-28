@@ -372,7 +372,7 @@ global function nebula_text_hit_test(
 end
 
 -- =============================================================================
--- ★ Phase 4.1: Slug 文本渲染运行时支持
+-- ★ Phase 4.2.2: Slug 文本渲染运行时支持
 --
 -- 设计哲学（公理 A）：
 --   · NebulaSlugVertex 是纯值类型，不持有任何 GPU 资源生命周期。
@@ -380,11 +380,12 @@ end
 --     输出顶点数组，不写入任何持久状态（L1）。
 --   · GPU 上传由调用方（TextContext:set_text）负责，符合公理 B。
 --
--- 顶点格式（64 bytes/vertex，4 x vec4<f32>）：
+-- ★ Phase 4.2.2 D-4.1-B: 顶点格式升级为 80 bytes/vertex（5 x vec4<f32>）：
 --   attr0: vec4<f32> — (pos_x, pos_y, glyph_x_min, glyph_y_min)
 --   attr1: vec4<f32> — (glyph_x_max, glyph_y_max, curve_offset, curve_count)
---   attr2: vec4<f32> — (band_offset, band_count, ref_offset, scale)
---   attr3: vec4<f32> — (color_r, color_g, color_b, color_a)
+--   attr2: vec4<f32> — (band_offset, h_band_count, v_band_count, scale)
+--   attr3: vec4<f32> — (inv_scale_x, inv_scale_y, 0, 0) — Jacobian 逆矩阵
+--   attr4: vec4<f32> — (color_r, color_g, color_b, color_a)
 --
 -- 每个字形由 2 个三角形（6 个顶点）组成，覆盖字形的 AABB 包围盒。
 -- 片段着色器通过 Slug 算法在包围盒内精确计算覆盖率。
@@ -394,7 +395,8 @@ global NebulaSlugVertex = @record{
   attr0: Vec4,
   attr1: Vec4,
   attr2: Vec4,
-  attr3: Vec4,
+  attr3: Vec4,  -- ★ Phase 4.2.2: Jacobian inverse
+  attr4: Vec4,  -- ★ Phase 4.2.2: color (was attr3)
 }
 
 global function nebula_slug_text_build_vertices(
@@ -424,6 +426,10 @@ global function nebula_slug_text_build_vertices(
   local max_x: float32 = origin_x
   local line_height = pixel_height
 
+  -- ★ Phase 4.2.2 D-4.1-B: Jacobian 逆矩阵
+  -- 对于正交投影 + 均匀缩放，inv_scale = 1.0 / scale
+  local inv_scale: float32 = 1.0 / scale
+
   local i: csize = 0
   while i < text_len do
     local cp = (@cint)(text_bytes[i])
@@ -446,46 +452,28 @@ global function nebula_slug_text_build_vertices(
         local cf = (@float32)(glyph.curve_offset)
         local cc = (@float32)(glyph.curve_count)
         local bf = (@float32)(glyph.band_offset)
-        local rf = (@float32)(glyph.ref_offset)
+        -- ★ Phase 4.2.2: per-glyph band counts
+        local hbc = (@float32)(glyph.h_band_count)
+        local vbc = (@float32)(glyph.v_band_count)
+
+        -- ★ Phase 4.2.2: 构建 5-attribute 顶点
+        local a0_tl = Vec4{ x=gx0, y=gy0, z=glyph.x_min*scale, w=glyph.y_min*scale }
+        local a0_tr = Vec4{ x=gx1, y=gy0, z=glyph.x_min*scale, w=glyph.y_min*scale }
+        local a0_bl = Vec4{ x=gx0, y=gy1, z=glyph.x_min*scale, w=glyph.y_min*scale }
+        local a0_br = Vec4{ x=gx1, y=gy1, z=glyph.x_min*scale, w=glyph.y_min*scale }
+        local a1 = Vec4{ x=glyph.x_max*scale, y=glyph.y_max*scale, z=cf, w=cc }
+        local a2 = Vec4{ x=bf, y=hbc, z=vbc, w=scale }
+        local a3 = Vec4{ x=inv_scale, y=inv_scale, z=0.0, w=0.0 }  -- Jacobian inverse
+        local a4 = Vec4{ x=color.r, y=color.g, z=color.b, w=color.a }
 
         -- 三角形 1
-        out_vertices[vertex_count + 0] = NebulaSlugVertex{
-          attr0 = Vec4{ x=gx0, y=gy0, z=glyph.x_min*scale, w=glyph.y_min*scale },
-          attr1 = Vec4{ x=glyph.x_max*scale, y=glyph.y_max*scale, z=cf, w=cc },
-          attr2 = Vec4{ x=bf, y=rf, z=scale, w=0.0 },
-          attr3 = Vec4{ x=color.r, y=color.g, z=color.b, w=color.a },
-        }
-        out_vertices[vertex_count + 1] = NebulaSlugVertex{
-          attr0 = Vec4{ x=gx1, y=gy0, z=glyph.x_min*scale, w=glyph.y_min*scale },
-          attr1 = Vec4{ x=glyph.x_max*scale, y=glyph.y_max*scale, z=cf, w=cc },
-          attr2 = Vec4{ x=bf, y=rf, z=scale, w=0.0 },
-          attr3 = Vec4{ x=color.r, y=color.g, z=color.b, w=color.a },
-        }
-        out_vertices[vertex_count + 2] = NebulaSlugVertex{
-          attr0 = Vec4{ x=gx1, y=gy1, z=glyph.x_min*scale, w=glyph.y_min*scale },
-          attr1 = Vec4{ x=glyph.x_max*scale, y=glyph.y_max*scale, z=cf, w=cc },
-          attr2 = Vec4{ x=bf, y=rf, z=scale, w=0.0 },
-          attr3 = Vec4{ x=color.r, y=color.g, z=color.b, w=color.a },
-        }
+        out_vertices[vertex_count + 0] = NebulaSlugVertex{ attr0=a0_tl, attr1=a1, attr2=a2, attr3=a3, attr4=a4 }
+        out_vertices[vertex_count + 1] = NebulaSlugVertex{ attr0=a0_tr, attr1=a1, attr2=a2, attr3=a3, attr4=a4 }
+        out_vertices[vertex_count + 2] = NebulaSlugVertex{ attr0=a0_br, attr1=a1, attr2=a2, attr3=a3, attr4=a4 }
         -- 三角形 2
-        out_vertices[vertex_count + 3] = NebulaSlugVertex{
-          attr0 = Vec4{ x=gx0, y=gy0, z=glyph.x_min*scale, w=glyph.y_min*scale },
-          attr1 = Vec4{ x=glyph.x_max*scale, y=glyph.y_max*scale, z=cf, w=cc },
-          attr2 = Vec4{ x=bf, y=rf, z=scale, w=0.0 },
-          attr3 = Vec4{ x=color.r, y=color.g, z=color.b, w=color.a },
-        }
-        out_vertices[vertex_count + 4] = NebulaSlugVertex{
-          attr0 = Vec4{ x=gx1, y=gy1, z=glyph.x_min*scale, w=glyph.y_min*scale },
-          attr1 = Vec4{ x=glyph.x_max*scale, y=glyph.y_max*scale, z=cf, w=cc },
-          attr2 = Vec4{ x=bf, y=rf, z=scale, w=0.0 },
-          attr3 = Vec4{ x=color.r, y=color.g, z=color.b, w=color.a },
-        }
-        out_vertices[vertex_count + 5] = NebulaSlugVertex{
-          attr0 = Vec4{ x=gx0, y=gy1, z=glyph.x_min*scale, w=glyph.y_min*scale },
-          attr1 = Vec4{ x=glyph.x_max*scale, y=glyph.y_max*scale, z=cf, w=cc },
-          attr2 = Vec4{ x=bf, y=rf, z=scale, w=0.0 },
-          attr3 = Vec4{ x=color.r, y=color.g, z=color.b, w=color.a },
-        }
+        out_vertices[vertex_count + 3] = NebulaSlugVertex{ attr0=a0_tl, attr1=a1, attr2=a2, attr3=a3, attr4=a4 }
+        out_vertices[vertex_count + 4] = NebulaSlugVertex{ attr0=a0_br, attr1=a1, attr2=a2, attr3=a3, attr4=a4 }
+        out_vertices[vertex_count + 5] = NebulaSlugVertex{ attr0=a0_bl, attr1=a1, attr2=a2, attr3=a3, attr4=a4 }
         vertex_count = vertex_count + 6
       end
 

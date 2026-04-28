@@ -391,15 +391,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 end
 
 -- =============================================================================
--- ★ Phase 4.1: Slug 文本着色器组合
+-- ★ Phase 4.2.2: Slug 文本着色器组合
 --
 -- 生成基于 Slug 算法的 WGSL 着色器对（顶点 + 片段）。
 -- 曲线数据和 Band 数据通过 Storage Buffer 传入（binding 1/2/3）。
--- 顶点格式（NebulaSlugVertex）：
---   location(0) pos: vec4<f32>  — (objX, objY, normalX, normalY)
---   location(1) tex: vec4<f32>  — (emX, emY, packedGlyphLoc, packedBandMax)
---   location(2) bnd: vec4<f32>  — (bandScaleX, bandScaleY, bandOffsetX, bandOffsetY)
---   location(3) col: vec4<f32>  — (r, g, b, a)
+-- 顶点格式（NebulaSlugVertex，5 x vec4<f32> = 80 bytes/vertex）：
+--   location(0) pos: vec4<f32>  — (objX, objY, glyphMinX, glyphMinY)
+--   location(1) tex: vec4<f32>  — (glyphMaxX, glyphMaxY, curveOffset, curveCount)
+--   location(2) bnd: vec4<f32>  — (bandOffset, hBandCount, vBandCount, scale)
+--   location(3) jac: vec4<f32>  — (invScaleX, invScaleY, 0, 0) — Jacobian 逆矩阵
+--   location(4) col: vec4<f32>  — (r, g, b, a)
 -- =============================================================================
 function nebula_compose_slug_shader(opts)
   opts = opts or {}
@@ -411,11 +412,11 @@ function nebula_compose_slug_shader(opts)
   )
 
   local source = struct_def .. [[
-// ★ Phase 4.1: Slug 算法 Storage Buffer 绑定
+// ★ Phase 4.2.2: Slug 算法 Storage Buffer 绑定
 // Binding 0: Uniform Buffer (视口等)
 // Binding 1: 曲线数据 (NebulaSlugCurve 数组，每条曲线 6 个 f32)
 // Binding 2: Band 元数据 (offset + count，每条 2 个 u32)
-// Binding 3: Band 曲线引用索引 (uint32 数组)
+// Binding 3: Band 曲线引用索引 (uint16 数组)
 @group(0) @binding(0) var<uniform> u_slug: ]] .. struct_name .. [[;
 
 struct SlugCurveData {
@@ -429,40 +430,62 @@ struct SlugBandMeta {
 }
 @group(0) @binding(1) var<storage, read> slug_curves:     array<SlugCurveData>;
 @group(0) @binding(2) var<storage, read> slug_band_metas: array<SlugBandMeta>;
-@group(0) @binding(3) var<storage, read> slug_band_refs:  array<u16>;  // BUG-6 fix: CPU side is uint16
+@group(0) @binding(3) var<storage, read> slug_band_refs:  array<u16>;
 
-// ---- 顶点输入/输出 ----
+// ---- 顶点输入/输出 (Phase 4.2.2: 5 attributes) ----
 struct SlugVertexInput {
   @location(0) pos: vec4<f32>,
   @location(1) tex: vec4<f32>,
   @location(2) bnd: vec4<f32>,
-  @location(3) col: vec4<f32>,
+  @location(3) jac: vec4<f32>,
+  @location(4) col: vec4<f32>,
 }
 struct SlugVertexOutput {
-  @builtin(position)              clip_pos:  vec4<f32>,
-  @location(0)                    color:     vec4<f32>,
-  @location(1)                    texcoord:  vec2<f32>,
-  @location(2) @interpolate(flat) banding:   vec4<f32>,
-  @location(3) @interpolate(flat) glyph_loc: vec4<u32>,
-  @location(4) @interpolate(flat) band_base: u32,
+  @builtin(position)              clip_pos:   vec4<f32>,
+  @location(0)                    color:      vec4<f32>,
+  @location(1)                    texcoord:   vec2<f32>,
+  @location(2) @interpolate(flat) glyph_info: vec4<f32>,
+  @location(3) @interpolate(flat) band_info:  vec4<f32>,
+  @location(4) @interpolate(flat) jac_inv:    vec2<f32>,
+}
+
+// ---- ★ Phase 4.2.2: SlugDilate — sub-pixel 膨胀补偿 ----
+fn slug_dilate(pos: vec2<f32>, glyph_min: vec2<f32>, glyph_max: vec2<f32>, inv_scale: vec2<f32>) -> vec2<f32> {
+  let half_pixel = inv_scale * 0.5;
+  return clamp(pos, glyph_min - half_pixel, glyph_max + half_pixel);
 }
 
 // ---- 顶点着色器 ----
 @vertex
 fn vs_main(in: SlugVertexInput) -> SlugVertexOutput {
   var out: SlugVertexOutput;
+
+  // ★ Phase 4.2.2: 从 bnd 属性解包 band 信息
+  let band_offset = in.bnd.x;
+  let h_band_count = in.bnd.y;
+  let v_band_count = in.bnd.z;
+  let scale = in.bnd.w;
+
+  // 从 tex 属性解包曲线信息
+  let glyph_max_x = in.tex.x;
+  let glyph_max_y = in.tex.y;
+  let curve_offset = in.tex.z;
+  let curve_count = in.tex.w;
+
+  let glyph_min = in.pos.zw;
+  let glyph_max = in.tex.xy;
+
   let ndc = vec2<f32>(
     (in.pos.x / u_slug.viewport.x) * 2.0 - 1.0,
     (in.pos.y / u_slug.viewport.y) * 2.0 - 1.0
   );
   out.clip_pos = vec4<f32>(ndc.x, -ndc.y, 0.0, 1.0);
   out.color    = in.col;
-  out.texcoord = in.tex.xy;
-  out.banding  = in.bnd;
-  let gz = bitcast<u32>(in.tex.z);
-  let gw = bitcast<u32>(in.tex.w);
-  out.glyph_loc = vec4<u32>(gz & 0xFFFFu, gz >> 16u, gw & 0xFFFFu, gw >> 16u);
-  out.band_base = out.glyph_loc.x;
+  // 计算 em-space 坐标（从像素空间反推）
+  out.texcoord = in.pos.zw;
+  out.glyph_info = vec4<f32>(curve_offset, curve_count, glyph_max_x, glyph_max_y);
+  out.band_info  = vec4<f32>(band_offset, h_band_count, v_band_count, scale);
+  out.jac_inv    = in.jac.xy;
   return out;
 }
 
@@ -509,19 +532,19 @@ fn slug_calc_coverage(xcov: f32, ycov: f32, xwgt: f32, ywgt: f32) -> f32 {
   );
 }
 
-// ---- 片段着色器 ----
+// ---- 片段着色器 (★ Phase 4.2.2: per-glyph band count + Jacobian) ----
 @fragment
 fn fs_main(in: SlugVertexOutput) -> @location(0) vec4<f32> {
   let render_coord = in.texcoord;
-  let bnd          = in.banding;
-  let band_max_x   = i32(in.glyph_loc.z);
-  let band_max_y   = i32(in.glyph_loc.w);
-  let band_base    = in.band_base;
+  let band_offset  = u32(in.band_info.x);
+  let h_band_count = i32(in.band_info.y);
+  let v_band_count = i32(in.band_info.z);
+  let scale        = in.band_info.w;
+  let glyph_min    = render_coord;
+  let glyph_max    = in.glyph_info.zw;
 
-  let band_coord = render_coord * bnd.xy + bnd.zw;
-  let band_ix    = clamp(i32(band_coord.x), 0, band_max_x);
-  let band_iy    = clamp(i32(band_coord.y), 0, band_max_y);
-
+  // ★ Phase 4.2.2: 使用 Jacobian 逆矩阵计算 pixels_per_em
+  let inv_scale = in.jac_inv;
   let dpx = dpdx(render_coord.x);
   let dpy = dpdy(render_coord.y);
   let pixels_per_em = vec2<f32>(
@@ -529,14 +552,22 @@ fn fs_main(in: SlugVertexOutput) -> @location(0) vec4<f32> {
     1.0 / max(abs(dpy), 0.0001)
   );
 
+  // ★ Phase 4.2.2: 从 glyph 边界框计算 band 索引（支持 per-glyph band count）
+  let width  = glyph_max.x - glyph_min.x;
+  let height = glyph_max.y - glyph_min.y;
+  let band_scale_x = f32(v_band_count) / max(width, 0.0001);
+  let band_scale_y = f32(h_band_count) / max(height, 0.0001);
+  let band_ix = clamp(i32((render_coord.x - glyph_min.x) * band_scale_x), 0, v_band_count - 1);
+  let band_iy = clamp(i32((render_coord.y - glyph_min.y) * band_scale_y), 0, h_band_count - 1);
+
   var xcov: f32 = 0.0;
   var xwgt: f32 = 0.0;
 
-  // 处理水平 Band（h-bands，索引 0..band_max_y）
-  let hband_meta_idx = band_base + u32(band_iy);
+  // 处理水平 Band（h-bands，索引 0..h_band_count-1）
+  let hband_meta_idx = band_offset + u32(band_iy);
   let hband = slug_band_metas[hband_meta_idx];
   for (var ci: u32 = 0u; ci < hband.count; ci = ci + 1u) {
-    let curve_idx = u32(slug_band_refs[hband.offset + ci]);  // BUG-6 fix: cast u16 to u32
+    let curve_idx = u32(slug_band_refs[hband.offset + ci]);
     let c = slug_curves[curve_idx];
     let p12 = vec4<f32>(c.p0x, c.p0y, c.p1x, c.p1y) - vec4<f32>(render_coord, render_coord);
     let p3  = vec2<f32>(c.p2x, c.p2y) - render_coord;
@@ -558,11 +589,11 @@ fn fs_main(in: SlugVertexOutput) -> @location(0) vec4<f32> {
   var ycov: f32 = 0.0;
   var ywgt: f32 = 0.0;
 
-  // 处理垂直 Band（v-bands，索引 band_max_y+1..band_max_y+1+band_max_x）
-  let vband_meta_idx = band_base + u32(band_max_y + 1) + u32(band_ix);
+  // 处理垂直 Band（v-bands，索引 h_band_count..h_band_count+v_band_count-1）
+  let vband_meta_idx = band_offset + u32(h_band_count) + u32(band_ix);
   let vband = slug_band_metas[vband_meta_idx];
   for (var ci: u32 = 0u; ci < vband.count; ci = ci + 1u) {
-    let curve_idx = u32(slug_band_refs[vband.offset + ci]);  // BUG-6 fix: cast u16 to u32
+    let curve_idx = u32(slug_band_refs[vband.offset + ci]);
     let c = slug_curves[curve_idx];
     let p12 = vec4<f32>(c.p0x, c.p0y, c.p1x, c.p1y) - vec4<f32>(render_coord, render_coord);
     let p3  = vec2<f32>(c.p2x, c.p2y) - render_coord;
@@ -591,10 +622,10 @@ fn fs_main(in: SlugVertexOutput) -> @location(0) vec4<f32> {
     source          = source,
     textured        = false,
     vertex_layout   = "slug",
-    features        = {"slug", "vertex_slug", "storage_buffer"},
+    features        = {"slug", "vertex_slug", "storage_buffer", "jacobian", "adaptive_band"},
     required_passes = {"main"},
     slug_bindings   = true,
   }
 end
 
-return "nebula_shader_compose_v0.7_phase4.1"
+return "nebula_shader_compose_v0.8_phase4.2.2"

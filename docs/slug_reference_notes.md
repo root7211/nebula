@@ -53,8 +53,13 @@
 - Override constants: SLUG_EVENODD, SLUG_WEIGHT
 
 ## Simplified Nebula Adaptation Plan
-For Nebula's Phase 4.1, we simplify the reference implementation:
+For Nebula's Phase 4.1, we simplified the reference implementation:
 1. S0: Use stbtt_GetGlyphShape to extract curves, pack into Nelua arrays
 2. S1: Generate simplified WGSL (no dilation, orthographic projection)
 3. S2: NebulaSlugVertex with 4 attributes (pos, tex, bnd, col) — skip jac for now
 4. Use Storage Buffers instead of textures for curve/band data (simpler in WebGPU)
+
+## Phase 4.2.2 Upgrades (D-4.1-A / D-4.1-B cleared)
+1. **D-4.1-A**: Adaptive band count (4/8/16 based on curve density) + FNV-1a hash merging of equivalent adjacent bands. Per-glyph `h_band_count`/`v_band_count` fields replace global `BAND_COUNT=8`.
+2. **D-4.1-B**: NebulaSlugVertex expanded to 5 x vec4<f32> (80 bytes/vertex). New `jac` attribute carries inverse Jacobian for affine transform support. `slug_dilate` function added to WGSL for sub-pixel dilation compensation.
+3. **D-4.1-C**: Storage Buffer vs texture benchmark deferred to Phase 4.2.3 decision gate.
