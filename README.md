@@ -12,15 +12,15 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ---
 
-### 当前状态：Phase 4.2.2 (Slug 生产级化) D-4.1-A/B 已清算
+### 当前状态：Phase 4.4 S1（可编程原语注册表）已完成
 
-**Phase 3.6.2 至 Phase 4.2.2 D-4.1-A/B 已全部合入主线**，全量回归测试通过。
+**Phase 3.6.2 至 Phase 4.4 S1 已全部合入主线**，28/28 回归测试全绿。
 
-- **Phase 4.2.2 D-4.1-A (已完成)**：自适应 Band 分割 + 等价子集哈希合并，消除固定 8-band 债务。
-- **Phase 4.2.2 D-4.1-B (已完成)**：Jacobian 逆矩阵 + SlugDilate sub-pixel 膨胀，支持任意仿射变换。
-- **Phase 4.2.2 D-4.1-C (待评估)**：Storage Buffer vs 纹理的 benchmark，侜 Phase 4.2.3 决策。
-- **Phase 4.2.1 (已完成)**：交付了跨平台 PAL 骨架，支持 Linux/Windows/Web。
-- **Phase 4.1 (已完成)**：引入了 Slug 文本渲染引擎，实现基于贝塞尔曲线的纯数学矢量渲染。
+- **Phase 4.4 S1 (已完成)**：`interaction_factory.lua` 完全元数据驱动重构——`nebula_gen_process_input` 消除所有硬编码原语分支，状态机转换由 `state_transitions` 元数据 priority 排序自动拼装。新增 `nebula_register_primitive(name, spec)` 公开 API。
+- **Phase 4.2.2 D-4.1-A/B (已完成)**：自适应 Band 分割 + 等价子集哈希合并 + Jacobian 逆矩阵 SlugDilate sub-pixel 膨胀。
+- **Phase 4.2.2 D-4.1-C (待评估)**：Storage Buffer vs 纹理 benchmark。
+- **Phase 4.2.1 (已完成)**：跨平台 PAL 骨架（Linux/Windows/Web）。
+- **Phase 4.1 (已完成)**：Slug 文本渲染引擎（贝塞尔曲线纯数学矢量渲染）。
 
 ---
 
@@ -68,9 +68,10 @@ main()
 | **4.2.1** | 跨平台 PAL 骨架 | 三端源码级对齐 | **已完成** | 83/100 |
 | **4.2.2** | Slug 渲染内核生产级化 | 清算债务，支持任意仿射变换 | **D-4.1-A/B 已完成** | 79/100 |
 | 4.2.3 | HarfBuzz + CJK 集成 | 7000 常用中文字符支持 | 规划中 | 82/100 |
-| **4.3** | **可编程原语注册表** | **允许开发者注入自定义交互逻辑** | 规划中 | **90/100** |
-| 4.4 | 高级组件库 | 实现 scrollable, editable 等标准组件 | 规划中 | 81/100 |
-| 4.5 | 文本编辑器原型 | 验证 Era II 工业级能力 | 规划中 | 待评分 |
+| 4.3 | Indirect Drawing | GPU 端实例剔除与间接绘制 | 规划中 | 78/100 |
+| **4.4** | **可编程原语注册表** | **允许开发者注入自定义交互逻辑** | **S1 已完成** | **90/100** |
+| 4.5 | 高级组件库 | 实现 multiline_editable, scrollable 等 | 规划中 | 81/100 |
+| 4.6 | 文本编辑器原型 | 验证 Era II 工业级能力 | 规划中 | 待评分 |
 | 5.0 | 工业化发布 | 自动化 CI/CD 与包管理支持 | 规划中 | 待评分 |
 
 > 重要度评分基于五个维度加权综合评分（满分 100），详见 [`docs/PHASE_IMPORTANCE_SCORECARD.md`](docs/PHASE_IMPORTANCE_SCORECARD.md)。
