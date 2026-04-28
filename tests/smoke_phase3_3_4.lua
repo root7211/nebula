@@ -43,8 +43,8 @@ local function check_error(name, fn)
 end
 
 -- ===== 版本号检查（Phase 3.7）=====
-check("pipeline_factory_version_phase3_7",
-  factory_ver == "nebula_pipeline_factory_v0.7_phase3.7",
+check("pipeline_factory_version_phase4_1",
+  factory_ver == "nebula_pipeline_factory_v0.8_phase4.1",
   "版本号未更新至 phase3.7，当前: " .. tostring(factory_ver))
 
 -- ===== 函数存在性 =====

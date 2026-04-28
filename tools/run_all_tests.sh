@@ -120,26 +120,47 @@ echo "=== Part 2: Compilation Regression Tests ==="
 
 # Phase 3.9 核心 Demo 编译回归（最新 API）
 run_test "compile button_demo (Phase 3.9 — 按钮演示)" \
-  bash build.sh button_demo
+  nelua -c -L src -L assets/generated --add-path . --add-path examples --add-path assets/generated \
+  --cflags="-I./vendor/wgpu-native/include" \
+  --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
+  examples/button_demo.nelua -o ~/.cache/nelua/button_demo
 
 run_test "compile layout_demo (Phase 3.9 — 编译期 Flexbox 布局)" \
-  bash build.sh layout_demo
+  nelua -c -L src -L assets/generated --add-path . --add-path examples --add-path assets/generated \
+  --cflags="-I./vendor/wgpu-native/include" \
+  --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
+  examples/layout_demo.nelua -o ~/.cache/nelua/layout_demo
 
 run_test "compile login_demo (Phase 3.9 — 文本一等公民登录框)" \
-  bash build.sh login_demo
+  nelua -c -L src -L assets/generated --add-path . --add-path examples --add-path assets/generated \
+  --cflags="-I./vendor/wgpu-native/include" \
+  --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
+  examples/login_demo.nelua -o ~/.cache/nelua/login_demo
 
 run_test "compile form_demo (Phase 3.9 — 文本一等公民表单)" \
-  bash build.sh form_demo
+  nelua -c -L src -L assets/generated --add-path . --add-path examples --add-path assets/generated \
+  --cflags="-I./vendor/wgpu-native/include" \
+  --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
+  examples/form_demo.nelua -o ~/.cache/nelua/form_demo
 
 run_test "compile dynamic_list_demo (Phase 3.9 — Slot Producer)" \
-  bash build.sh dynamic_list_demo
+  nelua -c -L src -L assets/generated --add-path . --add-path examples --add-path assets/generated \
+  --cflags="-I./vendor/wgpu-native/include" \
+  --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
+  examples/dynamic_list_demo.nelua -o ~/.cache/nelua/dynamic_list_demo
 
 # ★ Phase 3.10.5 新升级的 Demo
 run_test "compile shadow_demo (Phase 3.10.5 — 阴影已升级到 App 编排体系)" \
-  bash build.sh shadow_demo
+  nelua -c -L src -L assets/generated --add-path . --add-path examples --add-path assets/generated \
+  --cflags="-I./vendor/wgpu-native/include" \
+  --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
+  examples/shadow_demo.nelua -o ~/.cache/nelua/shadow_demo
 
 run_test "compile text_demo (Phase 3.10.5 — 独立文本标签已支持)" \
-  bash build.sh text_demo
+  nelua -c -L src -L assets/generated --add-path . --add-path examples --add-path assets/generated \
+  --cflags="-I./vendor/wgpu-native/include" \
+  --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
+  examples/text_demo.nelua -o ~/.cache/nelua/text_demo
 
 # ---- 总结 ----
 echo ""

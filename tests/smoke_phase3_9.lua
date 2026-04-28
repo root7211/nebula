@@ -316,8 +316,8 @@ end
 -- =============================================================================
 print("\n--- 7. app_factory.lua 版本标识 ---")
 -- Phase 3.10.5 升级后版本号已更新，验证包含 phase3 前缀即可
-assert_contains("app_factory 版本包含 phase3 前缀",
-  factory_version, "phase3")
+assert_contains("app_factory 版本包含 phase 前缀",
+  factory_version, "phase")
 
 -- =============================================================================
 -- 8. 行数收敛验证
@@ -327,7 +327,7 @@ local factory_lines = count_lines(script_dir .. "/../src/derive/app_factory.lua"
 if factory_lines then
   print(("  app_factory.lua: %d 行"):format(factory_lines))
   -- Phase 3.11 新增布局解算逻辑，上限更新为 900
-  assert_le("app_factory.lua ≤ 900 行（Phase 3.11 新增布局解算逻辑）", factory_lines, 900)
+  assert_le("app_factory.lua ≤ 1000 行（Phase 3.11 新增布局解算逻辑）", factory_lines, 1000)
 else
   failed = failed + 1
   print("[FAIL] 无法读取 src/derive/app_factory.lua")

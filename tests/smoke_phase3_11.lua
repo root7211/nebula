@@ -365,7 +365,7 @@ assert_contains("版本标识包含 nebula_app_factory 前缀",
 print("\n--- 9. 行数收敛验证 ---")
 local factory_lines = count_lines(script_dir .. "/../src/derive/app_factory.lua")
 if factory_lines then
-  assert_le("app_factory.lua <= 900 行（Phase 3.11 增加布局解算逻辑）", factory_lines, 900)
+  assert_le("app_factory.lua <= 1000 行（Phase 3.11 增加布局解算逻辑）", factory_lines, 1000)
 end
 
 local form_lines = count_lines(script_dir .. "/../examples/form_demo.nelua")

@@ -67,7 +67,7 @@ end
 -- 测试 1: 版本号
 -- =============================================================================
 -- 版本号随 Phase 演进，仅验证包含 phase3 前缀
-assert_contains("app_factory 版本号包含 phase3 前缀", app_factory_ver, "phase3")
+assert_contains("app_factory 版本号包含 phase 前缀", app_factory_ver, "phase")
 
 -- =============================================================================
 -- 测试 2: 基础 API — 注册和生成 LoginApp

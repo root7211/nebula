@@ -24,15 +24,17 @@
 --  20.  get_text 生成代码接受 out 参数（不再引用 visual.flat_buf）
 -- =============================================================================
 
+local script_dir = arg[0]:match("(.*/)")  or "."
 package.path = package.path
-  .. ";/home/ubuntu/nebula/src/?.lua"
-  .. ";/home/ubuntu/nebula/src/derive/?.lua"
+  .. ";" .. script_dir .. "/../src/?.lua"
+  .. ";" .. script_dir .. "/../src/derive/?.lua"
 
 -- =============================================================================
 -- 加载 gap_buffer 模块（提取 ##[[ ]] 块中的 Lua 代码）
 -- =============================================================================
+local script_dir = arg[0]:match("(.*/)")  or "."
 local function load_gap_buffer_module()
-  local f = io.open("/home/ubuntu/nebula/src/gap_buffer.nelua", "r")
+  local f = io.open(script_dir .. "/../src/gap_buffer.nelua", "r")
   assert(f, "cannot open gap_buffer.nelua")
   local content = f:read("*a")
   f:close()

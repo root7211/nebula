@@ -32,9 +32,9 @@ local function check(name, cond, msg)
 end
 
 -- ===== 模块版本检查（Phase 3.7）=====
-check("module_version_phase3_7",
-  compose_ver == "nebula_shader_compose_v0.6_phase3.7",
-  "模块版本号未更新至 phase3.7，当前: " .. tostring(compose_ver))
+check("module_version_phase4_2_2",
+  compose_ver == "nebula_shader_compose_v0.8_phase4.2.2",
+  "模块版本号断言失败，当前: " .. tostring(compose_ver))
 
 -- ===== Phase 3.7: 已删除函数不应存在 =====
 check("nebula_compose_instanced_shader_deleted",

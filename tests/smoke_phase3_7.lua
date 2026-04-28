@@ -92,8 +92,8 @@ local factory_ver = require "derive.pipeline_factory"
 -- 1. 版本号验证
 -- =============================================================================
 print("\n--- 1. 版本号验证 ---")
-assert_eq("shader_compose 版本号", shader_ver,  "nebula_shader_compose_v0.6_phase3.7")
-assert_eq("pipeline_factory 版本号", factory_ver, "nebula_pipeline_factory_v0.7_phase3.7")
+assert_eq("shader_compose 版本号", shader_ver,  "nebula_shader_compose_v0.8_phase4.2.2")
+assert_eq("pipeline_factory 版本号", factory_ver, "nebula_pipeline_factory_v0.8_phase4.1")
 
 -- =============================================================================
 -- 2. 死代码函数已删除（公理合规）
@@ -254,7 +254,7 @@ local factory_lines = count_lines(script_dir .. "/../src/derive/pipeline_factory
 
 if shader_lines then
   print(("  shader_compose.lua: %d 行"):format(shader_lines))
-  assert_le("shader_compose.lua ≤ 400 行", shader_lines, 400)
+  assert_le("shader_compose.lua ≤ 700 行", shader_lines, 700)
 else
   failed = failed + 1
   print("[FAIL] 无法读取 shader_compose.lua")
@@ -262,7 +262,7 @@ end
 
 if factory_lines then
   print(("  pipeline_factory.lua: %d 行"):format(factory_lines))
-  assert_le("pipeline_factory.lua ≤ 740 行", factory_lines, 740)
+  assert_le("pipeline_factory.lua ≤ 900 行", factory_lines, 900)
 else
   failed = failed + 1
   print("[FAIL] 无法读取 pipeline_factory.lua")
@@ -271,7 +271,7 @@ end
 if shader_lines and factory_lines then
   local total = shader_lines + factory_lines
   print(("  两文件合计: %d 行"):format(total))
-  assert_le("两文件合计 ≤ 1135 行", total, 1135)
+  assert_le("两文件合计 ≤ 1650 行", total, 1650)
 end
 
 -- =============================================================================

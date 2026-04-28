@@ -15,15 +15,16 @@
 --  11. nebula_gen_text_buffer 生成 Gap Buffer 驱动代码
 -- =============================================================================
 
+local script_dir = arg[0]:match("(.*/)")  or "."
 package.path = package.path
-  .. ";/home/ubuntu/nebula/src/?.lua"
-  .. ";/home/ubuntu/nebula/src/derive/?.lua"
+  .. ";" .. script_dir .. "/../src/?.lua"
+  .. ";" .. script_dir .. "/../src/derive/?.lua"
 
 -- 加载 gap_buffer 模块（通过 dofile 执行 .nelua 文件中的 ##[[ ]] 块）
 -- 由于 gap_buffer.nelua 是 Nelua 文件，我们直接测试其 Lua 生成逻辑
 -- 通过 loadstring 模拟 ##[[ ]] 块执行
 local function load_gap_buffer_module()
-  local f = io.open("/home/ubuntu/nebula/src/gap_buffer.nelua", "r")
+  local f = io.open(script_dir .. "/../src/gap_buffer.nelua", "r")
   assert(f, "cannot open gap_buffer.nelua")
   local content = f:read("*a")
   f:close()
