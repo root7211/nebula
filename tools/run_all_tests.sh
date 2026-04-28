@@ -122,6 +122,10 @@ run_test "smoke_phase4_3 (Phase 4.3 — 可编程原语注册表 & 参数校验)
 run_test "smoke_phase4_4_s1 (Phase 4.4 S1 — scrollable 原语注册 & 滚动逻辑验证)" \
   nelua-lua tests/smoke_phase4_4_s1.lua
 
+# ★ Phase 4.4 S2: dropdown_manager 原语注册 + 跨组件状态验证
+run_test "smoke_phase4_4_s2 (Phase 4.4 S2 — dropdown_manager 原语注册 & 下拉交互验证)" \
+  nelua-lua tests/smoke_phase4_4_s2.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="
@@ -183,6 +187,13 @@ run_test "compile scrollable_demo (Phase 4.4 S1 — scrollable 原语 + containe
   --cflags="-I./vendor/wgpu-native/include" \
   --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
   examples/scrollable_demo.nelua -o ~/.cache/nelua/scrollable_demo
+
+# ★ Phase 4.4 S2 新增：dropdown_demo 编译回归（dropdown_manager 原语 + 弹出层交互）
+run_test "compile dropdown_demo (Phase 4.4 S2 — dropdown_manager 原语 + 弹出层选择器)" \
+  nelua -c -L src -L assets/generated --add-path . --add-path examples --add-path assets/generated \
+  --cflags="-I./vendor/wgpu-native/include" \
+  --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
+  examples/dropdown_demo.nelua -o ~/.cache/nelua/dropdown_demo
 
 # ---- 总结 ----
 echo ""

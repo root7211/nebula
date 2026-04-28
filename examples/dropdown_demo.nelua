@@ -1,0 +1,360 @@
+-- =============================================================================
+-- dropdown_demo.nelua
+-- Nebula GUI Compiler — Phase 4.4 S2
+--
+-- ★ Dropdown 下拉选择器 demo
+--   · 注册 "dropdown_manager" 自定义原语（依赖 hoverable + clickable）
+--   · 主按钮点击展开/收起下拉列表
+--   · 列表项（DropdownItemVisual）点击选中后收起
+--   · 点击外部区域自动收起
+--   · 注册顺序 = 绘制顺序（item 在 dropdown 之上）
+--
+-- 验证点：
+--   1. register_primitive API 在弹出层场景下的组合能力
+--   2. 跨组件状态传播（选中项 → 文本显示）
+--   3. "点击外部关闭"交互模式
+--   4. 同类型多实例 + 不同类型混合注册的 draw 顺序
+-- =============================================================================
+## cinclude "<stdio.h>"
+
+require "nebula_core"
+require "glfw_bindings"
+require "wgpu_bindings"
+require "renderer"
+require "app"
+require "nebula_arena"
+
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+
+local WIN_W <comptime> = 800
+local WIN_H <comptime> = 600
+
+-- =============================================================================
+-- ★ Register custom "dropdown_manager" primitive
+-- =============================================================================
+##[[
+nebula_register_primitive("dropdown_manager", {
+  dependencies = {"hoverable", "clickable"},
+  context_fields = {
+    {name="is_open",       type="boolean"},
+    {name="selected_index",type="uint32"},
+    {name="item_count",    type="uint32"},
+  },
+  state_transitions = {},
+  process_body = function(spec, lines)
+    -- Toggle open/close on click
+    table.insert(lines, "  if self.click.just_clicked then")
+    table.insert(lines, "    self.is_open = not self.is_open")
+    table.insert(lines, "  end")
+    -- Close on click outside (when open and mouse pressed but not on self)
+    table.insert(lines, "  if self.is_open and input.mouse_left_pressed and not hovered then")
+    table.insert(lines, "    self.is_open = false")
+    table.insert(lines, "  end")
+  end,
+})
+]]
+
+-- =============================================================================
+-- DropdownVisual (trigger button showing selected item)
+-- =============================================================================
+global DropdownVisual = @record{
+  pos:    Vec2,
+  size:   Vec2,
+  radius: float32,
+
+  default_bg_color:     Color,
+  default_border_color: Color,
+  default_border_width: float32,
+
+  hovered_bg_color:     Color,
+  hovered_border_color: Color,
+  hovered_border_width: float32,
+
+  pressed_bg_color:     Color,
+  pressed_border_color: Color,
+  pressed_border_width: float32,
+}
+
+##[[
+nebula_annotate("DropdownVisual", {
+  states     = {"default", "hovered", "pressed"},
+  primitives = {"hoverable", "clickable", "dropdown_manager"},
+  transitions = {
+    {from="default",  to="hovered", on="hover_enter"},
+    {from="hovered",  to="default", on="hover_leave"},
+    {from="hovered",  to="pressed", on="press"},
+    {from="pressed",  to="hovered", on="release"},
+  },
+})
+]]
+## nebula_derive("DropdownVisual")
+
+-- =============================================================================
+-- DropdownItemVisual (individual item in the dropdown list)
+-- =============================================================================
+global DropdownItemVisual = @record{
+  pos:    Vec2,
+  size:   Vec2,
+  radius: float32,
+
+  default_bg_color:     Color,
+  default_border_color: Color,
+  default_border_width: float32,
+
+  hovered_bg_color:     Color,
+  hovered_border_color: Color,
+  hovered_border_width: float32,
+
+  pressed_bg_color:     Color,
+  pressed_border_color: Color,
+  pressed_border_width: float32,
+}
+
+##[[
+nebula_annotate("DropdownItemVisual", {
+  states     = {"default", "hovered", "pressed"},
+  primitives = {"hoverable", "clickable"},
+  transitions = {
+    {from="default",  to="hovered", on="hover_enter"},
+    {from="hovered",  to="default", on="hover_leave"},
+    {from="hovered",  to="pressed", on="press"},
+    {from="pressed",  to="hovered", on="release"},
+  },
+})
+]]
+## nebula_derive("DropdownItemVisual")
+
+-- =============================================================================
+-- Derive DropdownApp
+--   Registration order = draw order:
+--     1. dropdown (background button)
+--     2. item0..item4 (overlay items, drawn on top)
+-- =============================================================================
+local NUM_ITEMS <comptime> = 5
+
+##[[
+  nebula_app_begin("DropdownApp")
+    nebula_app_register_component("dropdown", "DropdownVisual")
+    nebula_app_register_component("item0", "DropdownItemVisual")
+    nebula_app_register_component("item1", "DropdownItemVisual")
+    nebula_app_register_component("item2", "DropdownItemVisual")
+    nebula_app_register_component("item3", "DropdownItemVisual")
+    nebula_app_register_component("item4", "DropdownItemVisual")
+  nebula_app_end()
+]]
+## nebula_derive_app("DropdownApp")
+
+-- =============================================================================
+-- Item labels are used directly in printf below (Nelua string literals)
+-- =============================================================================
+
+-- =============================================================================
+-- Main program
+-- =============================================================================
+local function main(): int32
+  if glfwInit() == 0 then printf("glfw: init failed\n") return 1 end
+  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
+
+  local window = glfwCreateWindow(WIN_W, WIN_H, "Nebula — Dropdown Demo (Phase 4.4 S2)", nilptr, nilptr)
+  if window == nilptr then printf("glfw: window creation failed\n") return 1 end
+
+  nebula_input_install_callbacks(window)
+
+  local renderer: NebulaRenderer
+  if not renderer:init(window, WIN_W, WIN_H) then return 1 end
+
+  local app: DropdownApp
+  if not app:init(&renderer, WIN_W, WIN_H) then return 1 end
+
+  -- Initialize dropdown trigger button
+  app.dropdown:init(DropdownVisual{
+    pos  = Vec2{ x = 280.0, y = 200.0 },
+    size = Vec2{ x = 240.0, y = 44.0 },
+    radius = 6.0,
+
+    default_bg_color     = Color{ r=0.16, g=0.16, b=0.22, a=1.0 },
+    default_border_color = Color{ r=0.30, g=0.30, b=0.40, a=1.0 },
+    default_border_width = 1.0,
+
+    hovered_bg_color     = Color{ r=0.20, g=0.20, b=0.28, a=1.0 },
+    hovered_border_color = Color{ r=0.40, g=0.60, b=1.00, a=1.0 },
+    hovered_border_width = 2.0,
+
+    pressed_bg_color     = Color{ r=0.24, g=0.24, b=0.32, a=1.0 },
+    pressed_border_color = Color{ r=0.50, g=0.80, b=1.00, a=1.0 },
+    pressed_border_width = 2.0,
+  })
+  app.dropdown.item_count = NUM_ITEMS
+  app.dropdown.selected_index = 0
+
+  -- Initialize dropdown items (hidden by default, shown when open)
+  local item_y_base: float32 = 248.0  -- just below the dropdown trigger
+  local item_colors: [NUM_ITEMS]Color = {
+    Color{ r=0.14, g=0.16, b=0.24, a=1.0 },
+    Color{ r=0.14, g=0.18, b=0.22, a=1.0 },
+    Color{ r=0.14, g=0.20, b=0.20, a=1.0 },
+    Color{ r=0.16, g=0.18, b=0.24, a=1.0 },
+    Color{ r=0.16, g=0.20, b=0.22, a=1.0 },
+  }
+  local item_hover_colors: [NUM_ITEMS]Color = {
+    Color{ r=0.22, g=0.28, b=0.44, a=1.0 },
+    Color{ r=0.22, g=0.30, b=0.42, a=1.0 },
+    Color{ r=0.22, g=0.32, b=0.40, a=1.0 },
+    Color{ r=0.24, g=0.28, b=0.44, a=1.0 },
+    Color{ r=0.24, g=0.30, b=0.42, a=1.0 },
+  }
+
+  -- item0
+  app.item0:init(DropdownItemVisual{
+    pos  = Vec2{ x = 280.0, y = item_y_base + 0.0 * 40.0 },
+    size = Vec2{ x = 240.0, y = 36.0 },
+    radius = 4.0,
+    default_bg_color     = item_colors[0],
+    default_border_color = Color{ r=0.30, g=0.30, b=0.40, a=1.0 },
+    default_border_width = 1.0,
+    hovered_bg_color     = item_hover_colors[0],
+    hovered_border_color = Color{ r=0.50, g=0.70, b=1.00, a=1.0 },
+    hovered_border_width = 1.5,
+    pressed_bg_color     = Color{ r=0.28, g=0.34, b=0.50, a=1.0 },
+    pressed_border_color = Color{ r=0.60, g=0.80, b=1.00, a=1.0 },
+    pressed_border_width = 2.0,
+  })
+  -- item1
+  app.item1:init(DropdownItemVisual{
+    pos  = Vec2{ x = 280.0, y = item_y_base + 1.0 * 40.0 },
+    size = Vec2{ x = 240.0, y = 36.0 },
+    radius = 4.0,
+    default_bg_color     = item_colors[1],
+    default_border_color = Color{ r=0.30, g=0.30, b=0.40, a=1.0 },
+    default_border_width = 1.0,
+    hovered_bg_color     = item_hover_colors[1],
+    hovered_border_color = Color{ r=0.50, g=0.70, b=1.00, a=1.0 },
+    hovered_border_width = 1.5,
+    pressed_bg_color     = Color{ r=0.28, g=0.34, b=0.50, a=1.0 },
+    pressed_border_color = Color{ r=0.60, g=0.80, b=1.00, a=1.0 },
+    pressed_border_width = 2.0,
+  })
+  -- item2
+  app.item2:init(DropdownItemVisual{
+    pos  = Vec2{ x = 280.0, y = item_y_base + 2.0 * 40.0 },
+    size = Vec2{ x = 240.0, y = 36.0 },
+    radius = 4.0,
+    default_bg_color     = item_colors[2],
+    default_border_color = Color{ r=0.30, g=0.30, b=0.40, a=1.0 },
+    default_border_width = 1.0,
+    hovered_bg_color     = item_hover_colors[2],
+    hovered_border_color = Color{ r=0.50, g=0.70, b=1.00, a=1.0 },
+    hovered_border_width = 1.5,
+    pressed_bg_color     = Color{ r=0.28, g=0.34, b=0.50, a=1.0 },
+    pressed_border_color = Color{ r=0.60, g=0.80, b=1.00, a=1.0 },
+    pressed_border_width = 2.0,
+  })
+  -- item3
+  app.item3:init(DropdownItemVisual{
+    pos  = Vec2{ x = 280.0, y = item_y_base + 3.0 * 40.0 },
+    size = Vec2{ x = 240.0, y = 36.0 },
+    radius = 4.0,
+    default_bg_color     = item_colors[3],
+    default_border_color = Color{ r=0.30, g=0.30, b=0.40, a=1.0 },
+    default_border_width = 1.0,
+    hovered_bg_color     = item_hover_colors[3],
+    hovered_border_color = Color{ r=0.50, g=0.70, b=1.00, a=1.0 },
+    hovered_border_width = 1.5,
+    pressed_bg_color     = Color{ r=0.28, g=0.34, b=0.50, a=1.0 },
+    pressed_border_color = Color{ r=0.60, g=0.80, b=1.00, a=1.0 },
+    pressed_border_width = 2.0,
+  })
+  -- item4
+  app.item4:init(DropdownItemVisual{
+    pos  = Vec2{ x = 280.0, y = item_y_base + 4.0 * 40.0 },
+    size = Vec2{ x = 240.0, y = 36.0 },
+    radius = 4.0,
+    default_bg_color     = item_colors[4],
+    default_border_color = Color{ r=0.30, g=0.30, b=0.40, a=1.0 },
+    default_border_width = 1.0,
+    hovered_bg_color     = item_hover_colors[4],
+    hovered_border_color = Color{ r=0.50, g=0.70, b=1.00, a=1.0 },
+    hovered_border_width = 1.5,
+    pressed_bg_color     = Color{ r=0.28, g=0.34, b=0.50, a=1.0 },
+    pressed_border_color = Color{ r=0.60, g=0.80, b=1.00, a=1.0 },
+    pressed_border_width = 2.0,
+  })
+
+  -- Store original Y positions for items (to restore when hiding)
+  local item_orig_y: [NUM_ITEMS]float32
+  item_orig_y[0] = item_y_base + 0.0 * 40.0
+  item_orig_y[1] = item_y_base + 1.0 * 40.0
+  item_orig_y[2] = item_y_base + 2.0 * 40.0
+  item_orig_y[3] = item_y_base + 3.0 * 40.0
+  item_orig_y[4] = item_y_base + 4.0 * 40.0
+
+  local input: NebulaInputState
+  local prev_time = glfwGetTime()
+
+  -- =============================================================================
+  -- Main loop
+  -- =============================================================================
+  while glfwWindowShouldClose(window) == 0 do
+    glfwPollEvents()
+    local now = glfwGetTime()
+    local dt  = (@float32)(now - prev_time)
+    prev_time = now
+    nebula_collect_input(window, &input, dt)
+
+    -- Business logic: detect item clicks and update selected_index
+    if app.dropdown.is_open then
+      if app.item0.click.just_clicked then
+        app.dropdown.selected_index = 0
+        app.dropdown.is_open = false
+        printf("dropdown: selected Option A\n")
+      elseif app.item1.click.just_clicked then
+        app.dropdown.selected_index = 1
+        app.dropdown.is_open = false
+        printf("dropdown: selected Option B\n")
+      elseif app.item2.click.just_clicked then
+        app.dropdown.selected_index = 2
+        app.dropdown.is_open = false
+        printf("dropdown: selected Option C\n")
+      elseif app.item3.click.just_clicked then
+        app.dropdown.selected_index = 3
+        app.dropdown.is_open = false
+        printf("dropdown: selected Option D\n")
+      elseif app.item4.click.just_clicked then
+        app.dropdown.selected_index = 4
+        app.dropdown.is_open = false
+        printf("dropdown: selected Option E\n")
+      end
+    end
+
+    -- Move items off-screen when dropdown is closed (hide them)
+    -- When open, restore to original positions
+    if not app.dropdown.is_open then
+      app.item0.visual.pos.y = -1000.0
+      app.item1.visual.pos.y = -1000.0
+      app.item2.visual.pos.y = -1000.0
+      app.item3.visual.pos.y = -1000.0
+      app.item4.visual.pos.y = -1000.0
+    else
+      app.item0.visual.pos.y = item_orig_y[0]
+      app.item1.visual.pos.y = item_orig_y[1]
+      app.item2.visual.pos.y = item_orig_y[2]
+      app.item3.visual.pos.y = item_orig_y[3]
+      app.item4.visual.pos.y = item_orig_y[4]
+    end
+
+    -- Render
+    nebula_frame_render(&renderer, &app, &input, dt, 0.09, 0.09, 0.10)
+  end
+
+  wgpuSurfaceRelease(renderer.surface)
+  wgpuDeviceRelease(renderer.device)
+  wgpuAdapterRelease(renderer.adapter)
+  wgpuInstanceRelease(renderer.instance)
+  glfwDestroyWindow(window)
+  glfwTerminate()
+  printf("nebula: clean exit\n")
+  return 0
+end
+
+main()
