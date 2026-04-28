@@ -84,6 +84,17 @@ NEBULA_PRIMITIVES["hoverable"] = {
   context_init = {
     { type = "record_init", field = "hover", record_name = "HoverableState" },
   },
+  -- ★ Phase 4.4: process_body — 更新 hover 状态字段
+  process_body = function(spec, lines)
+    table.insert(lines, "  local prev_hovered = self.hover.is_hovered")
+    table.insert(lines, "  self.hover.is_hovered  = hovered")
+    table.insert(lines, "  self.hover.just_entered = (hovered and not prev_hovered)")
+    table.insert(lines, "  self.hover.just_left    = (not hovered and prev_hovered)")
+  end,
+  -- ★ Phase 4.4: state_transitions — 状态机转换声明
+  state_transitions = {
+    { guard = "hovered", target = "Hovered", priority = 10 },
+  },
   post_process      = nil,
   pre_derive_hook   = nil,
   extra_source_hook = nil,
@@ -100,6 +111,16 @@ NEBULA_PRIMITIVES["clickable"] = {
   context_init = {
     { type = "record_init", field = "click", record_name = "ClickableState" },
   },
+  -- ★ Phase 4.4: process_body — 更新 click 状态字段
+  process_body = function(spec, lines)
+    table.insert(lines, "  local prev_pressed = self.click.is_pressed")
+    table.insert(lines, "  self.click.is_pressed   = (hovered and input.mouse_left_down)")
+    table.insert(lines, "  self.click.just_clicked = (prev_pressed and not self.click.is_pressed and hovered)")
+  end,
+  -- ★ Phase 4.4: state_transitions — 状态机转换声明
+  state_transitions = {
+    { guard = "self.click.is_pressed", target = "Pressed", priority = 30 },
+  },
   post_process      = nil,
   pre_derive_hook   = nil,
   extra_source_hook = nil,
@@ -114,6 +135,21 @@ NEBULA_PRIMITIVES["focusable"] = {
     { name = "component_id", type = "uint32" },
   },
   context_init = {},  -- component_id 默认零初始化即可
+  -- ★ Phase 4.4: process_body — 焦点管理逻辑（依赖 clickable.just_clicked）
+  process_body = function(spec, lines)
+    table.insert(lines, "  -- focusable: uses runtime self.component_id")
+    table.insert(lines, "  if self.click.just_clicked then")
+    table.insert(lines, "    input.focused_id = self.component_id")
+    table.insert(lines, "  elseif input.mouse_left_pressed and not hovered then")
+    table.insert(lines, "    if input.focused_id == self.component_id then")
+    table.insert(lines, "      input.focused_id = 0")
+    table.insert(lines, "    end")
+    table.insert(lines, "  end")
+  end,
+  -- ★ Phase 4.4: state_transitions — 状态机转换声明
+  state_transitions = {
+    { guard = "input.focused_id == self.component_id", target = "Focused", priority = 20 },
+  },
   post_process      = nil,
   pre_derive_hook   = nil,
   extra_source_hook = nil,
@@ -186,6 +222,47 @@ NEBULA_PRIMITIVES["editable"] = {
     })
   end,
 }
+
+-- =============================================================================
+-- ★ Phase 4.4: nebula_register_primitive(name, spec)
+--
+-- 向界面开发者暴露的公开 API，用于在 S1 编译期注册自定义交互原语。
+-- 注册后，原语在 nebula_annotate 中自动可用（与内置原语等价）。
+--
+-- 参数 spec 结构：
+--   dependencies      : string[]? — 依赖的其他原语
+--   context_fields    : table[]?  — 注入到 <T>Context 的字段 [{name, type}]
+--   context_init      : table[]?  — Context:init() 初始化项
+--   process_body      : function? — function(spec, lines) — 状态更新代码注入
+--   state_transitions : table[]?  — [{guard, target, priority}]
+--   post_process      : table?    — {method_call = "..."}
+--   pre_derive_hook   : function? — Context 生成前的钩子
+--   extra_source_hook : function? — 生成额外 Nelua 源码的钩子
+-- =============================================================================
+function nebula_register_primitive(name, spec)
+  assert(type(name) == "string" and #name > 0,
+    "nebula_register_primitive: name must be a non-empty string")
+  assert(type(spec) == "table",
+    "nebula_register_primitive: spec must be a table")
+  assert(not NEBULA_PRIMITIVES[name],
+    ("nebula_register_primitive: primitive '%s' is already registered (built-in)"):format(name))
+
+  NEBULA_PRIMITIVES[name] = {
+    name              = name,
+    dependencies      = spec.dependencies or {},
+    global_type_meta  = spec.global_type_meta,
+    context_fields    = spec.context_fields or {},
+    context_init      = spec.context_init or {},
+    process_body      = spec.process_body,
+    state_transitions = spec.state_transitions,
+    post_process      = spec.post_process,
+    pre_derive_hook   = spec.pre_derive_hook,
+    extra_source_hook = spec.extra_source_hook,
+  }
+
+  print(("[derive] registered custom primitive: %s (deps=[%s])"):format(
+    name, table.concat(spec.dependencies or {}, ", ")))
+end
 
 -- =============================================================================
 -- ★ Phase 3.10: nebula_resolve_primitives(prims) -> ordered_list
@@ -334,12 +411,21 @@ end
 -- =============================================================================
 -- nebula_gen_process_input(spec) -> string
 --
--- ★ Phase 3.10 重构：不再使用 Monkey-patch 注入 toggleable。
--- 后处理调用通过 NEBULA_PRIMITIVES 注册表的 post_process 元数据驱动，
--- 在函数末尾按注册顺序插入。
+-- ★ Phase 4.4 重构：完全元数据驱动的 process_input 生成器。
 --
--- focusable 原语使用 self.component_id（运行时字段），而非编译期常量。
--- 这允许同一 Visual 类型的多个实例拥有不同的焦点 ID。
+-- 所有原语通过 NEBULA_PRIMITIVES 注册表声明自己的贡献：
+--   process_body(spec, lines)   — 状态更新代码注入
+--   state_transitions            — 状态机转换声明 {guard, target, priority}
+--   post_process                 — 后处理方法调用
+--
+-- nebula_gen_process_input 只负责：
+--   1. 公共基础设施（AABB hit_test 调用）
+--   2. 收集各原语的 process_body → 生成状态更新代码
+--   3. 收集各原语的 state_transitions → 按 priority 排序 → 生成 if-elseif 链
+--   4. 收集 post_process → 生成后处理调用
+--
+-- 无任何 is_hoverable/is_clickable/is_focusable 硬编码分支。
+-- 新增原语只需在 NEBULA_PRIMITIVES 中声明 process_body + state_transitions。
 -- =============================================================================
 function nebula_gen_process_input(spec)
   assert(spec.base,       "nebula_gen_process_input: spec.base required")
@@ -352,20 +438,25 @@ function nebula_gen_process_input(spec)
   local prims      = spec.primitives
   local states     = spec.states
 
-  -- ★ Phase 3.10: 使用原始声明的 prims 列表判断基础交互能力
-  -- 注意：这里使用原始 prims 而非 resolved，保持与旧版本行为一致
-  -- 纯 toggleable 无 clickable 时仍然生成 no-op（因为 toggleable 依赖 clickable 的 just_clicked）
-  local is_hoverable  = has(prims, "hoverable")
-  local is_clickable  = has(prims, "clickable")
-  local is_focusable  = has(prims, "focusable")
+  -- ★ Phase 4.4: 检查是否有任何交互原语（有 process_body 或 state_transitions 的原语）
+  -- 使用原始 prims 列表（非 resolved），保持与旧版本行为一致
+  local resolved = nebula_resolve_primitives(prims)
+  local has_interaction = false
+  for _, prim_name in ipairs(resolved) do
+    local meta = NEBULA_PRIMITIVES[prim_name]
+    if meta and (meta.process_body or (meta.state_transitions and #meta.state_transitions > 0)) then
+      has_interaction = true
+      break
+    end
+  end
 
   -- 无任何基础交互原语：生成空体，保持接口统一
-  if not is_hoverable and not is_clickable and not is_focusable then
+  if not has_interaction then
     local lines = {}
     table.insert(lines, ("-- [interaction] %s: process_input (no primitives, no-op)"):format(ctx))
     table.insert(lines, ("function %s:process_input(input: *NebulaInputState): void"):format(ctx))
-    table.insert(lines,  "  -- no interaction primitives declared")
-    table.insert(lines,  "end")
+    table.insert(lines, "  -- no interaction primitives declared")
+    table.insert(lines, "end")
     return table.concat(lines, "\n")
   end
 
@@ -374,75 +465,54 @@ function nebula_gen_process_input(spec)
     ctx, table.concat(prims, ", ")))
   table.insert(lines, ("function %s:process_input(input: *NebulaInputState): void"):format(ctx))
 
-  -- ---- 1. AABB 碰撞检测 ----
-  table.insert(lines,  "  local hovered = self:hit_test(input.mouse_x, input.mouse_y)")
+  -- ---- 1. 公共基础设施：AABB 碰撞检测 ----
+  table.insert(lines, "  local hovered = self:hit_test(input.mouse_x, input.mouse_y)")
 
-  -- ---- 2. 更新 hover 原语字段 ----
-  if is_hoverable then
-    table.insert(lines,  "  local prev_hovered = self.hover.is_hovered")
-    table.insert(lines,  "  self.hover.is_hovered  = hovered")
-    table.insert(lines,  "  self.hover.just_entered = (hovered and not prev_hovered)")
-    table.insert(lines,  "  self.hover.just_left    = (not hovered and prev_hovered)")
-  end
-
-  -- ---- 3. 更新 click 原语字段 ----
-  if is_clickable then
-    table.insert(lines,  "  local prev_pressed = self.click.is_pressed")
-    table.insert(lines,  "  self.click.is_pressed   = (hovered and input.mouse_left_down)")
-    table.insert(lines,  "  self.click.just_clicked = (prev_pressed and not self.click.is_pressed and hovered)")
-  end
-
-  -- ---- 4. 焦点管理（focusable 原语，使用运行时 self.component_id） ----
-  if is_focusable then
-    table.insert(lines,  "  -- focusable: uses runtime self.component_id")
-    table.insert(lines,  "  if self.click.just_clicked then")
-    table.insert(lines,  "    input.focused_id = self.component_id")
-    table.insert(lines,  "  elseif input.mouse_left_pressed and not hovered then")
-    table.insert(lines,  "    if input.focused_id == self.component_id then")
-    table.insert(lines,  "      input.focused_id = 0")
-    table.insert(lines,  "    end")
-    table.insert(lines,  "  end")
-  end
-
-  -- ---- 5. 状态机转换（按优先级：pressed > focused > hovered > default） ----
-  local has_pressed = is_clickable and has_state(states, "pressed")
-  local has_focused = is_focusable and has_state(states, "focused")
-  local has_hovered = is_hoverable and has_state(states, "hovered")
-  local default_st  = cap(states[1])
-
-  if has_pressed then
-    table.insert(lines,  "  if self.click.is_pressed then")
-    table.insert(lines, ("    self.sm:transition_to(%s.Pressed)"):format(st))
-    if has_focused then
-      table.insert(lines,  "  elseif input.focused_id == self.component_id then")
-      table.insert(lines, ("    self.sm:transition_to(%s.Focused)"):format(st))
+  -- ---- 2. 元数据驱动的状态更新：收集各原语的 process_body ----
+  for _, prim_name in ipairs(resolved) do
+    local meta = NEBULA_PRIMITIVES[prim_name]
+    if meta and meta.process_body then
+      table.insert(lines, "")
+      meta.process_body(spec, lines)
     end
-    if has_hovered then
-      table.insert(lines,  "  elseif hovered then")
-      table.insert(lines, ("    self.sm:transition_to(%s.Hovered)"):format(st))
-    end
-    table.insert(lines,  "  else")
-    table.insert(lines, ("    self.sm:transition_to(%s.%s)"):format(st, default_st))
-    table.insert(lines,  "  end")
-  elseif has_focused then
-    table.insert(lines,  "  if input.focused_id == self.component_id then")
-    table.insert(lines, ("    self.sm:transition_to(%s.Focused)"):format(st))
-    if has_hovered then
-      table.insert(lines,  "  elseif hovered then")
-      table.insert(lines, ("    self.sm:transition_to(%s.Hovered)"):format(st))
-    end
-    table.insert(lines,  "  else")
-    table.insert(lines, ("    self.sm:transition_to(%s.%s)"):format(st, default_st))
-    table.insert(lines,  "  end")
-  elseif has_hovered then
-    table.insert(lines,  "  if hovered then")
-    table.insert(lines, ("    self.sm:transition_to(%s.Hovered)"):format(st))
-    table.insert(lines,  "  else")
-    table.insert(lines, ("    self.sm:transition_to(%s.%s)"):format(st, default_st))
-    table.insert(lines,  "  end")
   end
 
-  -- ★ Phase 3.10: 元数据驱动的后处理注入（替代旧的 Monkey-patch）
+  -- ---- 3. 元数据驱动的状态机转换：收集各原语的 state_transitions，按 priority 排序 ----
+  local transitions = {}
+  for _, prim_name in ipairs(resolved) do
+    local meta = NEBULA_PRIMITIVES[prim_name]
+    if meta and meta.state_transitions then
+      for _, tr in ipairs(meta.state_transitions) do
+        -- 只在目标状态在 states 列表中存在时才生成
+        if has_state(states, tr.target:lower()) then
+          table.insert(transitions, {
+            guard    = tr.guard,
+            target   = tr.target,
+            priority = tr.priority or 0,
+          })
+        end
+      end
+    end
+  end
+
+  -- 按 priority 降序排列（高优先级在前：pressed=30 > focused=20 > hovered=10）
+  table.sort(transitions, function(a, b) return a.priority > b.priority end)
+
+  -- 生成 if-elseif 链
+  if #transitions > 0 then
+    table.insert(lines, "")
+    local default_st = cap(states[1])
+    for i, tr in ipairs(transitions) do
+      local keyword = (i == 1) and "if" or "elseif"
+      table.insert(lines, ("  %s %s then"):format(keyword, tr.guard))
+      table.insert(lines, ("    self.sm:transition_to(%s.%s)"):format(st, tr.target))
+    end
+    table.insert(lines, "  else")
+    table.insert(lines, ("    self.sm:transition_to(%s.%s)"):format(st, default_st))
+    table.insert(lines, "  end")
+  end
+
+  -- ---- 4. 元数据驱动的后处理注入 ----
   local post_items = nebula_get_post_process(prims)
   for _, post in ipairs(post_items) do
     if post.method_call then
@@ -450,7 +520,7 @@ function nebula_gen_process_input(spec)
     end
   end
 
-  table.insert(lines,  "end")
+  table.insert(lines, "end")
   return table.concat(lines, "\n")
 end
 

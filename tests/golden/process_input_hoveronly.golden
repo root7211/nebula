@@ -1,0 +1,15 @@
+-- [interaction] SimpleContext: process_input (primitives=[hoverable])
+function SimpleContext:process_input(input: *NebulaInputState): void
+  local hovered = self:hit_test(input.mouse_x, input.mouse_y)
+
+  local prev_hovered = self.hover.is_hovered
+  self.hover.is_hovered  = hovered
+  self.hover.just_entered = (hovered and not prev_hovered)
+  self.hover.just_left    = (not hovered and prev_hovered)
+
+  if hovered then
+    self.sm:transition_to(SimpleState.Hovered)
+  else
+    self.sm:transition_to(SimpleState.Default)
+  end
+end

@@ -1,0 +1,32 @@
+-- [interaction] InputContext: process_input (primitives=[hoverable, clickable, focusable])
+function InputContext:process_input(input: *NebulaInputState): void
+  local hovered = self:hit_test(input.mouse_x, input.mouse_y)
+
+  local prev_hovered = self.hover.is_hovered
+  self.hover.is_hovered  = hovered
+  self.hover.just_entered = (hovered and not prev_hovered)
+  self.hover.just_left    = (not hovered and prev_hovered)
+
+  local prev_pressed = self.click.is_pressed
+  self.click.is_pressed   = (hovered and input.mouse_left_down)
+  self.click.just_clicked = (prev_pressed and not self.click.is_pressed and hovered)
+
+  -- focusable: uses runtime self.component_id
+  if self.click.just_clicked then
+    input.focused_id = self.component_id
+  elseif input.mouse_left_pressed and not hovered then
+    if input.focused_id == self.component_id then
+      input.focused_id = 0
+    end
+  end
+
+  if self.click.is_pressed then
+    self.sm:transition_to(InputState.Pressed)
+  elseif input.focused_id == self.component_id then
+    self.sm:transition_to(InputState.Focused)
+  elseif hovered then
+    self.sm:transition_to(InputState.Hovered)
+  else
+    self.sm:transition_to(InputState.Default)
+  end
+end

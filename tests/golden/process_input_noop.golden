@@ -1,0 +1,4 @@
+-- [interaction] CardContext: process_input (no primitives, no-op)
+function CardContext:process_input(input: *NebulaInputState): void
+  -- no interaction primitives declared
+end

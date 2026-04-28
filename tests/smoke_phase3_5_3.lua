@@ -134,14 +134,14 @@ local spec_pure_toggle = {
   primitives = {"toggleable"},
   states     = {"default"},
 }
--- 纯 toggleable 没有 clickable，just_clicked 不会被设置，process_toggle 仍应生成
--- 但由于没有 clickable，process_input 会是 no-op 版本，process_toggle 也不会被追加
--- （因为 toggleable 依赖 clickable 的 just_clicked）
--- 这是预期行为：toggleable 必须与 clickable 配合使用
+-- ★ Phase 4.4: 纯 toggleable 时，resolve 自动注入依赖 hoverable+clickable。
+-- 由于 clickable 有 process_body 和 state_transitions，不再是 no-op。
+-- 这是正确的：toggleable 隐含可交互性，它依赖 click.just_clicked。
 local pi_pure_toggle_src = nebula_gen_process_input(spec_pure_toggle)
--- 没有 hoverable/clickable/focusable，应生成 no-op
-assert_contains("纯 toggleable 无 clickable 时生成 no-op process_input",
-  pi_pure_toggle_src, "no interaction primitives declared")
+assert_contains("纯 toggleable 解析后包含 hoverable 状态更新",
+  pi_pure_toggle_src, "prev_hovered")
+assert_contains("纯 toggleable 解析后包含 click 状态更新",
+  pi_pure_toggle_src, "just_clicked")
 
 -- =============================================================================
 -- 测试 7: 向后兼容性 — 现有测试的 process_input 不受影响

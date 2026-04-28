@@ -1,0 +1,21 @@
+-- [interaction] ButtonContext: process_input (primitives=[hoverable, clickable])
+function ButtonContext:process_input(input: *NebulaInputState): void
+  local hovered = self:hit_test(input.mouse_x, input.mouse_y)
+
+  local prev_hovered = self.hover.is_hovered
+  self.hover.is_hovered  = hovered
+  self.hover.just_entered = (hovered and not prev_hovered)
+  self.hover.just_left    = (not hovered and prev_hovered)
+
+  local prev_pressed = self.click.is_pressed
+  self.click.is_pressed   = (hovered and input.mouse_left_down)
+  self.click.just_clicked = (prev_pressed and not self.click.is_pressed and hovered)
+
+  if self.click.is_pressed then
+    self.sm:transition_to(ButtonState.Pressed)
+  elseif hovered then
+    self.sm:transition_to(ButtonState.Hovered)
+  else
+    self.sm:transition_to(ButtonState.Default)
+  end
+end
