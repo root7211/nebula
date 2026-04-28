@@ -126,6 +126,11 @@ global NebulaKey = @enum(uint8){
   ShiftRight = 11,
   ShiftHome  = 12,
   ShiftEnd   = 13,
+  -- ★ Phase 4.4 S3: Up/Down arrow keys (multiline editing)
+  Up         = 14,
+  Down       = 15,
+  ShiftUp    = 16,
+  ShiftDown  = 17,
 }
 
 -- =============================================================================
@@ -597,7 +602,7 @@ global ClickableState = @record{
 ## 
 ## -- ★ Phase 3.6: 加载 Gap Buffer 工厂模块（使 nebula_gen_gap_buffer_type 在所有 require nebula_core 的文件中可用）
 ## local gap_buffer_factory_mod = require "derive.gap_buffer_factory"
-## assert(gap_buffer_factory_mod == "nebula_gap_buffer_factory_v0.1_phase3.6",
+## assert(gap_buffer_factory_mod == "nebula_gap_buffer_factory_v0.2_phase4.4_s3",
 ##   "nebula: failed to load derive/gap_buffer_factory.lua")
 ## 
 ## -- 从 Visual 字段集合中检测着色器特性

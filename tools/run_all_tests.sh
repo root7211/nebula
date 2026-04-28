@@ -126,6 +126,10 @@ run_test "smoke_phase4_4_s1 (Phase 4.4 S1 — scrollable 原语注册 & 滚动�
 run_test "smoke_phase4_4_s2 (Phase 4.4 S2 — dropdown_manager 原语注册 & 下拉交互验证)" \
   nelua-lua tests/smoke_phase4_4_s2.lua
 
+# ★ Phase 4.4 S3: multiline_editable 原语注册 + NebulaMultiBuf 类型生成验证
+run_test "smoke_phase4_4_s3 (Phase 4.4 S3 — multiline_editable 原语注册 & NebulaMultiBuf 验证)" \
+  nelua-lua tests/smoke_phase4_4_s3.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="
@@ -195,6 +199,13 @@ run_test "compile dropdown_demo (Phase 4.4 S2 — dropdown_manager 原语 + 弹�
   --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
   examples/dropdown_demo.nelua -o ~/.cache/nelua/dropdown_demo
 
+# ★ Phase 4.4 S3 新增：multiline_editable_demo 编译回归（multiline_editable 原语 + NebulaMultiBuf）
+run_test "compile multiline_editable_demo (Phase 4.4 S3 — multiline_editable 原语 + 多行文本编辑)" \
+  nelua -c -L src -L assets/generated --add-path . --add-path examples --add-path assets/generated \
+  --cflags="-I./vendor/wgpu-native/include" \
+  --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
+  examples/multiline_editable_demo.nelua -o ~/.cache/nelua/multiline_editable_demo
+
 # ---- 总结 ----
 echo ""
 echo "============================================"
@@ -205,6 +216,6 @@ if [ "$FAIL" -gt 0 ]; then
   echo "[REGRESSION DETECTED] $FAIL test(s) failed!"
   exit 1
 else
-  echo "[ALL PASS] Phase 3.12 regression suite complete."
+  echo "[ALL PASS] Phase 4.4 S3 regression suite complete."
   exit 0
 fi

@@ -95,6 +95,9 @@ global function _nebula_key_callback(
   elseif key == GLFW_KEY_RIGHT then nk = shift_down and NebulaKey.ShiftRight or NebulaKey.Right
   elseif key == GLFW_KEY_HOME  then nk = shift_down and NebulaKey.ShiftHome  or NebulaKey.Home
   elseif key == GLFW_KEY_END   then nk = shift_down and NebulaKey.ShiftEnd   or NebulaKey.End
+  -- ★ Phase 4.4 S3: Up/Down arrow keys (multiline editing)
+  elseif key == GLFW_KEY_UP    then nk = shift_down and NebulaKey.ShiftUp    or NebulaKey.Up
+  elseif key == GLFW_KEY_DOWN  then nk = shift_down and NebulaKey.ShiftDown  or NebulaKey.Down
   end
 
   if nk ~= NebulaKey.None then

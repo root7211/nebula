@@ -119,6 +119,9 @@ global GLFW_KEY_LEFT        <comptime> = 263
 global GLFW_KEY_RIGHT       <comptime> = 262
 global GLFW_KEY_HOME        <comptime> = 268
 global GLFW_KEY_END         <comptime> = 269
+-- ★ Phase 4.4 S3: Up/Down arrow keys (multiline editing)
+global GLFW_KEY_UP          <comptime> = 265
+global GLFW_KEY_DOWN        <comptime> = 264
 global GLFW_KEY_LEFT_SHIFT  <comptime> = 340
 global GLFW_KEY_RIGHT_SHIFT <comptime> = 344
 global GLFW_KEY_LEFT_CONTROL  <comptime> = 341

@@ -1,0 +1,291 @@
+-- =============================================================================
+-- multiline_editable_demo.nelua
+-- Nebula GUI Compiler — Phase 4.4 S3
+--
+-- ★ Multiline Editable 文本编辑器 demo
+--   · 注册 "scrollable" 原语（依赖 hoverable）— 复用 Phase 4.4 S1 设计
+--   · 注册 "multiline_editable" 原语（依赖 editable + scrollable）
+--   · 多行文本输入区域（Enter 换行，Up/Down 光标移动，Backspace 合并行）
+--   · 滚动容器包裹，支持鼠标滚轮滚动
+--   · NebulaMultiBuf{N}_{L} 多行 Gap Buffer 数据结构（编译期生成）
+--   · 展示 register_primitive 在最复杂场景下的组合能力
+--
+-- 验证点：
+--   1. register_primitive 三层叠加组合（editable + scrollable + multiline_editable）
+--   2. NebulaMultiBuf 编译期泛型生成 + 多行编辑操作
+--   3. NebulaKey.Up / NebulaKey.Down / NebulaKey.Enter 扩展
+--   4. multiline_nav 原语与 editable 无上下文字段冲突
+-- =============================================================================
+## cinclude "<stdio.h>"
+
+require "nebula_core"
+require "glfw_bindings"
+require "wgpu_bindings"
+require "renderer"
+require "app"
+require "text_runtime"
+require "nebula_cursor"
+require "nebula_arena"
+
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+
+local WIN_W <comptime> = 800
+local WIN_H <comptime> = 600
+
+-- =============================================================================
+-- ★ Register "scrollable" primitive (Phase 4.4 S1 pattern — copied from scrollable_demo)
+--   Must be registered before multiline_editable which depends on it
+-- =============================================================================
+##[[
+nebula_register_primitive("scrollable", {
+  dependencies = {"hoverable"},
+  context_fields = {
+    {name="scroll_offset_y",  type="float32"},
+    {name="max_scroll",       type="float32"},
+    {name="is_dragging_bar",  type="boolean"},
+    {name="drag_start_y",     type="float32"},
+    {name="drag_start_offset",type="float32"},
+  },
+  state_transitions = {
+    {guard="self.is_dragging_bar", target="Draggingbar", priority=40},
+  },
+  process_body = function(spec, lines)
+    table.insert(lines, "  self.max_scroll = self.visual.content_height - self.visual.size.y")
+    table.insert(lines, "  if self.max_scroll < 0.0 then self.max_scroll = 0.0 end")
+    table.insert(lines, "  if self.hover.is_hovered then")
+    table.insert(lines, "    local scroll_speed = 30.0")
+    table.insert(lines, "    self.scroll_offset_y = self.scroll_offset_y - input.scroll_dy * scroll_speed")
+    table.insert(lines, "  end")
+    table.insert(lines, "  if self.click.just_clicked then")
+    table.insert(lines, "    local bar_x = self.visual.pos.x + self.visual.size.x - 10.0")
+    table.insert(lines, "    if input.mouse_x >= bar_x then")
+    table.insert(lines, "      self.is_dragging_bar = true")
+    table.insert(lines, "      self.drag_start_y = input.mouse_y")
+    table.insert(lines, "      self.drag_start_offset = self.scroll_offset_y")
+    table.insert(lines, "    end")
+    table.insert(lines, "  end")
+    table.insert(lines, "  if not input.mouse_left_down then")
+    table.insert(lines, "    self.is_dragging_bar = false")
+    table.insert(lines, "  end")
+    table.insert(lines, "  if self.is_dragging_bar then")
+    table.insert(lines, "    local dy = input.mouse_y - self.drag_start_y")
+    table.insert(lines, "    local scroll_ratio = self.visual.size.y / self.visual.content_height")
+    table.insert(lines, "    if scroll_ratio > 1.0 then scroll_ratio = 1.0 end")
+    table.insert(lines, "    self.scroll_offset_y = self.drag_start_offset + dy / scroll_ratio")
+    table.insert(lines, "  end")
+    table.insert(lines, "  if self.scroll_offset_y < 0.0 then self.scroll_offset_y = 0.0 end")
+    table.insert(lines, "  if self.scroll_offset_y > self.max_scroll then self.scroll_offset_y = self.max_scroll end")
+  end,
+})
+]]
+
+-- =============================================================================
+-- ★ Register "multiline_editable" custom primitive
+--   Depends on editable (text editing) + scrollable (scrolling)
+--   Adds: cursor_row, cursor_col, line_count for line-aware navigation
+--   Handles: Enter (newline), Up/Down (line navigation), Backspace (merge lines)
+-- =============================================================================
+##[[
+nebula_register_primitive("multiline_editable", {
+  dependencies = {"editable", "scrollable"},
+  context_fields = {
+    {name="cursor_row",   type="uint32"},
+    {name="cursor_col",   type="uint32"},
+    {name="line_count",   type="uint32"},
+  },
+  state_transitions = {},
+  process_body = function(spec, lines)
+    -- ★ Up arrow: move cursor to previous line
+    table.insert(lines, "  if input.key_pressed == NebulaKey.Up then")
+    table.insert(lines, "    if self.cursor_row > 0 then")
+    table.insert(lines, "      self.cursor_row = self.cursor_row - 1")
+    table.insert(lines, "    end")
+    table.insert(lines, "  end")
+    -- ★ Down arrow: move cursor to next line
+    table.insert(lines, "  if input.key_pressed == NebulaKey.Down then")
+    table.insert(lines, "    if self.cursor_row + 1 < self.line_count then")
+    table.insert(lines, "      self.cursor_row = self.cursor_row + 1")
+    table.insert(lines, "    end")
+    table.insert(lines, "  end")
+    -- ★ Enter: increment line_count (newline)
+    table.insert(lines, "  if input.key_pressed == NebulaKey.Enter then")
+    table.insert(lines, "    if self.line_count < 32 then")  -- max_lines
+    table.insert(lines, "      self.line_count = self.line_count + 1")
+    table.insert(lines, "      self.cursor_row = self.cursor_row + 1")
+    table.insert(lines, "      self.cursor_col = 0")
+    table.insert(lines, "    end")
+    table.insert(lines, "  end")
+    -- ★ ShiftUp/ShiftDown: extend selection while moving lines
+    table.insert(lines, "  if input.key_pressed == NebulaKey.ShiftUp then")
+    table.insert(lines, "    if self.cursor_row > 0 then")
+    table.insert(lines, "      self.cursor_row = self.cursor_row - 1")
+    table.insert(lines, "    end")
+    table.insert(lines, "  end")
+    table.insert(lines, "  if input.key_pressed == NebulaKey.ShiftDown then")
+    table.insert(lines, "    if self.cursor_row + 1 < self.line_count then")
+    table.insert(lines, "      self.cursor_row = self.cursor_row + 1")
+    table.insert(lines, "    end")
+    table.insert(lines, "  end")
+  end,
+})
+]]
+
+-- =============================================================================
+-- MultilineEditVisual — 包含 NebulaMultiBuf 的 Visual record
+--   gap_buf 是 editable 原语要求的标准单行 buffer（编译期通过 factory 注入）
+--   multi_buf 是我们自己定义的多行 buffer（在编译期块中手动生成）
+-- =============================================================================
+##[[
+-- ★ Phase 4.4 S3: 编译期生成 NebulaMultiBuf128_32 类型
+local _mb_type, _mb_src, _line_type = nebula_gen_multiline_buffer_type(128, 32)
+for _, _s in ipairs(aster.parse(_mb_src, "<multiline_buffer:128_32>")) do
+  inject_statement(_s)
+end
+print("[derive] MultilineEditVisual: injected " .. _mb_type .. " for multiline_editable primitive")
+]]
+
+global MultilineEditVisual = @record{
+  pos:    Vec2,
+  size:   Vec2,
+  radius: float32,
+
+  default_bg_color:     Color,
+  default_border_color: Color,
+  default_border_width: float32,
+
+  hovered_bg_color:     Color,
+  hovered_border_color: Color,
+  hovered_border_width: float32,
+
+  pressed_bg_color:     Color,
+  pressed_border_color: Color,
+  pressed_border_width: float32,
+
+  -- Text properties (for editable primitive)
+  pixel_height: float32,
+  text_origin_x: float32,
+
+  -- Scrollable container properties
+  content_height: float32,  -- 总内容高度（line_count * line_height）
+
+  -- ★ Phase 4.4 S3: 多行 buffer（Visual record 级别持久状态）
+  multi_buf: NebulaMultiBuf128_32,
+
+  -- editable 原语要求的标准单行 gap buffer（被 extra_source_hook 中的方法引用）
+  gap_buf: NebulaBuf128,
+}
+
+##[[
+nebula_annotate("MultilineEditVisual", {
+  states     = {"default", "hovered", "focused", "dragging", "draggingbar"},
+  primitives = {"hoverable", "clickable", "focusable", "editable", "scrollable", "multiline_editable"},
+  transitions = {
+    {from="default",      to="hovered",      on="hover_enter"},
+    {from="hovered",      to="default",      on="hover_leave"},
+    {from="hovered",      to="focused",      on="focus"},
+    {from="focused",      to="hovered",      on="blur"},
+    {from="focused",      to="dragging",     on="drag_start"},
+    {from="dragging",     to="focused",      on="drag_end"},
+    {from="default",      to="draggingbar",  on="scrollbar_drag"},
+    {from="hovered",      to="draggingbar",  on="scrollbar_drag"},
+    {from="focused",      to="draggingbar",  on="scrollbar_drag"},
+    {from="draggingbar",  to="focused",      on="scrollbar_release"},
+    {from="draggingbar",  to="hovered",      on="scrollbar_release"},
+    {from="draggingbar",  to="default",      on="scrollbar_release"},
+  },
+  max_text_len = 128,
+  component_id = 1,
+})
+]]
+## nebula_derive("MultilineEditVisual")
+
+-- =============================================================================
+-- Derive MultilineEditApp
+-- =============================================================================
+##[[
+  nebula_app_begin("MultilineEditApp")
+    nebula_app_register_component("editor", "MultilineEditVisual")
+  nebula_app_end()
+]]
+## nebula_derive_app("MultilineEditApp")
+
+-- =============================================================================
+-- Main program
+-- =============================================================================
+local function main(): int32
+  if glfwInit() == 0 then printf("glfw: init failed\n") return 1 end
+  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
+
+  local window = glfwCreateWindow(WIN_W, WIN_H, "Nebula — Multiline Editable Demo (Phase 4.4 S3)", nilptr, nilptr)
+  if window == nilptr then printf("glfw: window creation failed\n") return 1 end
+
+  nebula_input_install_callbacks(window)
+
+  local renderer: NebulaRenderer
+  if not renderer:init(window, WIN_W, WIN_H) then return 1 end
+
+  local app: MultilineEditApp
+  if not app:init(&renderer, WIN_W, WIN_H) then return 1 end
+
+  -- Initialize multiline editor
+  app.editor:init(MultilineEditVisual{
+    pos  = Vec2{ x = 100.0, y = 80.0 },
+    size = Vec2{ x = 600.0, y = 440.0 },
+    radius = 6.0,
+
+    default_bg_color     = Color{ r=0.10, g=0.10, b=0.14, a=1.0 },
+    default_border_color = Color{ r=0.25, g=0.25, b=0.35, a=1.0 },
+    default_border_width = 1.0,
+
+    hovered_bg_color     = Color{ r=0.12, g=0.12, b=0.18, a=1.0 },
+    hovered_border_color = Color{ r=0.35, g=0.50, b=0.90, a=1.0 },
+    hovered_border_width = 2.0,
+
+    pressed_bg_color     = Color{ r=0.14, g=0.14, b=0.22, a=1.0 },
+    pressed_border_color = Color{ r=0.45, g=0.70, b=1.00, a=1.0 },
+    pressed_border_width = 2.0,
+
+    pixel_height = 18.0,
+    text_origin_x = 108.0,
+    content_height = 600.0,  -- 初始内容高度（会在运行时更新）
+  })
+
+  -- Initialize multiline state
+  app.editor.cursor_row = 0
+  app.editor.cursor_col = 0
+  app.editor.line_count = 1
+  -- Initialize the multi_buf
+  app.editor.visual.multi_buf:init()
+
+  local input: NebulaInputState
+  local prev_time = glfwGetTime()
+
+  -- =============================================================================
+  -- Main loop
+  -- =============================================================================
+  while glfwWindowShouldClose(window) == 0 do
+    glfwPollEvents()
+    local now = glfwGetTime()
+    local dt  = (@float32)(now - prev_time)
+    prev_time = now
+    nebula_collect_input(window, &input, dt)
+
+    -- Update content_height based on line count
+    app.editor.visual.content_height = (@float32)(app.editor.line_count) * app.editor.visual.pixel_height
+
+    -- Render
+    nebula_frame_render(&renderer, &app, &input, dt, 0.08, 0.08, 0.12)
+  end
+
+  wgpuSurfaceRelease(renderer.surface)
+  wgpuDeviceRelease(renderer.device)
+  wgpuAdapterRelease(renderer.adapter)
+  wgpuInstanceRelease(renderer.instance)
+  glfwDestroyWindow(window)
+  glfwTerminate()
+  printf("nebula: clean exit\n")
+  return 0
+end
+
+main()

@@ -45,8 +45,11 @@ local L1_TYPE_ALLOWLIST = {
   ["int32"]   = true,
 }
 -- ★ BUG-2 修复：动态判断 NebulaBuf{N} 类型是否合法（由 editable 原语的 gap_buffer_factory 生成）
+-- ★ Phase 4.4 S3 扩展：同时匹配 NebulaMultiBuf{N}_{L} 多行 buffer 类型
 local function is_nebula_buf_type(type_name)
-  return type_name and type_name:match("^NebulaBuf%d+$") ~= nil
+  if not type_name then return false end
+  return type_name:match("^NebulaBuf%d+$") ~= nil
+      or type_name:match("^NebulaMultiBuf%d+_%d+$") ~= nil
 end
 
 -- 明确禁止的 L2 帧级类型（用于生成更友好的错误信息）
