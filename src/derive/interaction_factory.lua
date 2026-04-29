@@ -280,12 +280,26 @@ function nebula_register_primitive(name, spec)
       ("nebula_register_primitive: process_body for '%s' must be a function"):format(name))
   end
 
+  -- ★ Phase 4.3 S3: static_asserts 格式校验
+  -- 每项必须是 {field=string, type_pattern=string, reason=string}
+  for i, sa in ipairs(spec.static_asserts or {}) do
+    assert(type(sa) == "table",
+      ("nebula_register_primitive: static_asserts[%d] for '%s' must be a table"):format(i, name))
+    assert(type(sa.field) == "string" and #sa.field > 0,
+      ("nebula_register_primitive: static_asserts[%d].field for '%s' must be a non-empty string"):format(i, name))
+    assert(type(sa.type_pattern) == "string" and #sa.type_pattern > 0,
+      ("nebula_register_primitive: static_asserts[%d].type_pattern for '%s' must be a non-empty string"):format(i, name))
+    assert(type(sa.reason) == "string" and #sa.reason > 0,
+      ("nebula_register_primitive: static_asserts[%d].reason for '%s' must be a non-empty string"):format(i, name))
+  end
+
   NEBULA_PRIMITIVES[name] = {
     name              = name,
     dependencies      = spec.dependencies or {},
     global_type_meta  = spec.global_type_meta,
     context_fields    = spec.context_fields or {},
     context_init      = spec.context_init or {},
+    static_asserts    = spec.static_asserts or {},  -- ★ Phase 4.3 S3
     process_body      = spec.process_body,
     state_transitions = spec.state_transitions,
     post_process      = spec.post_process,
@@ -336,19 +350,107 @@ end
 function nebula_get_context_fields(prims)
   local fields = {}
   local seen = {}
+  local source_map = {}  -- ★ Phase 4.3 S3: 记录每个字段的来源原语（用于冲突报告）
   local resolved = nebula_resolve_primitives(prims)
   for _, prim_name in ipairs(resolved) do
     local meta = NEBULA_PRIMITIVES[prim_name]
     if meta then
       for _, f in ipairs(meta.context_fields or {}) do
         if not seen[f.name] then
-          seen[f.name] = true
+          seen[f.name] = f.type
+          source_map[f.name] = prim_name
           table.insert(fields, f)
+        else
+          -- ★ Phase 4.3 S3: 字段冲突检测 — 同名但不同类型
+          if seen[f.name] ~= f.type then
+            error(("[Axiom-S3 冲突] 原语 '%s' 注入的字段 '%s' (类型 '%s') 与原语 '%s' 已注入的同名字段 (类型 '%s') 类型不一致。\n"):format(
+              prim_name, f.name, f.type, source_map[f.name], seen[f.name])
+              .. "修复建议：将其中一个原语的字段重命名，或统一类型。", 2)
+          end
+          -- 同名同类型：静默去重（依赖链中多处引用同一字段是合法的）
         end
       end
     end
   end
   return fields
+end
+
+-- =============================================================================
+-- ★ Phase 4.3 S3: nebula_validate_static_asserts(prims) -> void
+--
+-- 编译期静态契约校验。
+--
+-- 收集所有已注册原语的 static_asserts 声明，然后检查 context fields 是否满足断言。
+-- 每条断言声明：{field = "gap_buf", type_pattern = "NebulaBuf%d+", reason = "..."}
+-- 含义：Context 中必须存在名为 `field` 的字段，且其类型匹配 `type_pattern`（Lua 模式）。
+--
+-- 典型用途：clipboard_aware 声明 "需要 editable 原语提供的 gap_buf 字段"，
+-- 若组件未声明 editable 原语，则在此处报出清晰的编译期错误。
+-- =============================================================================
+function nebula_validate_static_asserts(prims)
+  -- 收集所有已解析原语的 static_asserts
+  local resolved = nebula_resolve_primitives(prims)
+  local all_asserts = {}
+  for _, prim_name in ipairs(resolved) do
+    local meta = NEBULA_PRIMITIVES[prim_name]
+    if meta and meta.static_asserts then
+      for _, sa in ipairs(meta.static_asserts) do
+        table.insert(all_asserts, {
+          field        = sa.field,
+          type_pattern = sa.type_pattern,
+          reason       = sa.reason,
+          source       = prim_name,
+        })
+      end
+    end
+  end
+
+  if #all_asserts == 0 then return end
+
+  -- 构建已注入字段的 name -> type 映射
+  local fields = nebula_get_context_fields(prims)
+  local field_map = {}
+  for _, f in ipairs(fields) do
+    field_map[f.name] = f.type
+  end
+
+  -- 逐条校验
+  local violations = {}
+  for _, sa in ipairs(all_asserts) do
+    local actual_type = field_map[sa.field]
+    if not actual_type then
+      table.insert(violations, {
+        field  = sa.field,
+        expect = sa.type_pattern,
+        actual = "(不存在)",
+        reason = sa.reason,
+        source = sa.source,
+      })
+    elseif not actual_type:match(sa.type_pattern) then
+      table.insert(violations, {
+        field  = sa.field,
+        expect = sa.type_pattern,
+        actual = actual_type,
+        reason = sa.reason,
+        source = sa.source,
+      })
+    end
+  end
+
+  if #violations > 0 then
+    local lines = {
+      "[Axiom-S3 违规] 编译期静态契约校验失败：",
+    }
+    for _, v in ipairs(violations) do
+      table.insert(lines, ("  · 原语 '%s' 要求字段 '%s' 匹配模式 '%s'，实际类型 '%s' — %s"):format(
+        v.source, v.field, v.expect, v.actual, v.reason))
+    end
+    table.insert(lines, "")
+    table.insert(lines, "修复建议：")
+    table.insert(lines, "  · 确保组件的 primitives 列表中包含了声明该字段的原语")
+    table.insert(lines, "  · 或检查原语的依赖链是否正确")
+    error(table.concat(lines, "\n"), 2)
+  end
 end
 
 -- =============================================================================

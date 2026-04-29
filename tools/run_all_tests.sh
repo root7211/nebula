@@ -130,6 +130,10 @@ run_test "smoke_phase4_4_s2 (Phase 4.4 S2 — dropdown_manager 原语注册 & �
 run_test "smoke_phase4_4_s3 (Phase 4.4 S3 — multiline_editable 原语注册 & NebulaMultiBuf 验证)" \
   nelua-lua tests/smoke_phase4_4_s3.lua
 
+# ★ Phase 4.3 S3: 字段冲突检测 + static_asserts 编译期契约校验
+run_test "smoke_phase4_3_s3 (Phase 4.3 S3 — 字段冲突检测 & static_asserts 契约校验)" \
+  nelua-lua tests/smoke_phase4_3_s3.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="
