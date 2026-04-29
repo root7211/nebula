@@ -7,25 +7,82 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 - **ImGui 的开发效率**：零样板代码，极简的 API 调用。
 - **SwiftUI 的声明式体验**：纯声明式的 UI 描述，编译期自动推导布局与交互。
 
-它的核心主张是**阶段封闭性**：
+核心主张是**阶段封闭性**：
 > 每个操作必须归属于其输入最早全部可知的阶段。后一阶段不得执行前一阶段的操作，前一阶段的输出是后一阶段的不可变输入。
 
 ---
 
-### 当前状态：Phase 4.4 S3（multiline_editable 多行编辑器）已完成
+## 当前状态
 
-**Phase 3.6.2 至 Phase 4.4 S3 已全部合入主线，37/37 回归测试全绿。**
+**Era II 进行中 | 37/37 回归测试全绿 | 最新 Phase 4.4 S3 已完成**
 
-- **Phase 4.3 S1 (已完成)**：`interaction_factory.lua` 完全元数据驱动重构——`nebula_gen_process_input` 消除所有硬编码原语分支，状态机转换由 `state_transitions` 元数据 priority 排序自动拼装。新增 `nebula_register_primitive(name, spec)` 公开 API。
-- **Phase 4.3 S2 (已完成)**：`register_primitive` API 端到端验证——新增 `draggable_value` 原语 DX demo（slider_demo.nelua）、67 条专项测试（smoke_phase4_3.lua）、参数校验（依赖存在性 / context_fields / state_transitions / process_body 格式检查）。
-- **Phase 4.3 S3 (已完成)**：字段冲突检测 + `static_asserts` 编译期契约校验——注册同名字段的不同类型将触发编译错误；Visual 可声明编译期断言表达式。
-- **Phase 4.4 S1 (已完成)**：Scrollable 容器组件——新增 `scrollable` 自定义原语（依赖 hoverable，5 个 context 字段）、scrollable_demo.nelua（8 个子按钮 + scissor rect 裁剪 + 手动渲染循环）、`wgpuRenderPassEncoderSetScissorRect` 绑定、32 条专项测试。
-- **Phase 4.4 S2 (已完成)**：Dropdown 下拉选择器——`dropdown_manager` 自定义原语 + 弹出层 z-order 管理、dropdown_demo.nelua、29 条专项测试。
-- **Phase 4.4 S3 (已完成)**：Multiline editable 多行编辑器——`multiline_editable` 自定义原语 + `NebulaMultiBuf{N,L}` 编译期泛型类型生成、multiline_editable_demo.nelua、上下文滚动支持。
-- **Phase 4.2.2 D-4.1-A/B (已完成)**：自适应 Band 分割 + 等价子集哈希合并 + Jacobian 逆矩阵 SlugDilate sub-pixel 膨胀。
-- **Phase 4.2.2 D-4.1-C (待评估)**：Storage Buffer vs 纹理 benchmark。
-- **Phase 4.2.1 (已完成)**：跨平台 PAL 骨架（Linux/Windows/Web）。
-- **Phase 4.1 (已完成)**：Slug 文本渲染引擎（贝塞尔曲线纯数学矢量渲染）。
+### 最近完成
+
+| 里程碑 | 内容 | 关键 commit |
+| :--- | :--- | :--- |
+| **Phase 4.3 S1-S3** | 可编程原语注册表 | `a641d41` |
+| **Phase 4.4 S1-S3** | 高级组件库 | `b9fee31` |
+
+### Phase 4.3 — 可编程原语注册表（90/100）
+
+- **S1**：`interaction_factory.lua` 完全元数据驱动——消除所有硬编码原语分支，暴露 `nebula_register_primitive(name, spec)` 公开 API
+- **S2**：`draggable_value` 自定义原语端到端验证（slider_demo），67 条专项测试
+- **S3**：字段冲突检测 + `static_asserts` 编译期契约校验
+
+### Phase 4.4 — 高级组件库（81/100）
+
+- **S1**：`scrollable` 原语 + scissor rect 裁剪 + scrollable_demo
+- **S2**：`dropdown_manager` 原语 + 弹出层 z-order 管理 + dropdown_demo
+- **S3**：`multiline_editable` 原语 + `NebulaMultiBuf{N,L}` 编译期泛型类型 + multiline_editable_demo
+
+---
+
+## 架构路线图
+
+### Era I：形即渲染 — 已完成
+
+| Phase | 名称 | 核心成就 | 重要度 |
+| :--- | :--- | :--- | :--- |
+| **1** | `nebula_derive()` 编译期生成器 | 声明意图→编译期推导的核心范式 | **91** |
+| **2** | 形即渲染（WGSL 管线生成） | shader_compose + pipeline_factory + interaction_factory | **89** |
+| **3.1–3.4** | 多组件布局、文本、键盘输入 | layout_engine + SDF 文本 + Gap Buffer + Input 组件 | 87 |
+| **3.5** | App 编排与全面 Instancing | nebula_app_begin/end + 30 行愿景 | **91** |
+| **3.6** | Gap Buffer 文本编辑 | 编译期定容 Gap Buffer + 光标 + 选区 | 75 |
+| **3.7** | 管线生成器收敛 | 消除双脑渲染，统一至单一路径 | 75 |
+| **3.8** | 渲染循环封装 + FrameArena | nebula_frame_render 单函数 | 76 |
+| **3.9** | 文本一等公民 + Slot Producer | register_text + 万项动态列表 | 85 |
+| **3.10** | 原语注册中心 | NEBULA_PRIMITIVES 元数据驱动 | 68 |
+| **3.11** | Layout-App 统一注册 | 单次声明驱动全部生成 | 77 |
+| **3.12** | 响应式重排 | 编译期多视口采样 + 运行时线性插值 | 71 |
+| **4.0** | 编译期公理校验器 | axiom_validator 公理→可执行约束 | 75 |
+| **4.1** | Slug 文本渲染引擎 | 无纹理纯数学矢量文本渲染 | **89** |
+| **4.2.1** | 跨平台 PAL 骨架 | Linux/Windows/Web 源码级对齐 | 83 |
+
+### Era II：全功能框架 — 进行中
+
+| Phase | 名称 | 状态 | 重要度 |
+| :--- | :--- | :--- | :--- |
+| **4.2.2** | Slug 渲染内核生产级化 | **D-4.1-A/B 已完成**，D-4.1-C 待评估 | 79 |
+| **4.3** | 可编程原语注册表 | **S1+S2+S3 已完成** | **90** |
+| **4.4** | 高级组件库 | **S1+S2+S3 已完成** | **81** |
+| 4.2.3 | HarfBuzz + CJK 集成 | 规划中 | 82 |
+| 4.X | 高密度文本 + 输入补全 | 规划中 | — |
+| 4.5 | 注册原语语法糖 | 规划中 | — |
+| 4.6 | Indirect Drawing | 规划中 | 78 |
+| 4.7 | 文本编辑器原型 | 规划中 | — |
+| 5.0 | 生态与 CI/CD | 规划中 | — |
+
+> 重要度评分基于五个维度加权综合评分（满分 100），详见 [`docs/PHASE_IMPORTANCE_SCORECARD.md`](docs/PHASE_IMPORTANCE_SCORECARD.md)。
+
+---
+
+## 核心哲学：三大公理
+
+Nebula 的设计由三条正交公理驱动（详见 [`docs/ARCHITECTURE_GRAND_PLAN.md`](docs/ARCHITECTURE_GRAND_PLAN.md)）：
+
+1. **公理 A（阶段封闭性）**：严格划分 S0（预处理）、S1（编译）、S2（运行）阶段。
+2. **公理 B（生命周期三层）**：明确 L0（永久）、L1（持久）、L2（帧级）数据存活周期。
+3. **公理 C（形即渲染）**：Visual 类型在编译期确定性映射到管线签名。
 
 ---
 
@@ -66,35 +123,6 @@ main()
 
 ---
 
-## 架构路线图
-
-| Phase | 名称 | 目标 | 状态 | 重要度 |
-| :--- | :--- | :--- | :--- | :--- |
-| **4.2.1** | 跨平台 PAL 骨架 | 三端源码级对齐 | **已完成** | 83/100 |
-| **4.2.2** | Slug 渲染内核生产级化 | 清算债务，支持任意仿射变换 | **D-4.1-A/B 已完成** | 79/100 |
-| 4.2.3 | HarfBuzz + CJK 集成 | 7000 常用中文字符支持 | 规划中 | 82/100 |
-| **4.3** | **可编程原语注册表** | **允许开发者注入自定义交互逻辑** | **S3 已完成** | **90/100** |
-| **4.4** | **高级组件库** | **实现 multiline_editable, scrollable, dropdown** | **S3 已完成** | **81/100** |
-| 4.X | 高密度文本渲染 + 输入补全 | Atlas 文本通道 + char callback + clipboard | 规划中 | 待评分 |
-| 4.5 | 注册原语语法糖 | 基于 4.4 真实用例提炼重复模式，简化 DX | 规划中 | 待评分 |
-| 4.6 | Indirect Drawing | GPU 端实例剔除与间接绘制 | 规划中 | 78/100 |
-| 4.7 | 文本编辑器原型 | 验证 Era II 工业级能力 | 规划中 | 待评分 |
-| 5.0 | 工业化发布 | 自动化 CI/CD 与包管理支持 | 规划中 | 待评分 |
-
-> 重要度评分基于五个维度加权综合评分（满分 100），详见 [`docs/PHASE_IMPORTANCE_SCORECARD.md`](docs/PHASE_IMPORTANCE_SCORECARD.md)。
-
----
-
-## 核心哲学：三大公理
-
-Nebula 的设计由三条正交公理驱动（详见 [`docs/ARCHITECTURE_GRAND_PLAN.md`](docs/ARCHITECTURE_GRAND_PLAN.md)）：
-
-1. **公理 A（阶段封闭性）**：严格划分 S0（预处理）、S1（编译）、S2（运行）阶段。
-2. **公理 B（生命周期三层）**：明确 L0（永久）、L1（持久）、L2（帧级）数据存活周期。
-3. **公理 C（形即渲染）**：Visual 类型在编译期确定性映射到管线签名。
-
----
-
 ## 构建与运行
 
 ```bash
@@ -107,3 +135,67 @@ LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/form_demo
 ```bash
 bash tools/run_all_tests.sh
 ```
+
+---
+
+## 项目结构
+
+```
+nebula/
+├── src/                          # 核心框架
+│   ├── nebula_core.nelua         # 框架核心模块
+│   ├── app.nelua                 # App 编排 + GLFW 事件循环
+│   ├── renderer.nelua            # WebGPU 渲染器
+│   ├── text_runtime.nelua        # 文本渲染运行时
+│   ├── gap_buffer.nelua          # 单行 Gap Buffer
+│   ├── nebula_cursor.nelua       # 光标系统
+│   ├── nebula_arena.nelua        # Frame Arena 分配器
+│   ├── wgpu_bindings.nelua       # WebGPU C 绑定
+│   ├── glfw_bindings.nelua       # GLFW C 绑定
+│   ├── stb_truetype_bindings.nelua
+│   └── derive/                   # S1 编译期元编程引擎
+│       ├── interaction_factory.lua   # 原语注册表 + 交互代码生成
+│       ├── gap_buffer_factory.lua    # Gap Buffer / MultiBuf 类型生成
+│       ├── pipeline_factory.lua      # GPU 管线生成
+│       ├── shader_compose.lua        # WGSL 着色器组合
+│       ├── layout_engine.lua         # 编译期 Flexbox 布局
+│       ├── app_factory.lua           # App 编排代码生成
+│       └── axiom_validator.lua       # 公理合规校验
+├── examples/                     # 演示程序
+│   ├── button_demo.nelua         # 按钮组件
+│   ├── login_demo.nelua          # 登录表单
+│   ├── form_demo.nelua           # 多组件表单
+│   ├── layout_demo.nelua         # Flexbox 布局
+│   ├── text_demo.nelua           # 文本渲染
+│   ├── shadow_demo.nelua         # 阴影效果
+│   ├── dynamic_list_demo.nelua   # 万项动态列表
+│   ├── slider_demo.nelua         # 可编程原语 (draggable_value)
+│   ├── scrollable_demo.nelua     # 滚动容器
+│   ├── dropdown_demo.nelua       # 下拉选择器
+│   └── multiline_editable_demo.nelua  # 多行编辑器
+├── tests/                        # 测试套件 (37 项)
+├── tools/                        # 构建与测试工具
+├── assets/                       # 字体/纹理预处理产物
+├── vendor/                       # 第三方依赖 (wgpu-native, GLFW)
+└── docs/                         # 架构文档与设计参考
+```
+
+---
+
+## 文档索引
+
+| 文档 | 内容 |
+| :--- | :--- |
+| [`ARCHITECTURE_GRAND_PLAN.md`](docs/ARCHITECTURE_GRAND_PLAN.md) | 三大公理 + 两纪元路线图 + 50 行愿景 |
+| [`PHASE_IMPORTANCE_SCORECARD.md`](docs/PHASE_IMPORTANCE_SCORECARD.md) | 各 Phase 五维量化评分 |
+| [`DESIGN_PHASE1.md`](docs/DESIGN_PHASE1.md) | Phase 1 设计哲学：编译期推导范式 |
+| [`PLAN_PHASE2.md`](docs/PLAN_PHASE2.md) | Phase 2 总体设计：形即渲染 |
+| [`PLAN_PHASE3.md`](docs/PLAN_PHASE3.md) | Phase 3 总体设计：多组件系统 |
+| [`PLAN_PHASE3_6.md`](docs/PLAN_PHASE3_6.md) | Gap Buffer 生命周期设计（架构参考） |
+| [`PLAN_PHASE4_1.md`](docs/PLAN_PHASE4_1.md) | Slug 渲染引擎设计 |
+| [`PLAN_PHASE4_3.md`](docs/PLAN_PHASE4_3.md) | 可编程原语注册表设计 |
+| [`PLAN_PHASE4_2_3_CJK.md`](docs/PLAN_PHASE4_2_3_CJK.md) | HarfBuzz + CJK 集成规划（待实施） |
+| [`PLAN_PHASE4_X_DENSE_TEXT.md`](docs/PLAN_PHASE4_X_DENSE_TEXT.md) | 高密度文本 + 输入系统规划（待实施） |
+| [`TEXT_EDITOR_ROADMAP.md`](docs/TEXT_EDITOR_ROADMAP.md) | 文本编辑器长期愿景 |
+| [`ROADMAP_INDUSTRY_RESEARCH.md`](docs/ROADMAP_INDUSTRY_RESEARCH.md) | 行业对标研究 (Zed/GPUI, Vello/Piet) |
+| [`WASM_TARGET_ANALYSIS.md`](docs/WASM_TARGET_ANALYSIS.md) | WebAssembly 目标可行性分析 |

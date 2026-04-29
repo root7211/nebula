@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # run_all_tests.sh
-# Nebula GUI Compiler — Phase 3.10.5 Full Regression Test Suite
+# Nebula GUI Compiler — Full Regression Test Suite
 #
 # 运行所有 Lua 冒烟测试和编译回归测试。
 #
@@ -34,7 +34,7 @@ run_test() {
 }
 
 echo "============================================"
-echo " Nebula Phase 3.12 — Full Regression Suite"
+echo " Nebula — Full Regression Suite"
 echo "============================================"
 
 # ---- Part 1: Lua 冒烟测试（纯编译期逻辑验证） ----
@@ -220,6 +220,6 @@ if [ "$FAIL" -gt 0 ]; then
   echo "[REGRESSION DETECTED] $FAIL test(s) failed!"
   exit 1
 else
-  echo "[ALL PASS] Phase 4.4 S3 regression suite complete."
+  echo "[ALL PASS] Full regression suite complete."
   exit 0
 fi
