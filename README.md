@@ -12,13 +12,16 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ---
 
-### 当前状态：Phase 4.4 S2（Dropdown 下拉选择器）已完成
+### 当前状态：Phase 4.4 S3（multiline_editable 多行编辑器）已完成
 
-**Phase 3.6.2 至 Phase 4.4 S2 已全部合入主线，34/34 回归测试全绿。
+**Phase 3.6.2 至 Phase 4.4 S3 已全部合入主线，37/37 回归测试全绿。**
 
 - **Phase 4.3 S1 (已完成)**：`interaction_factory.lua` 完全元数据驱动重构——`nebula_gen_process_input` 消除所有硬编码原语分支，状态机转换由 `state_transitions` 元数据 priority 排序自动拼装。新增 `nebula_register_primitive(name, spec)` 公开 API。
 - **Phase 4.3 S2 (已完成)**：`register_primitive` API 端到端验证——新增 `draggable_value` 原语 DX demo（slider_demo.nelua）、67 条专项测试（smoke_phase4_3.lua）、参数校验（依赖存在性 / context_fields / state_transitions / process_body 格式检查）。
+- **Phase 4.3 S3 (已完成)**：字段冲突检测 + `static_asserts` 编译期契约校验——注册同名字段的不同类型将触发编译错误；Visual 可声明编译期断言表达式。
 - **Phase 4.4 S1 (已完成)**：Scrollable 容器组件——新增 `scrollable` 自定义原语（依赖 hoverable，5 个 context 字段）、scrollable_demo.nelua（8 个子按钮 + scissor rect 裁剪 + 手动渲染循环）、`wgpuRenderPassEncoderSetScissorRect` 绑定、32 条专项测试。
+- **Phase 4.4 S2 (已完成)**：Dropdown 下拉选择器——`dropdown_manager` 自定义原语 + 弹出层 z-order 管理、dropdown_demo.nelua、29 条专项测试。
+- **Phase 4.4 S3 (已完成)**：Multiline editable 多行编辑器——`multiline_editable` 自定义原语 + `NebulaMultiBuf{N,L}` 编译期泛型类型生成、multiline_editable_demo.nelua、上下文滚动支持。
 - **Phase 4.2.2 D-4.1-A/B (已完成)**：自适应 Band 分割 + 等价子集哈希合并 + Jacobian 逆矩阵 SlugDilate sub-pixel 膨胀。
 - **Phase 4.2.2 D-4.1-C (待评估)**：Storage Buffer vs 纹理 benchmark。
 - **Phase 4.2.1 (已完成)**：跨平台 PAL 骨架（Linux/Windows/Web）。
@@ -70,8 +73,9 @@ main()
 | **4.2.1** | 跨平台 PAL 骨架 | 三端源码级对齐 | **已完成** | 83/100 |
 | **4.2.2** | Slug 渲染内核生产级化 | 清算债务，支持任意仿射变换 | **D-4.1-A/B 已完成** | 79/100 |
 | 4.2.3 | HarfBuzz + CJK 集成 | 7000 常用中文字符支持 | 规划中 | 82/100 |
-| **4.3** | **可编程原语注册表** | **允许开发者注入自定义交互逻辑** | **S2 已完成** | **90/100** |
-| **4.4** | **高级组件库** | **实现 multiline_editable, scrollable 等** | **S2 已完成** | **81/100** |
+| **4.3** | **可编程原语注册表** | **允许开发者注入自定义交互逻辑** | **S3 已完成** | **90/100** |
+| **4.4** | **高级组件库** | **实现 multiline_editable, scrollable, dropdown** | **S3 已完成** | **81/100** |
+| 4.X | 高密度文本渲染 + 输入补全 | Atlas 文本通道 + char callback + clipboard | 规划中 | 待评分 |
 | 4.5 | 注册原语语法糖 | 基于 4.4 真实用例提炼重复模式，简化 DX | 规划中 | 待评分 |
 | 4.6 | Indirect Drawing | GPU 端实例剔除与间接绘制 | 规划中 | 78/100 |
 | 4.7 | 文本编辑器原型 | 验证 Era II 工业级能力 | 规划中 | 待评分 |
