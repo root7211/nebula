@@ -597,8 +597,8 @@ global ClickableState = @record{
 ## 
 ## -- ★ Phase 4.0: 加载公理校验器模块
 ## local axiom_validator_mod = require "derive.axiom_validator"
-## assert(axiom_validator_mod == "nebula_axiom_validator_v1.0_phase4.0",
-##   "nebula: failed to load derive/axiom_validator.lua")  -- ★ Phase 4.0 新增
+## assert(axiom_validator_mod == "nebula_axiom_validator_v2.0_phase4.3",
+##   "nebula: failed to load derive/axiom_validator.lua")  -- ★ Phase 4.3 升级（任务 D）
 ## 
 ## -- ★ Phase 3.6: 加载 Gap Buffer 工厂模块（使 nebula_gen_gap_buffer_type 在所有 require nebula_core 的文件中可用）
 ## local gap_buffer_factory_mod = require "derive.gap_buffer_factory"

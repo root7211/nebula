@@ -134,6 +134,10 @@ run_test "smoke_phase4_4_s3 (Phase 4.4 S3 — multiline_editable 原语注册 & 
 run_test "smoke_phase4_3_s3 (Phase 4.3 S3 — 字段冲突检测 & static_asserts 契约校验)" \
   nelua-lua tests/smoke_phase4_3_s3.lua
 
+# ★ Phase 4.3 Task D: process_body 公理校验（引用域闭合 + 分支覆盖增强）
+run_test "smoke_phase4_3_s4 (Phase 4.3 Task D — process_body 公理校验)" \
+  nelua-lua tests/smoke_phase4_3_s4.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="

@@ -928,6 +928,23 @@ function nebula_app_generate(app_name)
     nebula_validate_app(app_name, reg)
   end
 
+  -- ★ Phase 4.3: 任务 D — process_body 引用域校验 + 静态契约校验
+  -- 在任务 B/C 之后执行，确保 process_body 中的引用域合法
+  local app_prims = {}
+  for _, comp in ipairs(reg.components or {}) do
+    for _, p in ipairs(comp.prims or {}) do
+      table.insert(app_prims, p)
+    end
+  end
+  if #app_prims > 0 then
+    if nebula_validate_process_body then
+      nebula_validate_process_body(app_name, app_prims)
+    end
+    if nebula_validate_static_asserts then
+      nebula_validate_static_asserts(app_prims)
+    end
+  end
+
   local parts = {
     gen_app_record(app_name, reg),
     gen_app_init(app_name, reg),
