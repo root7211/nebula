@@ -29,7 +29,7 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 | # | 来源 Phase | 缺口 | 详情 |
 |:--|:-----------|:-----|:-----|
-| 1 | **4.3 S3** | **沙箱隔离未实现** | `process_body` 可注入任意 Nelua 代码，无全局函数白名单、L2 内存分配检测等安全边界。PLAN 2.3 §3 要求"确保只能访问 self 和 input" |
+| 1 | **4.3 S3** | **沙箱隔离未实现** | `process_body` 可注入任意 Nelua 代码，无引用域校验。实施方案见 [`PLAN_PHASE4_3_TASK_D.md`](docs/PLAN_PHASE4_3_TASK_D.md)（axiom_validator 任务 D，从公理 A+B 推导） |
 | 2 | **4.3 S3** | **契约校验未接入编译流程** | `nebula_validate_static_asserts()` 已实现但在 `app_factory.lua` 的 `nebula_derive_app` 中从未调用，仅在测试中出现 |
 | 3 | **4.4 S1-S3** | **高级原语未内置到框架注册表** | `scrollable`、`dropdown_manager`、`multiline_editable` 均需用户在 .nelua 中手动注册 50+ 行样板代码，未内置到 `interaction_factory.lua` 的 `NEBULA_PRIMITIVES` |
 | 4 | **4.2.2** | **D-4.1-C benchmark 未执行** | 需在 10000 字符规模下测试 Storage Buffer 性能退化。`REPORT_PHASE4_2_2_BENCH.md` 从未生成，阻塞 4.2.3 CJK 启动决策 |
@@ -210,6 +210,7 @@ nebula/
 | [`PLAN_PHASE3_6.md`](docs/PLAN_PHASE3_6.md) | Gap Buffer 生命周期设计（架构参考） |
 | [`PLAN_PHASE4_1.md`](docs/PLAN_PHASE4_1.md) | Slug 渲染引擎设计 |
 | [`PLAN_PHASE4_3.md`](docs/PLAN_PHASE4_3.md) | 可编程原语注册表设计 |
+| [`PLAN_PHASE4_3_TASK_D.md`](docs/PLAN_PHASE4_3_TASK_D.md) | process_body 公理校验补丁（从公理 A+B 推导） |
 | [`PLAN_PHASE4_2_3_CJK.md`](docs/PLAN_PHASE4_2_3_CJK.md) | HarfBuzz + CJK 集成规划（待实施） |
 | [`PLAN_PHASE4_X_DENSE_TEXT.md`](docs/PLAN_PHASE4_X_DENSE_TEXT.md) | 高密度文本 + 输入系统规划（待实施） |
 | [`TEXT_EDITOR_ROADMAP.md`](docs/TEXT_EDITOR_ROADMAP.md) | 文本编辑器长期愿景 |
