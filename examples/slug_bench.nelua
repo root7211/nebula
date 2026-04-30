@@ -1,0 +1,291 @@
+-- =============================================================================
+-- slug_bench.nelua
+-- Nebula GUI Compiler — Phase 4.2.2 D-4.1-C Benchmark
+--
+-- Storage Buffer 可扩展性性能基准测试。
+--
+-- Usage:
+--   ./build.sh slug_bench
+--   ~/.cache/nelua/slug_bench
+-- =============================================================================
+
+## cinclude "<stdio.h>"
+## cinclude "<string.h>"
+## cinclude "<stdlib.h>"
+
+require "nebula_core"
+require "glfw_bindings"
+require "wgpu_bindings"
+require "renderer"
+require "app"
+require "nebula_arena"
+
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+
+local WIN_W <comptime> = 800
+local WIN_H <comptime> = 600
+
+-- =============================================================================
+-- 极简 Visual 规格
+-- =============================================================================
+global BenchVisual = @record{
+  pos: Vec2,
+  size: Vec2,
+  default_bg_color: Color,
+  default_border_color: Color,
+  default_border_width: float32,
+}
+
+##[[
+nebula_annotate("BenchVisual", {
+  states = {"default"},
+  primitives = {},
+  transitions = {},
+})
+]]
+## nebula_derive("BenchVisual")
+
+-- =============================================================================
+-- App 派生
+-- =============================================================================
+##[[
+  nebula_app_begin("BenchApp")
+    nebula_app_register_component("bench", "BenchVisual")
+  nebula_app_end()
+]]
+## nebula_derive_app("BenchApp")
+
+-- =============================================================================
+-- 编译期生成 benchmark 辅助函数
+-- =============================================================================
+##[[
+local layout = nebula_gen_uniform_layout("BenchVisual", {
+  record_name      = "BenchVisualUniforms",
+  wgsl_struct_name = "Uniforms",
+})
+BENCH_UNIFORMS_BYTES = layout.total_size
+
+-- 注入 comptime 常量
+do
+  local src = string.format("global BENCH_UNIFORMS_BYTES_VAL: uint32 <comptime> = %d", BENCH_UNIFORMS_BYTES)
+  local ast = aster.parse(src, "<bench_const>")
+  for _, stat in ipairs(ast) do inject_statement(stat) end
+end
+
+-- 注入 fill_bench_instances（不引用 BenchVisualUniforms 类型，直接用 float32 数组）
+do
+  local ub = BENCH_UNIFORMS_BYTES
+  local nfloats = ub / 4  -- 64 / 4 = 16
+  local src = table.concat({
+    "global function fill_bench_instances(out: *[0]float32, count: uint32): void",
+    "  local cols: uint32 = 100",
+    "  local rows: uint32 = (count + cols - 1) / cols",
+    string.format("  local cell_w = (@float32)(%d) / (@float32)(cols)", 800),
+    string.format("  local cell_h = (@float32)(%d) / (@float32)(rows)", 600),
+    "  local rect_w = cell_w * 0.9",
+    "  local rect_h = cell_h * 0.9",
+    "  local i: uint32 = 0",
+    "  while i < count do",
+    "    local col = i % cols",
+    "    local row = i / cols",
+    string.format("    local base = (@usize)(i) * %d", nfloats),
+    "    out[base + 0] = (@float32)(col) * cell_w + cell_w * 0.05",
+    "    out[base + 1] = (@float32)(row) * cell_h + cell_h * 0.05",
+    "    out[base + 2] = rect_w",
+    "    out[base + 3] = rect_h",
+    "    out[base + 4] = 0.3",
+    "    out[base + 5] = 0.6",
+    "    out[base + 6] = 0.9",
+    "    out[base + 7] = 1.0",
+    "    out[base + 8] = 0.0",
+    "    out[base + 9] = 0.0",
+    "    out[base + 10] = 0.0",
+    "    out[base + 11] = 0.0",
+    "    out[base + 12] = 0.0",
+    "    out[base + 13] = 0.0",
+    "    out[base + 14] = 0.0",
+    "    out[base + 15] = 0.0",
+    "    i = i + 1",
+    "  end",
+    "end",
+  }, "\n")
+  local ast = aster.parse(src, "<fill_bench>")
+  for _, stat in ipairs(ast) do inject_statement(stat) end
+end
+
+-- 注入 bench_render_frame
+do
+  local src = table.concat({
+    "global function bench_render_frame(",
+    "  renderer: *NebulaRenderer, instances: pointer, count: uint32, max_instances: uint32",
+    "): boolean",
+    "  glfwPollEvents()",
+    "  local pipe: BenchVisualPipeline",
+    "  if not pipe:init(renderer, max_instances) then",
+    '    printf("bench: pipeline init failed\\n")',
+    "    return false",
+    "  end",
+    "  pipe:upload(renderer, instances, count)",
+    "  local surf_tex = WGPUSurfaceTexture{}",
+    "  wgpuSurfaceGetCurrentTexture(renderer.surface, &surf_tex)",
+    "  if surf_tex.texture == nilptr then",
+    "    pipe:deinit()",
+    "    return false",
+    "  end",
+    "  local tex_view = wgpuTextureCreateView(surf_tex.texture, nilptr)",
+    '  local enc_desc = WGPUCommandEncoderDescriptor{ nextInChain = nilptr, label = wgpu_str("bench-enc") }',
+    "  local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, &enc_desc)",
+    "  local rp_color = WGPURenderPassColorAttachment{",
+    "    nextInChain = nilptr, view = tex_view, depthSlice = 0xFFFFFFFF,",
+    "    resolveTarget = nilptr, loadOp = WGPURenderOp_Clear, storeOp = WGPURenderOp_Store,",
+    "    clearValue = WGPUColor{ r = 0.05, g = 0.05, b = 0.07, a = 1.0 },",
+    "  }",
+    "  local rp_desc = WGPURenderPassDescriptor{",
+    '    nextInChain = nilptr, label = wgpu_str("bench-rp"),',
+    "    colorAttachmentCount = 1, colorAttachments = &rp_color,",
+    "    depthStencilAttachment = nilptr, timestampWrites = nilptr,",
+    "  }",
+    "  local pass = wgpuCommandEncoderBeginRenderPass(encoder, &rp_desc)",
+    "  pipe:draw_instanced(pass, count)",
+    "  wgpuRenderPassEncoderEnd(pass)",
+    "  wgpuRenderPassEncoderRelease(pass)",
+    '  local cmd_buf_desc = WGPUCommandBufferDescriptor{ nextInChain = nilptr, label = wgpu_str("bench-cmd") }',
+    "  local cmd_buf = wgpuCommandEncoderFinish(encoder, &cmd_buf_desc)",
+    "  wgpuCommandEncoderRelease(encoder)",
+    "  wgpuQueueSubmit(renderer.queue, 1, &cmd_buf)",
+    "  wgpuCommandBufferRelease(cmd_buf)",
+    "  wgpuTextureViewRelease(tex_view)",
+    "  wgpuSurfacePresent(renderer.surface)",
+    "  wgpuDevicePoll(renderer.device, false, nilptr)",
+    "  pipe:deinit()",
+    "  return true",
+    "end",
+  }, "\n")
+  local ast = aster.parse(src, "<bench_render>")
+  for _, stat in ipairs(ast) do inject_statement(stat) end
+end
+]]
+
+-- =============================================================================
+-- 主程序
+-- =============================================================================
+local function main(): int32
+  printf("=============================================================\n")
+  printf(" Nebula D-4.1-C: Storage Buffer Scalability Benchmark\n")
+  printf(" Phase 4.2.2\n")
+  printf("=============================================================\n\n")
+
+  if glfwInit() == 0 then
+    printf("glfw: init failed\n")
+    return 1
+  end
+  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
+
+  local window = glfwCreateWindow(WIN_W, WIN_H,
+    "Nebula D-4.1-C Benchmark", nilptr, nilptr)
+  if window == nilptr then
+    printf("glfw: window creation failed\n")
+    return 1
+  end
+
+  local renderer: NebulaRenderer
+  if not renderer:init(window, WIN_W, WIN_H) then
+    return 1
+  end
+
+  local BENCH_FRAMES: uint32 = 60
+  local uniform_size: csize = BENCH_UNIFORMS_BYTES_VAL
+
+  printf("Running benchmark: %u frames per scale, warmup=3\n\n", BENCH_FRAMES)
+  printf("  %-12s  %-9s  %-18s  %s\n", "Scale", "Count", "Avg Frame Time", "Data Volume")
+  printf("  %-12s  %-9s  %-18s  %s\n", "-----", "-----", "---------------", "-----------")
+
+  local counts: [3]uint32 = {1000, 5000, 10000}
+  local labels: [3]cstring = {"1K-baseline", "5K-mid", "10K-target"}
+  local avg_times: [3]float64 = {0.0, 0.0, 0.0}
+
+  local bench_idx: uint32 = 0
+  while bench_idx < 3 do
+    local count = counts[bench_idx]
+    local label = labels[bench_idx]
+
+    local buf_size = uniform_size * (@csize)(count)
+    local instances = (@pointer)(malloc(buf_size))
+    fill_bench_instances(instances, count)
+
+    -- Warmup
+    local w: uint32 = 0
+    while w < 3 do
+      bench_render_frame(&renderer, instances, count, count + 16)
+      w = w + 1
+    end
+
+    -- Measurement
+    local t_start = glfwGetTime()
+    local f: uint32 = 0
+    while f < BENCH_FRAMES do
+      if not bench_render_frame(&renderer, instances, count, count + 16) then break end
+      f = f + 1
+    end
+    local t_end = glfwGetTime()
+
+    local actual = (@float64)(f)
+    local total_sec = t_end - t_start
+    local avg_ms = 0.0
+    if actual > 0.0 then
+      avg_ms = (total_sec / actual) * 1000.0
+    end
+    avg_times[bench_idx] = avg_ms
+    local upload_mb = (@float64)(count) * (@float64)(uniform_size) / (1024.0 * 1024.0)
+    printf("  %-12s  count=%5u  avg=%.3f ms/frame  (%.2f MB upload, %llu verts)\n",
+      label, count, avg_ms, upload_mb, (@uint64)(count) * 6)
+
+    free(instances)
+    bench_idx = bench_idx + 1
+  end
+
+  printf("\n=============================================================\n")
+  printf(" D-4.1-C Results\n")
+  printf("=============================================================\n\n")
+
+  local t_1k = avg_times[0]
+  if t_1k > 0.0 then
+    local ratio_5k = avg_times[1] / t_1k
+    local ratio_10k = avg_times[2] / t_1k
+    local degrade_5k = (ratio_5k - 1.0) * 100.0
+    local degrade_10k = (ratio_10k - 1.0) * 100.0
+
+    printf("  1K baseline:    %.3f ms/frame\n", t_1k)
+    printf("  5K (5x scale):  %.3f ms/frame  (degradation: %+.1f%%)\n", avg_times[1], degrade_5k)
+    printf("  10K (10x scale): %.3f ms/frame  (degradation: %+.1f%%)\n", avg_times[2], degrade_10k)
+    printf("\n  Verdict: ")
+    if degrade_10k < 20.0 then
+      printf("PASSED — degradation %.1f%% < 20%% threshold\n", degrade_10k)
+      printf("  D-4.1-C: benchmark DISMISSED. Storage Buffer path viable at CJK scale.\n")
+    else
+      printf("FAILED — degradation %.1f%% >= 20%% threshold\n", degrade_10k)
+      printf("  D-4.1-C: benchmark SUSTAINED. Migration to RGBA32Float texture needed.\n")
+    end
+  else
+    printf("  ERROR: baseline benchmark failed.\n")
+  end
+
+  printf("\n  Environment:\n")
+  printf("    Platform:  WSL2 / Linux (X11)\n")
+  printf("    Renderer:  wgpu-native v29+\n")
+  printf("    Window:    %d x %d\n", WIN_W, WIN_H)
+  printf("    Uniforms:  %d bytes/instance\n", (@int)(uniform_size))
+  printf("    Draw:      wgpuRenderPassEncoderDraw(pass, 6, N, 0, 0)\n\n")
+
+  wgpuSurfaceRelease(renderer.surface)
+  wgpuDeviceRelease(renderer.device)
+  wgpuAdapterRelease(renderer.adapter)
+  wgpuInstanceRelease(renderer.instance)
+  glfwDestroyWindow(window)
+  glfwTerminate()
+  printf("bench: clean exit\n")
+  return 0
+end
+
+main()
