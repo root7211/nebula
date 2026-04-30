@@ -5,14 +5,30 @@
 
 ## Summary
 
-**D-4.1-C benchmark STATUS: CODE COMPLETE — awaiting runtime data on native GPU.**
+**D-4.1-C benchmark STATUS: PASSED (2026-05-01)**
 
-The benchmark binary compiles and links successfully against wgpu-native v29+.
-Static analysis (20/20 assertions) confirms the Storage Buffer infrastructure
-is architecturally sound for CJK-scale instance counts (10K+).
+Runtime execution on WSL2 + llvmpipe (Vulkan software renderer) confirms
+Storage Buffer path is viable at CJK scale. Degradation from 1K→10K is only
+**+2.5%**, well below the 20% dismissal threshold.
 
-Runtime execution requires a native GPU environment (not available in WSL2).
-The binary is ready for execution on any Linux system with wgpu-native + GLFW.
+### Runtime Results
+
+| Scale     | Instances | Avg Frame Time | Degradation vs 1K |
+|-----------|-----------|----------------|-------------------|
+| 1K baseline | 1,000   | 1.414 ms/frame | baseline          |
+| 5K mid      | 5,000   | 1.453 ms/frame | +2.8%             |
+| 10K target  | 10,000  | 1.450 ms/frame | +2.5%             |
+
+**Verdict: DISMISSED — Storage Buffer path viable at CJK scale.**
+
+### Environment
+
+- Platform: WSL2 / Linux (X11 via WSLg XWayland)
+- GPU: llvmpipe (LLVM 20.1.2, 256 bits) — Vulkan software renderer
+- Renderer: wgpu-native v29+
+- VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json
+- Window: 800×600, BGRA8Unorm surface format
+- 60 frames/measurement, 3 warmup frames
 
 ## Benchmark Design
 

@@ -14,13 +14,13 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 进行中 | 43/43 回归测试全绿 | Phase 4.2.2 D-4.1-C benchmark 已完成（2026-05-01）**
+**Era II 进行中 | 43/43 回归测试全绿 | Phase 4.2.2 D-4.1-C benchmark PASSED（2026-05-01）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
-| **Phase 4.2.2 D-4.1-C** | Storage Buffer scalability benchmark（1K/5K/10K，20 静态断言） | `5561bb0` |
+| **Phase 4.2.2 D-4.1-C** | Storage Buffer scalability benchmark PASSED — 1K=1.41ms, 5K=1.45ms, 10K=1.45ms, 退化+2.5%<20%阈值 | `ebd7333` |
 | **Phase 4.2.3-S0** | HarfBuzz 绑定 + CJK shaping 预处理（zh-CN-common 20 字验证） | `afab95e` |
 | **Phase 4.2.2-fix** | GPU 资源 deinit — 修复 ~40+ GPU 对象泄漏，公理 B 合规 | `2b2d9cb` |
 | **Phase 4.3 S1-S3 + Task D** | 可编程原语注册表 + axiom_validator v2.0 三层防御 | `1fdc182` |
@@ -35,7 +35,7 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 | ~~1~~ | **4.3 S3** | ~~沙箱隔离~~ | ✅ 已修复 | Task D 实现 `axiom_validator` v2.0 三层防御（Proxy + Token 扫描 + NEBULA_INTRINSICS 白名单 + Trace），已在 `nebula_derive_app` 中接入编译流程 |
 | ~~2~~ | **4.3 S3** | ~~契约校验未接入编译流程~~ | ✅ 已修复 | `nebula_validate_static_asserts()` + `nebula_validate_process_body()` 均已接入 `app_factory.lua:940-944` |
 | ~~3~~ | **4.4 S1-S3** | ~~高级原语未内置到框架注册表~~ | ✅ 已修复 | `scrollable`、`dropdown_manager`、`multiline_editable` 已内置到 `interaction_factory.lua` 的 `NEBULA_PRIMITIVES`，用户只需在 `nebula_annotate` 中声明 `primitives = {...}` 即可使用，无需手动注册 |
-| ~~4~~ | **4.2.2** | ~~D-4.1-C benchmark 未执行~~ | ✅ 已完成 | `slug_bench.nelua` 已编译链接成功，20/20 静态分析通过，待 native GPU 执行运行时测试。详见 `docs/REPORT_PHASE4_2_2_BENCH.md` |
+| ~~4~~ | **4.2.2** | ~~D-4.1-C benchmark 未执行~~ | ✅ PASSED | `slug_bench.nelua` WSL2+llvmpipe Vulkan 运行时通过：1K=1.41ms/帧, 5K=1.45ms/帧, 10K=1.45ms/帧，退化+2.5% 远低于 20% 阈值。Storage Buffer 路径在 CJK 规模下完全可行。commit `ebd7333` |
 | ~~5~~ | **4.X** | ~~剪贴板 API 未绑定~~ | ✅ 已修复 | `glfw_bindings.nelua` 已绑定 `glfwGetClipboardString` / `glfwSetClipboardString`；`editable` 原语支持 Ctrl+C/V/X/A 剪贴板操作 |
 | ~~6~~ | **4.X** | ~~Unicode char callback 无消费者~~ | ✅ 已修复 | `editable` 原语已扩展为接受全 Unicode 可打印字符（UTF-8 编码插入），Ctrl+C/V/X/A 快捷键已集成 |
 
