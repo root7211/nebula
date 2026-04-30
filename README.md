@@ -20,7 +20,7 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
-| **Phase 4.2.2-fix** | GPU 资源 deinit — 修复 ~40+ GPU 对象泄漏，公理 B 合规 | `pending` |
+| **Phase 4.2.2-fix** | GPU 资源 deinit — 修复 ~40+ GPU 对象泄漏，公理 B 合规 | `2b2d9cb` |
 | **Phase 4.3 S1-S3 + Task D** | 可编程原语注册表 + axiom_validator v2.0 三层防御 | `1fdc182` |
 | **Phase 4.4 S1-S3** | 高级组件库 | `b9fee31` |
 
