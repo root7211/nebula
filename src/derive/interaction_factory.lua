@@ -223,6 +223,160 @@ NEBULA_PRIMITIVES["editable"] = {
   end,
 }
 
+-- ---- 6. scrollable ----
+-- ★ Phase 4.4 S1: 可滚动容器原语
+-- 管理滚动偏移 + 滚动条拖拽状态，依赖 hoverable（需要 hovered 决定是否响应滚轮）
+NEBULA_PRIMITIVES["scrollable"] = {
+  name         = "scrollable",
+  dependencies = { "hoverable" },
+  global_type_meta = nil,
+  context_fields = {
+    { name = "scroll_offset_y",   type = "float32" },
+    { name = "max_scroll",        type = "float32" },
+    { name = "is_dragging_bar",   type = "boolean" },
+    { name = "drag_start_y",      type = "float32" },
+    { name = "drag_start_offset", type = "float32" },
+  },
+  context_init = {},
+  process_body = function(spec, lines)
+    -- 更新 max_scroll（内容高度可能每帧变化）
+    table.insert(lines, "  self.max_scroll = self.visual.content_height - self.visual.size.y")
+    table.insert(lines, "  if self.max_scroll < 0.0 then self.max_scroll = 0.0 end")
+    -- 滚轮滚动（仅在 hovered 状态下响应）
+    table.insert(lines, "  if self.hover.is_hovered then")
+    table.insert(lines, "    local scroll_speed = 30.0")
+    table.insert(lines, "    self.scroll_offset_y = self.scroll_offset_y - input.scroll_dy * scroll_speed")
+    table.insert(lines, "  end")
+    -- 滚动条拖拽逻辑
+    table.insert(lines, "  if self.click.just_clicked then")
+    table.insert(lines, "    local bar_x = self.visual.pos.x + self.visual.size.x - 10.0")
+    table.insert(lines, "    if input.mouse_x >= bar_x then")
+    table.insert(lines, "      self.is_dragging_bar = true")
+    table.insert(lines, "      self.drag_start_y = input.mouse_y")
+    table.insert(lines, "      self.drag_start_offset = self.scroll_offset_y")
+    table.insert(lines, "    end")
+    table.insert(lines, "  end")
+    table.insert(lines, "  if not input.mouse_left_down then")
+    table.insert(lines, "    self.is_dragging_bar = false")
+    table.insert(lines, "  end")
+    table.insert(lines, "  if self.is_dragging_bar then")
+    table.insert(lines, "    local dy = input.mouse_y - self.drag_start_y")
+    table.insert(lines, "    local scroll_ratio = self.visual.size.y / self.visual.content_height")
+    table.insert(lines, "    if scroll_ratio > 1.0 then scroll_ratio = 1.0 end")
+    table.insert(lines, "    self.scroll_offset_y = self.drag_start_offset + dy / scroll_ratio")
+    table.insert(lines, "  end")
+    table.insert(lines, "  if self.scroll_offset_y < 0.0 then self.scroll_offset_y = 0.0 end")
+    table.insert(lines, "  if self.scroll_offset_y > self.max_scroll then self.scroll_offset_y = self.max_scroll end")
+  end,
+  state_transitions = {
+    { guard = "self.is_dragging_bar", target = "Draggingbar", priority = 40 },
+  },
+  post_process      = nil,
+  pre_derive_hook   = nil,
+  extra_source_hook = nil,
+}
+
+-- ---- 7. dropdown_manager ----
+-- ★ Phase 4.4 S2: 下拉选择器原语
+-- 管理展开/收起状态 + 选中索引 + 点击外部关闭
+NEBULA_PRIMITIVES["dropdown_manager"] = {
+  name         = "dropdown_manager",
+  dependencies = { "hoverable", "clickable" },
+  global_type_meta = nil,
+  context_fields = {
+    { name = "is_open",        type = "boolean" },
+    { name = "selected_index", type = "uint32" },
+    { name = "item_count",     type = "uint32" },
+  },
+  context_init = {},
+  process_body = function(spec, lines)
+    -- Toggle open/close on click
+    table.insert(lines, "  if self.click.just_clicked then")
+    table.insert(lines, "    self.is_open = not self.is_open")
+    table.insert(lines, "  end")
+    -- Close on click outside (when open and mouse pressed but not on self)
+    table.insert(lines, "  if self.is_open and input.mouse_left_pressed and not hovered then")
+    table.insert(lines, "    self.is_open = false")
+    table.insert(lines, "  end")
+  end,
+  state_transitions = {},
+  post_process      = nil,
+  pre_derive_hook   = nil,
+  extra_source_hook = nil,
+}
+
+-- ---- 8. multiline_editable ----
+-- ★ Phase 4.4 S3: 多行文本编辑原语
+-- 依赖 editable（文本编辑核心）+ scrollable（滚动容器）
+-- 添加 cursor_row/cursor_col/line_count 用于行级导航
+-- 通过 global_type_meta.factory 注入 NebulaMultiBuf{N}_{L} 编译期泛型类型
+NEBULA_PRIMITIVES["multiline_editable"] = {
+  name         = "multiline_editable",
+  dependencies = { "editable", "scrollable" },
+  global_type_meta = {
+    factory = function(reg, type_name, inject_statement, aster)
+      local max_lines = reg.max_lines or 32
+      local line_capacity = reg.max_text_len or 128
+      local mb_type, mb_src = nebula_gen_multiline_buffer_type(line_capacity, max_lines)
+      local mb_ast = aster.parse(mb_src, "<nebula_derive:multiline_buffer:" .. type_name .. ">")
+      for _, stat in ipairs(mb_ast) do
+        inject_statement(stat)
+      end
+      print(("[derive] %s: injected %s (lines=%d, capacity=%d) for multiline_editable primitive"):format(
+        type_name, mb_type, max_lines, line_capacity))
+    end,
+  },
+  context_fields = {
+    { name = "cursor_row", type = "uint32" },
+    { name = "cursor_col", type = "uint32" },
+    { name = "line_count", type = "uint32" },
+  },
+  context_init = {},
+  process_body = function(spec, lines)
+    -- Up arrow: move cursor to previous line
+    table.insert(lines, "  if input.key_pressed == NebulaKey.Up then")
+    table.insert(lines, "    if self.cursor_row > 0 then")
+    table.insert(lines, "      self.cursor_row = self.cursor_row - 1")
+    table.insert(lines, "    end")
+    table.insert(lines, "  end")
+    -- Down arrow: move cursor to next line
+    table.insert(lines, "  if input.key_pressed == NebulaKey.Down then")
+    table.insert(lines, "    if self.cursor_row + 1 < self.line_count then")
+    table.insert(lines, "      self.cursor_row = self.cursor_row + 1")
+    table.insert(lines, "    end")
+    table.insert(lines, "  end")
+    -- Enter: increment line_count (newline)
+    table.insert(lines, "  if input.key_pressed == NebulaKey.Enter then")
+    table.insert(lines, "    if self.line_count < 32 then")
+    table.insert(lines, "      self.line_count = self.line_count + 1")
+    table.insert(lines, "      self.cursor_row = self.cursor_row + 1")
+    table.insert(lines, "      self.cursor_col = 0")
+    table.insert(lines, "    end")
+    table.insert(lines, "  end")
+    -- ShiftUp/ShiftDown: extend selection while moving lines
+    table.insert(lines, "  if input.key_pressed == NebulaKey.ShiftUp then")
+    table.insert(lines, "    if self.cursor_row > 0 then")
+    table.insert(lines, "      self.cursor_row = self.cursor_row - 1")
+    table.insert(lines, "    end")
+    table.insert(lines, "  end")
+    table.insert(lines, "  if input.key_pressed == NebulaKey.ShiftDown then")
+    table.insert(lines, "    if self.cursor_row + 1 < self.line_count then")
+    table.insert(lines, "      self.cursor_row = self.cursor_row + 1")
+    table.insert(lines, "    end")
+    table.insert(lines, "  end")
+  end,
+  state_transitions = {},
+  post_process      = nil,
+  pre_derive_hook = function(reg, type_name, inject_statement, aster)
+    -- 注入 NebulaMultiBuf{N}_{L} 动态类型
+    local meta = NEBULA_PRIMITIVES["multiline_editable"].global_type_meta
+    if meta.factory then
+      meta.factory(reg, type_name, inject_statement, aster)
+    end
+  end,
+  extra_source_hook = nil,
+}
+
 -- =============================================================================
 -- ★ Phase 4.4: nebula_register_primitive(name, spec)
 --

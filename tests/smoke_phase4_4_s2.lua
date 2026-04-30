@@ -65,27 +65,7 @@ print("=== Phase 4.4 S2: dropdown_manager 原语注册验证 ===")
 print("")
 
 -- §1: 注册 dropdown_manager 原语
-nebula_register_primitive("dropdown_manager", {
-  dependencies = {"hoverable", "clickable"},
-  context_fields = {
-    {name="is_open",        type="boolean"},
-    {name="selected_index", type="uint32"},
-    {name="item_count",     type="uint32"},
-  },
-  state_transitions = {},
-  process_body = function(spec, lines)
-    table.insert(lines, "  if self.click.just_clicked then")
-    table.insert(lines, "    self.is_open = not self.is_open")
-    table.insert(lines, "  end")
-    table.insert(lines, "  if self.is_open and input.mouse_left_pressed and not hovered then")
-    table.insert(lines, "    self.is_open = false")
-    table.insert(lines, "  end")
-  end,
-})
-
-assert_true("§1.1: dropdown_manager registered in NEBULA_PRIMITIVES",
-  NEBULA_PRIMITIVES["dropdown_manager"] ~= nil)
-
+-- §1: dropdown_manager 原语已内置到 NEBULA_PRIMITIVES（interaction_factory.lua #7）ssert_true("§1.1: dropdown_manager is built-in", NEBULA_PRIMITIVES["dropdown_manager"] ~= nil)
 local dm = NEBULA_PRIMITIVES["dropdown_manager"]
 assert_eq("§1.2: dropdown_manager has 2 dependencies", #dm.dependencies, 2)
 assert_eq("§1.3: dep[1] = hoverable", dm.dependencies[1], "hoverable")

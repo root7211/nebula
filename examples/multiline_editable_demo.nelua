@@ -32,117 +32,16 @@ global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
 local WIN_W <comptime> = 800
 local WIN_H <comptime> = 600
 
--- =============================================================================
--- ★ Register "scrollable" primitive (Phase 4.4 S1 pattern — copied from scrollable_demo)
---   Must be registered before multiline_editable which depends on it
--- =============================================================================
-##[[
-nebula_register_primitive("scrollable", {
-  dependencies = {"hoverable"},
-  context_fields = {
-    {name="scroll_offset_y",  type="float32"},
-    {name="max_scroll",       type="float32"},
-    {name="is_dragging_bar",  type="boolean"},
-    {name="drag_start_y",     type="float32"},
-    {name="drag_start_offset",type="float32"},
-  },
-  state_transitions = {
-    {guard="self.is_dragging_bar", target="Draggingbar", priority=40},
-  },
-  process_body = function(spec, lines)
-    table.insert(lines, "  self.max_scroll = self.visual.content_height - self.visual.size.y")
-    table.insert(lines, "  if self.max_scroll < 0.0 then self.max_scroll = 0.0 end")
-    table.insert(lines, "  if self.hover.is_hovered then")
-    table.insert(lines, "    local scroll_speed = 30.0")
-    table.insert(lines, "    self.scroll_offset_y = self.scroll_offset_y - input.scroll_dy * scroll_speed")
-    table.insert(lines, "  end")
-    table.insert(lines, "  if self.click.just_clicked then")
-    table.insert(lines, "    local bar_x = self.visual.pos.x + self.visual.size.x - 10.0")
-    table.insert(lines, "    if input.mouse_x >= bar_x then")
-    table.insert(lines, "      self.is_dragging_bar = true")
-    table.insert(lines, "      self.drag_start_y = input.mouse_y")
-    table.insert(lines, "      self.drag_start_offset = self.scroll_offset_y")
-    table.insert(lines, "    end")
-    table.insert(lines, "  end")
-    table.insert(lines, "  if not input.mouse_left_down then")
-    table.insert(lines, "    self.is_dragging_bar = false")
-    table.insert(lines, "  end")
-    table.insert(lines, "  if self.is_dragging_bar then")
-    table.insert(lines, "    local dy = input.mouse_y - self.drag_start_y")
-    table.insert(lines, "    local scroll_ratio = self.visual.size.y / self.visual.content_height")
-    table.insert(lines, "    if scroll_ratio > 1.0 then scroll_ratio = 1.0 end")
-    table.insert(lines, "    self.scroll_offset_y = self.drag_start_offset + dy / scroll_ratio")
-    table.insert(lines, "  end")
-    table.insert(lines, "  if self.scroll_offset_y < 0.0 then self.scroll_offset_y = 0.0 end")
-    table.insert(lines, "  if self.scroll_offset_y > self.max_scroll then self.scroll_offset_y = self.max_scroll end")
-  end,
-})
-]]
+-- ★ 原语注册已内置到 NEBULA_PRIMITIVES（scrollable #6 + multiline_editable #8）
+-- ★ 但 NebulaMultiBuf/NebulaBuf 类型需在 record 声明之前注入（nelua 编译期语义）
+##[[ local _mb_type, _mb_src = nebula_gen_multiline_buffer_type(128, 32) ]]
+##[[ for _, _s in ipairs(aster.parse(_mb_src, "<multiline_buffer:128_32>")) do inject_statement(_s) end ]]
+##[[ local _gb_type, _gb_src = nebula_gen_gap_buffer_type(128) ]]
+##[[ for _, _s in ipairs(aster.parse(_gb_src, "<gap_buffer:128>")) do inject_statement(_s) end ]]
 
--- =============================================================================
--- ★ Register "multiline_editable" custom primitive
---   Depends on editable (text editing) + scrollable (scrolling)
---   Adds: cursor_row, cursor_col, line_count for line-aware navigation
---   Handles: Enter (newline), Up/Down (line navigation), Backspace (merge lines)
--- =============================================================================
-##[[
-nebula_register_primitive("multiline_editable", {
-  dependencies = {"editable", "scrollable"},
-  context_fields = {
-    {name="cursor_row",   type="uint32"},
-    {name="cursor_col",   type="uint32"},
-    {name="line_count",   type="uint32"},
-  },
-  state_transitions = {},
-  process_body = function(spec, lines)
-    -- ★ Up arrow: move cursor to previous line
-    table.insert(lines, "  if input.key_pressed == NebulaKey.Up then")
-    table.insert(lines, "    if self.cursor_row > 0 then")
-    table.insert(lines, "      self.cursor_row = self.cursor_row - 1")
-    table.insert(lines, "    end")
-    table.insert(lines, "  end")
-    -- ★ Down arrow: move cursor to next line
-    table.insert(lines, "  if input.key_pressed == NebulaKey.Down then")
-    table.insert(lines, "    if self.cursor_row + 1 < self.line_count then")
-    table.insert(lines, "      self.cursor_row = self.cursor_row + 1")
-    table.insert(lines, "    end")
-    table.insert(lines, "  end")
-    -- ★ Enter: increment line_count (newline)
-    table.insert(lines, "  if input.key_pressed == NebulaKey.Enter then")
-    table.insert(lines, "    if self.line_count < 32 then")  -- max_lines
-    table.insert(lines, "      self.line_count = self.line_count + 1")
-    table.insert(lines, "      self.cursor_row = self.cursor_row + 1")
-    table.insert(lines, "      self.cursor_col = 0")
-    table.insert(lines, "    end")
-    table.insert(lines, "  end")
-    -- ★ ShiftUp/ShiftDown: extend selection while moving lines
-    table.insert(lines, "  if input.key_pressed == NebulaKey.ShiftUp then")
-    table.insert(lines, "    if self.cursor_row > 0 then")
-    table.insert(lines, "      self.cursor_row = self.cursor_row - 1")
-    table.insert(lines, "    end")
-    table.insert(lines, "  end")
-    table.insert(lines, "  if input.key_pressed == NebulaKey.ShiftDown then")
-    table.insert(lines, "    if self.cursor_row + 1 < self.line_count then")
-    table.insert(lines, "      self.cursor_row = self.cursor_row + 1")
-    table.insert(lines, "    end")
-    table.insert(lines, "  end")
-  end,
-})
-]]
 
--- =============================================================================
 -- MultilineEditVisual — 包含 NebulaMultiBuf 的 Visual record
---   gap_buf 是 editable 原语要求的标准单行 buffer（编译期通过 factory 注入）
---   multi_buf 是我们自己定义的多行 buffer（在编译期块中手动生成）
--- =============================================================================
-##[[
--- ★ Phase 4.4 S3: 编译期生成 NebulaMultiBuf128_32 类型
-local _mb_type, _mb_src, _line_type = nebula_gen_multiline_buffer_type(128, 32)
-for _, _s in ipairs(aster.parse(_mb_src, "<multiline_buffer:128_32>")) do
-  inject_statement(_s)
-end
-print("[derive] MultilineEditVisual: injected " .. _mb_type .. " for multiline_editable primitive")
-]]
+--   gap_buf 和 multi_buf 类型由上方 ##[[ ]]块编译期注入
 
 global MultilineEditVisual = @record{
   pos:    Vec2,
@@ -194,6 +93,7 @@ nebula_annotate("MultilineEditVisual", {
     {from="draggingbar",  to="default",      on="scrollbar_release"},
   },
   max_text_len = 128,
+  max_lines = 32,
   component_id = 1,
 })
 ]]

@@ -29,30 +29,7 @@ global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
 local WIN_W <comptime> = 800
 local WIN_H <comptime> = 600
 
--- =============================================================================
--- ★ Register custom "dropdown_manager" primitive
--- =============================================================================
-##[[
-nebula_register_primitive("dropdown_manager", {
-  dependencies = {"hoverable", "clickable"},
-  context_fields = {
-    {name="is_open",       type="boolean"},
-    {name="selected_index",type="uint32"},
-    {name="item_count",    type="uint32"},
-  },
-  state_transitions = {},
-  process_body = function(spec, lines)
-    -- Toggle open/close on click
-    table.insert(lines, "  if self.click.just_clicked then")
-    table.insert(lines, "    self.is_open = not self.is_open")
-    table.insert(lines, "  end")
-    -- Close on click outside (when open and mouse pressed but not on self)
-    table.insert(lines, "  if self.is_open and input.mouse_left_pressed and not hovered then")
-    table.insert(lines, "    self.is_open = false")
-    table.insert(lines, "  end")
-  end,
-})
-]]
+-- ★ dropdown_manager 原语已内置到 NEBULA_PRIMITIVES（interaction_factory.lua #7），无需手动注册
 
 -- =============================================================================
 -- DropdownVisual (trigger button showing selected item)

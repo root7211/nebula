@@ -78,69 +78,12 @@ print("")
 print("=== Phase 4.4 S3: multiline_editable 原语注册与 NebulaMultiBuf 验证 ===")
 print("")
 
--- §1: 注册 scrollable 原语（multiline_editable 的依赖之一）
-nebula_register_primitive("scrollable", {
-  dependencies = {"hoverable"},
-  context_fields = {
-    {name="scroll_offset_y",  type="float32"},
-    {name="max_scroll",       type="float32"},
-    {name="is_dragging_bar",  type="boolean"},
-    {name="drag_start_y",     type="float32"},
-    {name="drag_start_offset",type="float32"},
-  },
-  state_transitions = {
-    {guard="self.is_dragging_bar", target="Draggingbar", priority=40},
-  },
-  process_body = function(spec, lines)
-    table.insert(lines, "  self.max_scroll = self.visual.content_height - self.visual.size.y")
-  end,
-})
+-- §1: scrollable 原语已内置到 NEBULA_PRIMITIVES（interaction_factory.lua #6）
+assert_true("§1.1: scrollable is built-in", NEBULA_PRIMITIVES["scrollable"] ~= nil)
 
-assert_true("§1.1: scrollable registered in NEBULA_PRIMITIVES",
-  NEBULA_PRIMITIVES["scrollable"] ~= nil)
 
--- §2: 注册 multiline_editable 原语
-nebula_register_primitive("multiline_editable", {
-  dependencies = {"editable", "scrollable"},
-  context_fields = {
-    {name="cursor_row",   type="uint32"},
-    {name="cursor_col",   type="uint32"},
-    {name="line_count",   type="uint32"},
-  },
-  state_transitions = {},
-  process_body = function(spec, lines)
-    table.insert(lines, "  if input.key_pressed == NebulaKey.Up then")
-    table.insert(lines, "    if self.cursor_row > 0 then")
-    table.insert(lines, "      self.cursor_row = self.cursor_row - 1")
-    table.insert(lines, "    end")
-    table.insert(lines, "  end")
-    table.insert(lines, "  if input.key_pressed == NebulaKey.Down then")
-    table.insert(lines, "    if self.cursor_row + 1 < self.line_count then")
-    table.insert(lines, "      self.cursor_row = self.cursor_row + 1")
-    table.insert(lines, "    end")
-    table.insert(lines, "  end")
-    table.insert(lines, "  if input.key_pressed == NebulaKey.Enter then")
-    table.insert(lines, "    if self.line_count < 32 then")
-    table.insert(lines, "      self.line_count = self.line_count + 1")
-    table.insert(lines, "      self.cursor_row = self.cursor_row + 1")
-    table.insert(lines, "      self.cursor_col = 0")
-    table.insert(lines, "    end")
-    table.insert(lines, "  end")
-    table.insert(lines, "  if input.key_pressed == NebulaKey.ShiftUp then")
-    table.insert(lines, "    if self.cursor_row > 0 then")
-    table.insert(lines, "      self.cursor_row = self.cursor_row - 1")
-    table.insert(lines, "    end")
-    table.insert(lines, "  end")
-    table.insert(lines, "  if input.key_pressed == NebulaKey.ShiftDown then")
-    table.insert(lines, "    if self.cursor_row + 1 < self.line_count then")
-    table.insert(lines, "      self.cursor_row = self.cursor_row + 1")
-    table.insert(lines, "    end")
-    table.insert(lines, "  end")
-  end,
-})
-
-assert_true("§2.1: multiline_editable registered in NEBULA_PRIMITIVES",
-  NEBULA_PRIMITIVES["multiline_editable"] ~= nil)
+-- §2: multiline_editable 原语已内置到 NEBULA_PRIMITIVES（interaction_factory.lua #8）
+assert_true("§2.1: multiline_editable is built-in", NEBULA_PRIMITIVES["multiline_editable"] ~= nil)
 
 local me = NEBULA_PRIMITIVES["multiline_editable"]
 assert_eq("§2.2: multiline_editable has 2 dependencies", #me.dependencies, 2)

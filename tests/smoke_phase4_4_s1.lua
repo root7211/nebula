@@ -89,30 +89,7 @@ print("")
 print("=== Phase 4.4 S1: scrollable 原语注册验证 ===")
 print("")
 
--- 1. 注册 scrollable 原语（模拟 scrollable_demo.nelua 中的注册）
-nebula_register_primitive("scrollable", {
-  dependencies = {"hoverable"},
-  context_fields = {
-    {name="scroll_offset_y",  type="float32"},
-    {name="max_scroll",       type="float32"},
-    {name="is_dragging_bar",  type="boolean"},
-    {name="drag_start_y",     type="float32"},
-    {name="drag_start_offset",type="float32"},
-  },
-  state_transitions = {
-    {guard="self.is_dragging_bar", target="Draggingbar", priority=40},
-  },
-  process_body = function(spec, lines)
-    table.insert(lines, "  self.max_scroll = self.visual.content_height - self.visual.size.y")
-    table.insert(lines, "  if self.max_scroll < 0.0 then self.max_scroll = 0.0 end")
-    table.insert(lines, "  if self.hover.is_hovered then")
-    table.insert(lines, "    local scroll_speed = 30.0")
-    table.insert(lines, "    self.scroll_offset_y = self.scroll_offset_y - input.scroll_dy * scroll_speed")
-    table.insert(lines, "  end")
-    table.insert(lines, "  if self.scroll_offset_y < 0.0 then self.scroll_offset_y = 0.0 end")
-    table.insert(lines, "  if self.scroll_offset_y > self.max_scroll then self.scroll_offset_y = self.max_scroll end")
-  end,
-})
+-- 1. scrollable 原语已内置到 NEBULA_PRIMITIVES（interaction_factory.lua #6）ssert_true("scrollable primitive is built-in", NEBULA_PRIMITIVES["scrollable"] ~= nil)
 
 -- ---- Test 1: 原语注册存在性 ----
 assert_true("scrollable primitive is registered", NEBULA_PRIMITIVES["scrollable"] ~= nil)
