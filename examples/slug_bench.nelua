@@ -93,7 +93,7 @@ nebula_annotate("BenchVisual", {
     "global function fill_bench_data(count: uint32): void",
     "  bench_count = count",
     "  local cols: uint32 = 100",
-    "  local rows: uint32 = (count + cols - 1) / cols",
+    "  local rows: uint32 = (@uint32)(((count + cols - 1) / cols) + 0.5)",
     "  local cell_w = 800.0 / (@float32)(cols)",
     "  local cell_h = 600.0 / (@float32)(rows)",
     "  local rect_w = cell_w * 0.9",

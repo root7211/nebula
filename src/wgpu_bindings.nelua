@@ -61,8 +61,11 @@ global WGPUTextureFormat_RGBA8Unorm <comptime> = (@WGPUTextureFormat)(0x00000012
 global WGPUTextureFormat_BGRA8Unorm <comptime> = (@WGPUTextureFormat)(0x00000017)
 
 global WGPUPresentMode = @uint32
-global WGPUPresentMode_Fifo    <comptime> = (@WGPUPresentMode)(0x00000002)
-global WGPUPresentMode_Mailbox <comptime> = (@WGPUPresentMode)(0x00000003)
+global WGPUPresentMode_Undefined <comptime> = (@WGPUPresentMode)(0x00000000)
+global WGPUPresentMode_Fifo      <comptime> = (@WGPUPresentMode)(0x00000001)
+global WGPUPresentMode_FifoRelaxed <comptime> = (@WGPUPresentMode)(0x00000002)
+global WGPUPresentMode_Immediate <comptime> = (@WGPUPresentMode)(0x00000003)
+global WGPUPresentMode_Mailbox   <comptime> = (@WGPUPresentMode)(0x00000004)
 
 global WGPULoadOp = @uint32
 global WGPULoadOp_Clear <comptime> = (@WGPULoadOp)(0x00000002)
