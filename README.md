@@ -14,12 +14,13 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 进行中 | 39/39 回归测试全绿 | 深度审计缺口 #1 #2 #3 #5 #6 已修复 + Phase 4.2.2-fix GPU deinit 完成（2026-04-30）**
+**Era II 进行中 | 40/40 回归测试全绿 | Phase 4.2.3-S0 HarfBuzz + CJK 预处理完成（2026-04-30）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
+| **Phase 4.2.3-S0** | HarfBuzz 绑定 + CJK shaping 预处理（zh-CN-common 20 字验证） | `afab95e` |
 | **Phase 4.2.2-fix** | GPU 资源 deinit — 修复 ~40+ GPU 对象泄漏，公理 B 合规 | `2b2d9cb` |
 | **Phase 4.3 S1-S3 + Task D** | 可编程原语注册表 + axiom_validator v2.0 三层防御 | `1fdc182` |
 | **Phase 4.4 S1-S3** | 高级组件库 | `b9fee31` |
@@ -82,7 +83,7 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 | **4.2.2** | Slug 渲染内核生产级化 | **D-4.1-A/B 已完成**，D-4.1-C 待评估，**GPU deinit 已修复** | 79 |
 | **4.3** | 可编程原语注册表 | **S1+S2+S3+TaskD 已完成** | **90** |
 | **4.4** | 高级组件库 | **S1+S2+S3 已完成** | **81** |
-| 4.2.3 | HarfBuzz + CJK 集成 | 规划中 | 82 |
+| 4.2.3 | HarfBuzz + CJK 集成 | **S0 已完成**（绑定 + 预处理 + shaping 表生成） | 82 |
 | 4.X | 高密度文本 + 输入补全 | 规划中 | — |
 | 4.5 | 注册原语语法糖 | 规划中 | — |
 | 4.6 | Indirect Drawing | 规划中 | 78 |
@@ -169,6 +170,7 @@ nebula/
 │   ├── nebula_arena.nelua        # Frame Arena 分配器
 │   ├── wgpu_bindings.nelua       # WebGPU C 绑定
 │   ├── glfw_bindings.nelua       # GLFW C 绑定
+│   ├── harfbuzz_bindings.nelua   # HarfBuzz C 绑定（Phase 4.2.3-S0）
 │   ├── stb_truetype_bindings.nelua
 │   └── derive/                   # S1 编译期元编程引擎
 │       ├── interaction_factory.lua   # 原语注册表 + 交互代码生成
@@ -190,7 +192,7 @@ nebula/
 │   ├── scrollable_demo.nelua     # 滚动容器
 │   ├── dropdown_demo.nelua       # 下拉选择器
 │   └── multiline_editable_demo.nelua  # 多行编辑器
-├── tests/                        # 测试套件 (38 项)
+├── tests/                        # 测试套件 (40 项)
 ├── tools/                        # 构建与测试工具
 ├── assets/                       # 字体/纹理预处理产物
 ├── vendor/                       # 第三方依赖 (wgpu-native, GLFW)
