@@ -131,6 +131,11 @@ global NebulaKey = @enum(uint8){
   Down       = 15,
   ShiftUp    = 16,
   ShiftDown  = 17,
+  -- ★ Phase 4.X: 剪贴板操作键（Ctrl+C / Ctrl+V / Ctrl+X / Ctrl+A）
+  Copy       = 18,
+  Paste      = 19,
+  Cut        = 20,
+  SelectAll  = 21,
 }
 
 -- =============================================================================

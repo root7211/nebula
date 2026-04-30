@@ -146,6 +146,13 @@ global GLFWscrollfun <cimport, nodecl> = @function(window: GLFWwindow, xoffset: 
 global function glfwSetScrollCallback(window: GLFWwindow, callback: GLFWscrollfun): GLFWscrollfun <cimport, nodecl> end
 
 -- =============================================================================
+-- ★ Phase 4.X: 剪贴板 API 绑定
+-- =============================================================================
+
+global function glfwGetClipboardString(window: GLFWwindow): cstring <cimport, nodecl> end
+global function glfwSetClipboardString(window: GLFWwindow, str: cstring): void <cimport, nodecl> end
+
+-- =============================================================================
 -- ★ Phase 3.12: Framebuffer Resize 回调绑定
 -- =============================================================================
 

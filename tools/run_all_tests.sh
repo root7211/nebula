@@ -138,6 +138,10 @@ run_test "smoke_phase4_3_s3 (Phase 4.3 S3 — 字段冲突检测 & static_assert
 run_test "smoke_phase4_3_s4 (Phase 4.3 Task D — process_body 公理校验)" \
   nelua-lua tests/smoke_phase4_3_s4.lua
 
+# ★ Phase 4.X: 输入系统补全（剪贴板 API + Unicode 扩展 + Ctrl+C/V/X/A）
+run_test "smoke_phase4_x_input (Phase 4.X — 剪贴板 + Unicode 输入 + extract_range)" \
+  nelua-lua tests/smoke_phase4_x_input.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="

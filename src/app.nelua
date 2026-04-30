@@ -83,7 +83,18 @@ global function _nebula_key_callback(
   local nk: NebulaKey = NebulaKey.None
   -- ★ Phase 3.6.3: 在回调中直接读取 mods 判断 Shift，避免额外的全局状态
   local shift_down = (mods & GLFW_MOD_SHIFT) ~= 0
+  local ctrl_down  = (mods & GLFW_MOD_CONTROL) ~= 0
 
+  -- ★ Phase 4.X: Ctrl 组合键优先（剪贴板 + 全选）
+  if ctrl_down then
+    if     key == 67 then nk = NebulaKey.Copy      -- Ctrl+C (GLFW_KEY_C = 67)
+    elseif key == 86 then nk = NebulaKey.Paste     -- Ctrl+V (GLFW_KEY_V = 86)
+    elseif key == 88 then nk = NebulaKey.Cut       -- Ctrl+X (GLFW_KEY_X = 88)
+    elseif key == 65 then nk = NebulaKey.SelectAll -- Ctrl+A (GLFW_KEY_A = 65)
+    end
+  end
+
+  if nk == NebulaKey.None then
   if     key == GLFW_KEY_BACKSPACE then nk = NebulaKey.Backspace
   elseif key == GLFW_KEY_DELETE    then nk = NebulaKey.Delete
   elseif key == GLFW_KEY_ENTER     then nk = NebulaKey.Enter
@@ -99,6 +110,7 @@ global function _nebula_key_callback(
   elseif key == GLFW_KEY_UP    then nk = shift_down and NebulaKey.ShiftUp    or NebulaKey.Up
   elseif key == GLFW_KEY_DOWN  then nk = shift_down and NebulaKey.ShiftDown  or NebulaKey.Down
   end
+  end -- close: if nk == NebulaKey.None
 
   if nk ~= NebulaKey.None then
     local next = (_nebula_key_tail + 1) % 16

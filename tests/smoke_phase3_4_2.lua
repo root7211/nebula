@@ -37,8 +37,8 @@ check("focused_id guard in process_text_input",
   src:find("input%.focused_id ~= self%.component_id") ~= nil)
 check("char_count loop",
   src:find("i < input%.char_count") ~= nil)
-check("ASCII range guard (0x20..0x7E)",
-  src:find("cp >= 0x20 and cp <= 0x7E") ~= nil)
+check("Unicode printable guard (>= 0x20, exclude DEL)",
+  src:find("cp >= 0x20 and cp ~= 0x7F") ~= nil)
 
 -- Phase 3.6.1: 插入/删除逻辑已迁移至 Gap Buffer API
 check("cursor insert: gap_buf:insert_char (Phase 3.6.1)",

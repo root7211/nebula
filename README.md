@@ -14,7 +14,7 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 进行中 | 38/38 回归测试全绿 | 深度审计缺口 #1 #2 #3 已修复（2026-04-30）**
+**Era II 进行中 | 39/39 回归测试全绿 | 深度审计缺口 #1 #2 #3 #5 #6 已修复（2026-04-30）**
 
 ### 最近完成
 
@@ -33,8 +33,8 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 | ~~2~~ | **4.3 S3** | ~~契约校验未接入编译流程~~ | ✅ 已修复 | `nebula_validate_static_asserts()` + `nebula_validate_process_body()` 均已接入 `app_factory.lua:940-944` |
 | ~~3~~ | **4.4 S1-S3** | ~~高级原语未内置到框架注册表~~ | ✅ 已修复 | `scrollable`、`dropdown_manager`、`multiline_editable` 已内置到 `interaction_factory.lua` 的 `NEBULA_PRIMITIVES`，用户只需在 `nebula_annotate` 中声明 `primitives = {...}` 即可使用，无需手动注册 |
 | 4 | **4.2.2** | **D-4.1-C benchmark 未执行** | ❌ 待评估 | 需在 10000 字符规模下测试 Storage Buffer 性能退化。阻塞 4.2.3 CJK 启动决策 |
-| 5 | **4.X** | **剪贴板 API 未绑定** | ❌ 待实施 | `glfw_bindings.nelua` 无 `GetClipboardString` / `SetClipboardString` 绑定 |
-| 6 | **4.X** | **Unicode char callback 无消费者** | ❌ 待实施 | `glfwSetCharCallback` 绑定存在但未被任何组件接入 |
+| ~~5~~ | **4.X** | ~~剪贴板 API 未绑定~~ | ✅ 已修复 | `glfw_bindings.nelua` 已绑定 `glfwGetClipboardString` / `glfwSetClipboardString`；`editable` 原语支持 Ctrl+C/V/X/A 剪贴板操作 |
+| ~~6~~ | **4.X** | ~~Unicode char callback 无消费者~~ | ✅ 已修复 | `editable` 原语已扩展为接受全 Unicode 可打印字符（UTF-8 编码插入），Ctrl+C/V/X/A 快捷键已集成 |
 
 ### Phase 4.3 — 可编程原语注册表（90/100）
 
