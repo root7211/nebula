@@ -14,35 +14,35 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 进行中 | 37/37 回归测试全绿 | 深度审计完成（2026-04-30）**
+**Era II 进行中 | 38/38 回归测试全绿 | 深度审计缺口 #1 #2 已修复（2026-04-30）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
-| **Phase 4.3 S1-S3** | 可编程原语注册表 | `a641d41` |
+| **Phase 4.3 S1-S3 + Task D** | 可编程原语注册表 + axiom_validator v2.0 三层防御 | `1fdc182` |
 | **Phase 4.4 S1-S3** | 高级组件库 | `b9fee31` |
 
 ### 深度审计：已发现的未完成工作
 
 > 以下基于 2026-04-30 对照规划文档的逐条代码审计。已标记为"已完成"的 Phase 中，存在以下结构性缺口。
 
-| # | 来源 Phase | 缺口 | 详情 |
-|:--|:-----------|:-----|:-----|
-| 1 | **4.3 S3** | **沙箱隔离未实现** | `process_body` 可注入任意 Nelua 代码，无引用域校验。实施方案见 [`PLAN_PHASE4_3_TASK_D.md`](docs/PLAN_PHASE4_3_TASK_D.md)（axiom_validator 任务 D，从公理 A+B 推导） |
-| 2 | **4.3 S3** | **契约校验未接入编译流程** | `nebula_validate_static_asserts()` 已实现但在 `app_factory.lua` 的 `nebula_derive_app` 中从未调用，仅在测试中出现 |
-| 3 | **4.4 S1-S3** | **高级原语未内置到框架注册表** | `scrollable`、`dropdown_manager`、`multiline_editable` 均需用户在 .nelua 中手动注册 50+ 行样板代码，未内置到 `interaction_factory.lua` 的 `NEBULA_PRIMITIVES` |
-| 4 | **4.2.2** | **D-4.1-C benchmark 未执行** | 需在 10000 字符规模下测试 Storage Buffer 性能退化。`REPORT_PHASE4_2_2_BENCH.md` 从未生成，阻塞 4.2.3 CJK 启动决策 |
-| 5 | **4.X** | **剪贴板 API 未绑定** | `glfw_bindings.nelua` 无 `GetClipboardString` / `SetClipboardString` 绑定 |
-| 6 | **4.X** | **Unicode char callback 无消费者** | `glfwSetCharCallback` 绑定存在但未被任何组件接入 |
+| # | 来源 Phase | 缺口 | 状态 | 详情 |
+|:--|:-----------|:-----|:-----|:-----|
+| ~~1~~ | **4.3 S3** | ~~沙箱隔离~~ | ✅ 已修复 | Task D 实现 `axiom_validator` v2.0 三层防御（Proxy + Token 扫描 + NEBULA_INTRINSICS 白名单 + Trace），已在 `nebula_derive_app` 中接入编译流程 |
+| ~~2~~ | **4.3 S3** | ~~契约校验未接入编译流程~~ | ✅ 已修复 | `nebula_validate_static_asserts()` + `nebula_validate_process_body()` 均已接入 `app_factory.lua:940-944` |
+| 3 | **4.4 S1-S3** | **高级原语未内置到框架注册表** | ❌ 待修复 | `scrollable`、`dropdown_manager`、`multiline_editable` 均需用户在 .nelua 中手动注册 50+ 行样板代码，未内置到 `interaction_factory.lua` 的 `NEBULA_PRIMITIVES` |
+| 4 | **4.2.2** | **D-4.1-C benchmark 未执行** | ❌ 待评估 | 需在 10000 字符规模下测试 Storage Buffer 性能退化。阻塞 4.2.3 CJK 启动决策 |
+| 5 | **4.X** | **剪贴板 API 未绑定** | ❌ 待实施 | `glfw_bindings.nelua` 无 `GetClipboardString` / `SetClipboardString` 绑定 |
+| 6 | **4.X** | **Unicode char callback 无消费者** | ❌ 待实施 | `glfwSetCharCallback` 绑定存在但未被任何组件接入 |
 
 ### Phase 4.3 — 可编程原语注册表（90/100）
 
 - **S1**：`interaction_factory.lua` 完全元数据驱动——消除所有硬编码原语分支，暴露 `nebula_register_primitive(name, spec)` 公开 API
 - **S2**：`draggable_value` 自定义原语端到端验证（slider_demo），67 条专项测试
 - **S3**：字段冲突检测 + `static_asserts` 编译期契约校验
-- ⚠️ 沙箱隔离：未实现（见缺口 #1）
-- ⚠️ 契约校验：函数已写但未接入编译流程（见缺口 #2）
+- **Task D**：`axiom_validator` v2.0 三层防御——① Proxy 类型感知 + 分支覆盖穷举 ② Token 扫描兜底 ③ NEBULA_INTRINSICS 白名单。已在 `nebula_derive_app` 编译流程中接入 `nebula_validate_process_body` + `nebula_validate_static_asserts`（`app_factory.lua:940-944`）
+- ⚠️ 三种高级原语（scrollable/dropdown_manager/multiline_editable）未内置到 `NEBULA_PRIMITIVES` 注册表（见缺口 #3）
 
 ### Phase 4.4 — 高级组件库（81/100）
 
@@ -79,7 +79,7 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 | Phase | 名称 | 状态 | 重要度 |
 | :--- | :--- | :--- | :--- |
 | **4.2.2** | Slug 渲染内核生产级化 | **D-4.1-A/B 已完成**，D-4.1-C 待评估 | 79 |
-| **4.3** | 可编程原语注册表 | **S1+S2+S3 已完成** | **90** |
+| **4.3** | 可编程原语注册表 | **S1+S2+S3+TaskD 已完成** | **90** |
 | **4.4** | 高级组件库 | **S1+S2+S3 已完成** | **81** |
 | 4.2.3 | HarfBuzz + CJK 集成 | 规划中 | 82 |
 | 4.X | 高密度文本 + 输入补全 | 规划中 | — |
@@ -189,7 +189,7 @@ nebula/
 │   ├── scrollable_demo.nelua     # 滚动容器
 │   ├── dropdown_demo.nelua       # 下拉选择器
 │   └── multiline_editable_demo.nelua  # 多行编辑器
-├── tests/                        # 测试套件 (37 项)
+├── tests/                        # 测试套件 (38 项)
 ├── tools/                        # 构建与测试工具
 ├── assets/                       # 字体/纹理预处理产物
 ├── vendor/                       # 第三方依赖 (wgpu-native, GLFW)
