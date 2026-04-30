@@ -1,142 +1,202 @@
-# Phase 4.X 实施方案：高密度文本渲染通道 + 输入系统补全
+# Phase 4.X 实施方案 v2：高密度文本渲染通道
 
 **创建日期**：2026-04-29
+**v2 修订日期**：2026-04-30
 **前置依赖**：Phase 4.4 S3（multiline_editable 已完成）
+
+**v2 修订摘要**：
+- 删除 S2（输入系统补全）— 剪贴板 API、Unicode 字符输入、Ctrl+C/V/X/A 已在缺口 #5/#6 清算中实现
+- 删除 resize 通知 — Phase 3.12 已实现（`viewport_resized`）
+- 重新设计顶点格式：RGBA8 压缩颜色替代 Vec4（64B→40B/vertex）
+- 新增方案 B：Instanced 路径评估（复用 standard_instanced 基础设施）
+- 明确 scope：仅等宽网格文本，变宽富文本留给后续 Phase
+- D-4.1-C 风险声明
 
 ---
 
-## 0. 动机与定位
+## 0. Scope 界定
 
-本 Phase 解决两个正交但协同的问题：
+本 Phase **仅解决一个问题**：Nebula 缺少高容量 + per-char 颜色的文本渲染通道。
 
-1. **文本渲染通道缺乏高密度模式**：当前 Nebula 有两条文本路径——
-   SDF atlas（textured，max_chars=256）和 Slug 矢量（max_chars=256）。
-   两者都为"按钮标签"量级设计，无法承载终端/代码编辑器/日志查看器
-   等场景的 4000+ 字符需求，也缺乏 per-character 颜色属性。
+**在 scope 内**：
+- 等宽字符网格（终端、日志查看器、数据表格）
+- max_chars 参数化至 8192
+- Per-character 前景色 + 背景色
+- L0/L1 GPU buffer（替代栈分配）
 
-2. **输入系统不完整**：缺少 Unicode 字符输入（glfwSetCharCallback）、
-   剪贴板集成、和窗口 resize 通知暴露给应用层。
-
-两者结合可以解锁：终端模拟器、代码编辑器、日志查看器、数据表格等
-所有"文本密集 + 颜色属性"场景。
-
-### 公理合规性声明
-
-本 Phase 的所有新增能力均通过三大公理审查：
-
-| 能力 | 公理 A（阶段封闭） | 公理 B（三层生命周期） | 公理 C（形即渲染） |
-|:-----|:-----|:-----|:-----|
-| atlas_dense 渲染通道 | ✅ 管线签名在 S1 确定 | ✅ atlas=L0, vbuf=L0, quad_data=L2 | ✅ Σ(V) 确定性映射 |
-| max_chars 参数化 | ✅ spec 参数，S1 已知 | ✅ buffer 大小编译期确定 | ✅ 管线签名不变 |
-| per-char color | ✅ VertexLayout 在 S1 确定 | ✅ color data=L2（帧级填入） | ✅ 属于 VertexLayout |
-| glfwSetCharCallback | ✅ S2 用户输入事件 | ✅ codepoint=L2（帧级事件） | ✅ 与管线无关 |
-| 剪贴板 | ✅ S2 OS API 调用 | ✅ 内容=L2 或 L1 | ✅ 与管线无关 |
-| on_resize | ✅ S2 窗口事件 | ✅ viewport uniform 已有 | ✅ uniform 值变化 |
+**不在 scope 内**：
+- 变宽富文本排版（Phase 4.2.3 HarfBuzz 的职责）
+- PTY / ANSI 解析（终端应用层代码）
+- IME 预编辑（未来 Phase）
+- 输入系统补全（已完成：缺口 #5/#6）
 
 ---
 
 ## 1. 现状分析
 
-### 1.1 已有的文本渲染路径
+### 1.1 三条已有文本管线
 
-Nebula 当前有两条文本管线路径，均由 `pipeline_factory.lua` 的
-`nebula_gen_pipeline_source(spec)` 分发：
+| 路径 | spec 标志 | vertex 格式 | 字节/vertex | 适用场景 | 代码位置 |
+|:-----|:----------|:------------|:-----------|:---------|:---------|
+| SDF atlas | `textured=true` | NebulaPosUvVertex (pos+uv) | 16B | 按钮标签 | pipeline_factory.lua:50 |
+| Slug 矢量 | `slug_text=true` | NebulaSlugVertex (5×Vec4) | 80B | 高质量文本 | pipeline_factory.lua:662 |
+| **standard_instanced** | `standard_instanced=true` | 无 vertex buffer（程序化） | 0B | UI 组件 | pipeline_factory.lua:444 |
 
-| 路径 | spec 标志 | vertex 格式 | 着色器 | 适用场景 |
-|:-----|:----------|:------------|:-------|:---------|
-| textured (SDF atlas) | `textured=true` | NebulaPosUvVertex (2×Vec2=16B) | nebula_compose_text_shader | 按钮标签（max_chars=256） |
-| slug_text (矢量) | `slug_text=true` | NebulaSlugVertex (5×Vec4=80B) | nebula_compose_slug_shader | 高质量文本（max_chars=256） |
+### 1.2 关键限制
 
-关键代码位置：
-- `shader_compose.lua:26` — `nebula_compose_text_shader()` 生成 SDF atlas WGSL
-- `shader_compose.lua:405` — `nebula_compose_slug_shader()` 生成 Slug WGSL
-- `pipeline_factory.lua:50` — `gen_pipeline_textured_vertex()` 生成 textured 管线源码
-- `pipeline_factory.lua:662` — `gen_pipeline_slug_text()` 生成 Slug 管线源码
-- `pipeline_factory.lua:780` — `nebula_gen_pipeline_source(spec)` 分发入口
-- `text_runtime.nelua:494` — `NebulaPosUvVertex` record 定义
-- `text_runtime.nelua:189` — `nebula_ascii_text_build_vertices()` 顶点构建
-- `nebula_core.nelua:982` — `gen_text_context_for()` SDF text context 生成
-- `nebula_core.nelua:1046` — `nebula_derive_text_visual()` SDF text 派生入口
+1. **容量**：SDF 路径栈分配 `[max_chars×6]NebulaPosUvVertex`，默认 max_chars=256（24KB 栈），4000 字符需要 384KB 栈帧，不可行。
+2. **颜色**：SDF 路径的颜色来自 uniform 全局色（`u.text_color`），无 per-char 颜色。Slug 路径 vertex attr4 带颜色但也是全局的。
+3. **绘制模型**：SDF 用 per-vertex 三角形列表（6 vertices/char），instanced 路径用程序化顶点 + Storage Buffer。
 
-### 1.2 已有的输入基础设施
+### 1.3 Standard Instanced 路径的启示
 
-- `glfw_bindings.nelua` — 键盘 key code（GLFW_KEY_*）、鼠标按钮、光标位置
-- `nebula_core.nelua:210` — `spec.max_chars` 参数已有（默认 256）
-- `renderer.nelua:494` — `NebulaPosUvVertex` 只有 position + uv，无 color
+standard_instanced 路径（pipeline_factory.lua:444-644）为高密度文本提供了一个成熟的参考模式：
 
-### 1.3 缺失的能力
-
-1. **max_chars 硬限制**：textured 路径的 `nebula_ascii_text_build_vertices`
-   栈分配 `[%d]NebulaPosUvVertex`（max_vertices = max_chars × 6）。
-   当 max_chars=4000 时，栈需要 4000×6×16 = 384 KB，对栈帧来说过大。
-
-2. **无 per-char color**：`NebulaPosUvVertex` 只有 pos+uv；
-   `nebula_compose_text_shader` 里颜色来自 `u.text_color`（uniform 全局色）。
-   Slug 路径在 vertex attr4 里带 color，但每个 draw call 只有一个颜色。
-
-3. **无 Unicode 字符输入**：GLFW key callback 只给 key code，
-   没有 `glfwSetCharCallback` 来获取 Unicode codepoint。
-
-4. **无剪贴板**：`glfw_bindings.nelua` 未绑定
-   `glfwGetClipboardString` / `glfwSetClipboardString`。
-
-5. **无 resize 通知**：`NebulaRenderer` 内部处理了 surface 重建，
-   但 App 层无法感知窗口尺寸变化。
+- **零 vertex buffer**：vertex shader 用 `instance_index` + `vertex_index` 程序化生成 6 顶点
+- **Storage Buffer**：per-instance 数据通过 `storage<read>` 传递（binding 1）
+- **批量上传**：`upload(renderer, data, count)` 一次写入所有实例数据
+- **已验证**：所有标准 UI 组件都走此路径，max_instances=128 在生产中稳定运行
 
 ---
 
-## 2. 实施路径
+## 2. 方案选择：Per-Vertex vs Instanced
 
-### 2.1 S1：Dense Text Rendering 通道
+### 方案 A：Per-Vertex 三角形列表（原方案）
 
-**目标**：新增第三条文本管线路径 `atlas_dense`，支持 4000+ 字符、
-per-character fg/bg color、等宽优化。
-
-#### 2.1.1 新顶点格式
+每字符 6 个顶点，颜色在 vertex attribute 中。
 
 ```
 NebulaDenseCharVertex = @record{
-  position: Vec2,     -- 16B (x, y)  像素坐标
-  uv:       Vec2,     -- 16B (u, v)  atlas 纹理坐标
-  fg_color: Vec4,     -- 16B (r, g, b, a) 前景色
-  bg_color: Vec4,     -- 16B (r, g, b, a) 背景色
+  position: Vec2,      -- 8B
+  uv:       Vec2,      -- 8B
+  fg_color: [4]uint8,  -- 4B (RGBA8 unorm)
+  bg_color: [4]uint8,  -- 4B (RGBA8 unorm)
 }
--- 64 bytes/vertex
--- 每字符 6 顶点 = 384 bytes/char
--- 4000 字符 = 1.5 MB（可接受，CPU 端 arena 或 malloc）
+-- 24 bytes/vertex × 6 vertices/char = 144 bytes/char
+-- 8192 chars = 1.125 MB vertex buffer
 ```
 
-#### 2.1.2 新 WGSL 着色器
+**优点**：
+- 实现简单，CPU 端逐字符填入 vertex array
+- 不依赖 Storage Buffer（规避 D-4.1-C 风险）
 
-由 `nebula_compose_dense_text_shader(opts)` 生成，位于
-`shader_compose.lua`：
+**缺点**：
+- 每字符 6 顶点存在大量冗余（同一字符的 6 个顶点共享 fg/bg color）
+- 8192 字符 = 49152 顶点 × 24B = 1.125 MB CPU→GPU 传输/帧（若文本变化）
+- vertex buffer 大对象需要 L0 或 L1 管理
+
+### 方案 B：Instanced 路径（推荐）
+
+复用 standard_instanced 基础设施的设计模式。每字符一个 instance，per-instance 数据通过 Storage Buffer 传递。Vertex shader 程序化生成单位 quad。
 
 ```
-@group(0) @binding(0) var<uniform> u: DenseTextUniforms;
-@group(0) @binding(1) var glyph_atlas:   texture_2d<f32>;
-@group(0) @binding(2) var glyph_sampler: sampler;
+DenseCharInstance = @record{
+  pos_x:     float32,   -- 4B  字符左上角 X（像素）
+  pos_y:     float32,   -- 4B  字符左上角 Y（像素）
+  uv_x:      float32,   -- 4B  atlas 纹理 U 起点
+  uv_y:      float32,   -- 4B  atlas 纹理 V 起点
+  uv_w:      float32,   -- 4B  atlas 纹理 U 宽度
+  uv_h:      float32,   -- 4B  atlas 纹理 V 高度
+  fg_color:  uint32,    -- 4B  RGBA8 packed
+  bg_color:  uint32,    -- 4B  RGBA8 packed
+}
+-- 32 bytes/instance
+-- 8192 chars = 256 KB Storage Buffer
+```
 
+**优点**：
+- 零 vertex buffer（与 standard_instanced 一致）
+- 每字符仅 32B（vs per-vertex 方案的 144B）
+- 8192 字符 = 256 KB Storage Buffer（vs 1.125 MB vertex buffer）
+- GPU 端 warp 效率更高（vertex shader 只有 6 次简单计算/instance）
+- 与 Nebula 现有架构一致（公理 C：管线签名在 S1 确定）
+
+**缺点**：
+- 依赖 Storage Buffer 性能（D-4.1-C 未验证）
+- 如果 D-4.1-C 在 10000 字符规模下退化 ≥ 20%，需要回退到方案 A
+
+### 决策
+
+**选择方案 B（Instanced）**，理由：
+1. 与 Nebula 的核心架构（standard_instanced）一致
+2. 内存效率高 4.4 倍
+3. 代码复用度高（pipeline_factory 的 instanced 生成逻辑可直接参考）
+4. 如果 D-4.1-C 结果不利，回退到方案 A 的改动范围可控（仅 vertex shader + upload 函数）
+
+---
+
+## 3. 实施路径
+
+### 3.1 着色器：`nebula_compose_dense_text_shader(opts)`
+
+位置：`shader_compose.lua`（新增函数）
+
+```wgsl
+// Uniforms — 极简：只有 viewport + cell_size
 struct DenseTextUniforms {
   viewport: vec2<f32>,
+  cell_w:   f32,        // 等宽字符宽度（像素）
+  cell_h:   f32,        // 等宽字符高度（像素）
 }
+@group(0) @binding(0) var<uniform> u: DenseTextUniforms;
 
-struct DenseCharVertexInput {
-  @location(0) position: vec2<f32>,
-  @location(1) uv:       vec2<f32>,
-  @location(2) fg_color: vec4<f32>,
-  @location(3) bg_color: vec4<f32>,
+// Per-instance 数据通过 Storage Buffer
+struct DenseCharInstance {
+  pos_x:    f32,
+  pos_y:    f32,
+  uv_x:    f32,
+  uv_y:    f32,
+  uv_w:    f32,
+  uv_h:    f32,
+  fg_color: u32,    // RGBA8 packed
+  bg_color: u32,    // RGBA8 packed
+}
+@group(0) @binding(1) var<storage, read> chars: array<DenseCharInstance>;
+@group(0) @binding(2) var glyph_atlas:   texture_2d<f32>;
+@group(0) @binding(3) var glyph_sampler: sampler;
+
+struct VertexOutput {
+  @builtin(position) clip_pos: vec4<f32>,
+  @location(0) uv:       vec2<f32>,
+  @location(1) fg_color: vec4<f32>,
+  @location(2) bg_color: vec4<f32>,
 }
 
 @vertex
-fn vs_main(in: DenseCharVertexInput) -> VertexOutput {
-  let ndc = vec2<f32>(
-    (in.position.x / u.viewport.x) * 2.0 - 1.0,
-    (in.position.y / u.viewport.y) * 2.0 - 1.0
-  );
-  out.clip_pos = vec4<f32>(ndc.x, -ndc.y, 0.0, 1.0);
-  out.uv = in.uv;
-  out.fg_color = in.fg_color;
-  out.bg_color = in.bg_color;
+fn vs_main(
+  @builtin(instance_index) inst: u32,
+  @builtin(vertex_index)   vert: u32
+) -> VertexOutput {
+  let ch = chars[inst];
+
+  // 6 vertices → unit quad (same pattern as standard_instanced)
+  var corner_x: f32; var corner_y: f32;
+  var uv_x: f32;     var uv_y: f32;
+  switch (vert % 6u) {
+    case 0u { corner_x = 0.0; corner_y = 0.0; uv_x = ch.uv_x;            uv_y = ch.uv_y; }
+    case 1u { corner_x = 1.0; corner_y = 0.0; uv_x = ch.uv_x + ch.uv_w;  uv_y = ch.uv_y; }
+    case 2u { corner_x = 0.0; corner_y = 1.0; uv_x = ch.uv_x;            uv_y = ch.uv_y + ch.uv_h; }
+    case 3u { corner_x = 0.0; corner_y = 1.0; uv_x = ch.uv_x;            uv_y = ch.uv_y + ch.uv_h; }
+    case 4u { corner_x = 1.0; corner_y = 0.0; uv_x = ch.uv_x + ch.uv_w;  uv_y = ch.uv_y; }
+    case 5u { corner_x = 1.0; corner_y = 1.0; uv_x = ch.uv_x + ch.uv_w;  uv_y = ch.uv_y + ch.uv_h; }
+    default { corner_x = 0.0; corner_y = 0.0; uv_x = 0.0; uv_y = 0.0; }
+  }
+
+  let pixel_x = ch.pos_x + corner_x * u.cell_w;
+  let pixel_y = ch.pos_y + corner_y * u.cell_h;
+  let ndc_x = (pixel_x / u.viewport.x) * 2.0 - 1.0;
+  let ndc_y = 1.0 - (pixel_y / u.viewport.y) * 2.0;
+
+  // Unpack RGBA8 → vec4<f32>
+  let fg = unpack4x8unorm(ch.fg_color);
+  let bg = unpack4x8unorm(ch.bg_color);
+
+  var out: VertexOutput;
+  out.clip_pos = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
+  out.uv       = vec2<f32>(uv_x, uv_y);
+  out.fg_color = fg;
+  out.bg_color = bg;
+  return out;
 }
 
 @fragment
@@ -144,171 +204,194 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
   let sdf = textureSample(glyph_atlas, glyph_sampler, in.uv).r;
   let width = fwidth(sdf);
   let alpha = smoothstep(0.5 - width, 0.5 + width, sdf);
-  // 混合：背景色 + 前景色按 alpha 叠加
+  // 背景色 + 前景色按 SDF alpha 叠加
   return mix(in.bg_color, vec4<f32>(in.fg_color.rgb, 1.0), in.fg_color.a * alpha);
 }
 ```
 
-关键差异（对比现有 `nebula_compose_text_shader`）：
-- Uniforms 极简（只有 viewport），颜色全部在 vertex attribute
-- Fragment shader 做 bg+fg 混合
-- 仍使用同一个 atlas 纹理（SDF 路径，glyph_atlas binding）
+关键设计要点：
+- **Uniforms 只有 16B**：viewport + cell_size。所有 per-char 数据在 Storage Buffer。
+- **fg/bg 用 `u32` + `unpack4x8unorm`**：WGSL 内置函数，零额外开销，精度对 GUI 颜色足够。
+- **vertex shader 程序化生成 quad**：与 standard_instanced 完全一致的模式。
+- **fragment shader 做 bg+fg SDF 混合**：背景色填充 cell，前景色按字形 alpha 叠加。
 
-#### 2.1.3 管线代码生成
+### 3.2 管线代码生成：`gen_pipeline_dense_text()`
 
-在 `pipeline_factory.lua` 中新增 `gen_pipeline_dense_text()`，
-并在 `nebula_gen_pipeline_source(spec)` 的分发链中增加：
+位置：`pipeline_factory.lua`（新增函数）
+
+生成的 Nelua record 结构：
+
+```
+<Base>DenseTextPipeline = @record{
+  pipeline:     WGPURenderPipeline,
+  bind_layout:  WGPUBindGroupLayout,
+  uniform_buf:  WGPUBuffer,      -- 16B: viewport + cell_size
+  storage_buf:  WGPUBuffer,      -- max_chars × 32B
+  storage_size: uint64,
+  bind_group:   WGPUBindGroup,   -- binds uniform + storage + atlas + sampler
+  char_count:   uint32,          -- 当前帧实际字符数
+}
+```
+
+Bind Group Layout（4 entries）：
+
+| binding | 类型 | visibility | 内容 |
+|:--------|:-----|:-----------|:-----|
+| 0 | uniform | vertex+fragment | DenseTextUniforms (16B) |
+| 1 | storage<read> | vertex | array\<DenseCharInstance\> |
+| 2 | texture_2d | fragment | glyph_atlas (SDF) |
+| 3 | sampler | fragment | glyph_sampler |
+
+生成的方法：
+
+- `init(renderer, max_chars)` — 创建 pipeline + buffers + bind group
+- `update_atlas_binding(renderer, tex_view, sampler)` — 绑定 SDF atlas 纹理
+- `update_viewport(renderer, vw, vh, cell_w, cell_h)` — 更新 uniform buffer
+- `upload(renderer, data: *[0]DenseCharInstance, count)` — 写入 Storage Buffer
+- `draw(pass, count)` — `wgpuRenderPassEncoderDraw(pass, 6, count, 0, 0)`
+
+在 `nebula_gen_pipeline_source(spec)` 分发链中新增：
 
 ```lua
 elseif spec.atlas_dense then
-  return gen_pipeline_dense_text(spec.base, spec.uniforms_record, spec.wgsl_source)
+  assert(spec.wgsl_source, "nebula_gen_pipeline_source: wgsl_source required for atlas_dense path")
+  local max_chars = spec.max_chars or 4096
+  return gen_pipeline_dense_text(spec.base, spec.wgsl_source, max_chars)
 ```
 
-生成的管线 record 结构与 `gen_pipeline_textured_vertex` 类似，
-但 `init` 方法使用 `nebula_init_dense_char_vertex_layout`（4 attributes）。
+### 3.3 DenseTextContext 派生
 
-#### 2.1.4 顶点构建运行时
+位置：`nebula_core.nelua`（新增 `nebula_derive_dense_text_visual`）
 
-在 `text_runtime.nelua` 中新增：
+与 `nebula_derive_text_visual` 并列，但关键差异：
+
+| 维度 | 现有 TextContext | 新 DenseTextContext |
+|:-----|:----------------|:-------------------|
+| 调用方式 | `nebula_derive_text_visual("T")` | `nebula_derive_dense_text_visual("T")` |
+| spec 标志 | `textured=true` | `atlas_dense=true` |
+| 颜色模型 | uniform 全局色 | per-instance fg/bg |
+| 容量 | max_chars=256（栈） | max_chars=4096+（L0 buffer） |
+| set_text | `set_text(renderer, text)` | `set_cells(renderer, cells, count)` |
+| 数据源 | cstring | `*[0]DenseCharInstance` |
+
+`set_cells` 方法不做排版计算——调用方负责填充 `DenseCharInstance` 数组（pos, uv, fg, bg）。这保持了框架的通用性：终端应用用 cell grid 填充，代码编辑器用排版结果填充。
+
+### 3.4 辅助运行时
+
+位置：`text_runtime.nelua`（新增）
 
 ```nelua
-global function nebula_dense_text_build_vertices(
-  text:         cstring,
+-- 等宽网格辅助：根据 (row, col, codepoint) 填充 DenseCharInstance
+global function nebula_dense_grid_fill_instance(
+  inst:         *DenseCharInstance,
+  row:          uint32,
+  col:          uint32,
+  codepoint:    uint32,
   origin_x:     float32,
   origin_y:     float32,
-  pixel_height: float32,
-  fg_colors:    *[0]Color,   -- per-char 前景色数组
-  bg_colors:    *[0]Color,   -- per-char 背景色数组
-  default_fg:   Color,
-  default_bg:   Color,
-  out_vertices: *[0]NebulaDenseCharVertex,
-  max_vertices: uint32,
-  out_width:    *float32,
-  out_height:   *float32
-): uint32
+  cell_w:       float32,
+  cell_h:       float32,
+  fg_packed:    uint32,
+  bg_packed:    uint32
+): void
 ```
 
-调用方负责分配 out_vertices 内存（L2 arena 或 L1 buffer）。
-
-#### 2.1.5 TextContext 派生扩展
-
-在 `nebula_core.nelua` 中新增 `nebula_derive_dense_text_visual(type_name)`，
-与现有 `nebula_derive_text_visual` 并列。
-
-关键差异：
-- TextContext 用 `text_mode="atlas_dense"` 注入
-- set_text 方法接受 fg_colors/bg_colors 参数
-- vertex buffer 改用 L1 持久分配（不走 arena，因为 4000×6×64B = 1.5MB）
-
-#### 2.1.6 公理合规性细节
-
-| 数据 | 生命周期层 | 理由 |
-|:-----|:----------|:-----|
-| atlas 纹理 | L0 | init 创建，应用全生命周期 |
-| pipeline + bind group | L0 | 编译期确定的管线签名 |
-| dense vertex buffer | L0/L1 | init 创建（大小编译期确定），内容每帧更新 |
-| per-frame quad data | L2 | 每帧 CPU 构建，写入 L0 buffer |
-| DenseTextUniforms | L0 | 只含 viewport，resize 时更新 |
-
-公理 C 审查：
-- Σ(TerminalVisual) = (DenseCharVertexLayout, DenseTextUniformsLayout,
-  DenseTextShaderModule, AlphaBlend)
-- 所有四项在 S1 完全确定
-- 与 Σ(ButtonTextVisual) = (PosUvLayout, TextUniformsLayout, ...) 正交
-
-### 2.2 S2：输入系统补全
-
-#### 2.2.1 Unicode 字符输入
-
-在 `glfw_bindings.nelua` 中新增：
-
-```nelua
-typealias GLFWcharfun = function(window: *GLFWwindow, codepoint: uint32): void
-global function glfwSetCharCallback(window: *GLFWwindow, cbfun: GLFWcharfun): GLFWcharfun <cimport, nodecl> end
-```
-
-在 `NebulaInputState` 中新增：
-
-```nelua
-global NebulaCharEvent = @record{
-  codepoint: uint32,
-}
-
-global NebulaInputState = @record{
-  -- ... 已有字段 ...
-  char_events:      [64]NebulaCharEvent,  -- L2 帧级缓冲
-  char_event_count: uint32,
-}
-```
-
-GLFW char callback 将 codepoint 写入缓冲区（ring buffer 或
-帧级数组）。process_input 中原语可读取。
-
-#### 2.2.2 剪贴板集成
-
-在 `glfw_bindings.nelua` 中新增：
-
-```nelua
-global function glfwGetClipboardString(window: *GLFWwindow): cstring <cimport, nodecl> end
-global function glfwSetClipboardString(window: *GLFWwindow, string: cstring): void <cimport, nodecl> end
-```
-
-在 `nebula_core.nelua` 的 `editable` 原语中扩展 process_body：
-增加 Ctrl+C / Ctrl+V / Ctrl+X 处理（调用剪贴板 API）。
-
-#### 2.2.3 窗口 resize 通知
-
-在 `NebulaRenderer` 或 App 框架中暴露：
-
-```nelua
-global NebulaResizeEvent = @record{
-  width:  uint32,
-  height: uint32,
-}
-```
-
-在 `nebula_frame_render` 的 surface 重建路径中，当检测到
-尺寸变化时设置标志。App 的 update 回调可读取。
+这是一个纯辅助函数，不强制使用。终端应用可以直接填充 `DenseCharInstance` 数组。
 
 ---
 
-## 3. 验收标准
+## 4. 公理合规性审查
 
-1. **高密度文本渲染**：编译一个 120×40 终端网格（4800 字符），
-   每个字符有不同的 fg/bg color，60fps 流畅渲染。
-2. **公理合规**：新管线路径的 Σ(V) 在 S1 完全确定，无运行时
-   管线创建或类型生成。
-3. **回归**：现有 36/36 回归测试全绿，form_demo 编译结果字节一致。
-4. **Unicode 输入**：通过 glfwSetCharCallback 接收中文 codepoint，
-   写入 char_events 缓冲区。
-5. **剪贴板**：Ctrl+C / Ctrl+V 在 editable 原语中可用。
-6. **resize 通知**：App 层能在 update 中获取窗口新尺寸。
+### 公理 A（阶段封闭性）
+
+| 操作 | 阶段 | 理由 |
+|:-----|:-----|:-----|
+| DenseCharInstance record 定义 | S1 | 类型在编译期确定 |
+| DenseTextPipeline record 生成 | S1 | pipeline_factory 编译期展开 |
+| WGSL 着色器组合 | S1 | shader_compose 编译期生成 |
+| GPU buffer 创建 | S2 init | 大小由 S1 的 max_chars 确定 |
+| Storage Buffer 写入 | S2 per-frame | 运行时数据 |
+| SDF 采样 + 颜色混合 | S2 render | GPU 操作 |
+
+**合规**：无 S1 操作泄漏到 S2，无 S2 操作拉回 S1。
+
+### 公理 B（生命周期三层）
+
+| 数据 | 层 | 创建 | 销毁 | 理由 |
+|:-----|:---|:-----|:-----|:-----|
+| SDF atlas 纹理 | L0 | init | deinit | 应用全生命周期 |
+| pipeline + bind group | L0 | init | deinit | 编译期确定的管线签名 |
+| Storage Buffer (256KB) | L0 | init | deinit | 大小编译期确定，内容每帧更新 |
+| DenseCharInstance[] 数组 | L2 | 每帧 | arena.reset | CPU 端帧级临时数据 |
+| Uniform buffer (16B) | L0 | init | deinit | viewport/cell_size |
+
+**合规**：L0 数据不跨层引用 L2，L2 数据帧末销毁。
+
+### 公理 C（形即渲染）
+
+```
+Σ(DenseTextVisual) = (
+  VertexLayout:   无（程序化）,
+  UniformsLayout: DenseTextUniforms (16B),
+  ShaderModule:   dense_text_shader,
+  BlendState:     AlphaBlend
+)
+```
+
+所有四项在 S1 完全确定。与现有管线签名正交，不冲突。
 
 ---
 
-## 4. 文件清单
+## 5. D-4.1-C 风险声明
+
+方案 B 依赖 Storage Buffer 在 8192 instance 规模下的性能。当前 D-4.1-C（10000 字符规模 Storage Buffer benchmark）未执行。
+
+**风险缓解策略**：
+
+1. **先实施方案 B**，在 `dense_text_demo` 中实测 8192 字符帧时间。
+2. 如果帧时间退化 ≥ 20%（对比同规模空 draw call），记录到 D-4.1-C 报告。
+3. 如果不可接受，回退到方案 A（per-vertex）：
+   - 改动范围：vertex shader（加回 vertex buffer）、upload 函数（vertex array）、pipeline layout（增加 VBO）
+   - 预计 ~200 行 diff，不影响 API 层
+
+---
+
+## 6. 验收标准
+
+1. **容量**：`dense_text_demo` 渲染 120×50 = 6000 字符网格，每字符独立 fg/bg color。
+2. **公理合规**：axiom_validator 对 DenseTextVisual 的管线签名审查通过。
+3. **回归**：39/39 回归测试全绿 + 新增专项测试。
+4. **性能基线**：记录 6000 字符帧时间，作为 D-4.1-C 数据点。
+5. **API 简洁性**：应用层调用不超过 3 步：① 填充 DenseCharInstance 数组 ② upload ③ draw。
+
+---
+
+## 7. 文件清单
 
 | 文件 | 操作 | 内容 |
 |:-----|:-----|:-----|
 | `src/derive/shader_compose.lua` | 修改 | 新增 `nebula_compose_dense_text_shader()` |
 | `src/derive/pipeline_factory.lua` | 修改 | 新增 `gen_pipeline_dense_text()`，扩展分发链 |
-| `src/renderer.nelua` | 修改 | 新增 `NebulaDenseCharVertex` record + `nebula_init_dense_char_vertex_layout` |
-| `src/text_runtime.nelua` | 修改 | 新增 `nebula_dense_text_build_vertices()` |
-| `src/nebula_core.nelua` | 修改 | 新增 `nebula_derive_dense_text_visual()`；editable 原语扩展剪贴板 |
-| `src/glfw_bindings.nelua` | 修改 | 新增 char callback + clipboard 绑定 |
-| `src/input.nelua` | 修改 | NebulaInputState 扩展 char_events |
-| `examples/dense_text_demo.nelua` | 新建 | 演示 4800 字符 + per-char color |
-| `tests/smoke_phase4_x.lua` | 新建 | 专项测试 |
+| `src/renderer.nelua` | 修改 | 新增 `DenseCharInstance` record + `DenseTextUniforms` record |
+| `src/text_runtime.nelua` | 修改 | 新增 `nebula_dense_grid_fill_instance()` 辅助函数 |
+| `src/nebula_core.nelua` | 修改 | 新增 `nebula_derive_dense_text_visual()` 派生入口 |
+| `examples/dense_text_demo.nelua` | 新建 | 120×50 网格 + per-char color 演示 |
+| `tests/smoke_phase4_x_dense.lua` | 新建 | 管线生成 + 着色器组合 + 公理合规专项测试 |
+| `docs/PLAN_PHASE4_X_DENSE_TEXT.md` | 替换 | 本文档 |
 
 ---
 
-## 5. 不在范围内
+## 8. 与原方案的 Diff 摘要
 
-以下终端特有能力由应用层自行实现，不属于本 Phase：
-
-- PTY 管理（fork/exec/openpty）
-- VT100/ANSI 转义序列解析
-- 终端环形缓冲区
-- DEC 私有模式状态机
-- 终端选区管理（双击选词等）
-- IME 预编辑支持
+| 维度 | v1（原方案） | v2（本修订） |
+|:-----|:------------|:------------|
+| Scope | 高密度文本 + 输入补全 | 仅高密度文本（输入已完成） |
+| 顶点格式 | Vec4 fg/bg (64B/vertex) | 方案 B: Instanced 32B/instance |
+| 颜色精度 | float32×4 | RGBA8 packed (u32) |
+| 绘制模型 | Per-vertex 三角形列表 | Instanced（与 standard_instanced 一致） |
+| 内存占用 (8192 chars) | 1.5 MB vertex buffer | 256 KB Storage Buffer |
+| resize 通知 | 需新增 | 已有（Phase 3.12） |
+| 剪贴板 | 需新增 | 已完成（缺口 #5） |
+| Unicode 输入 | 需新增 | 已完成（缺口 #6） |
+| D-4.1-C | 回避 | 显式风险声明 + 回退策略 |
+| Dense vs Rich | 未界定 | 明确仅等宽网格 |
