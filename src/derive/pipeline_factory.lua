@@ -131,6 +131,15 @@ local function gen_pipeline_textured_vertex(base, uniforms_record, wgsl_source)
   table.insert(lines,  "  self:draw_buffer(pass, self.vertex_buf, self.vertex_buf_size, self.vertex_count)")
   table.insert(lines,  "end")
 
+  -- deinit（释放所有 GPU 资源，公理 B：L0 资源在 deinit 时销毁）
+  table.insert(lines, ("function %s:deinit(): void"):format(pipe))
+  table.insert(lines,  "  wgpuRenderPipelineRelease(self.pipeline)")
+  table.insert(lines,  "  if self.bind_group ~= nilptr then wgpuBindGroupRelease(self.bind_group) end")
+  table.insert(lines,  "  wgpuBindGroupLayoutRelease(self.bind_layout)")
+  table.insert(lines,  "  wgpuBufferRelease(self.uniform_buf)")
+  table.insert(lines,  "  if self.vertex_buf ~= nilptr then wgpuBufferRelease(self.vertex_buf) end")
+  table.insert(lines,  "end")
+
   return table.concat(lines, "\n")
 end
 
@@ -427,15 +436,44 @@ local function gen_pipeline_shadow(base, uniforms_record, wgsl_source,
   emit("  -- 再调用 draw 绘制主组件本体。这样多个组件仍可共享同一个 surface pass。")
   emit("end")
 
+  -- ===== deinit（释放所有 GPU 资源，公理 B：L0 资源在 deinit 时销毁） =====
+  emit(("function %s:deinit(): void"):format(pipe))
+  -- 主管线
+  emit("  wgpuRenderPipelineRelease(self.pipeline)")
+  emit("  wgpuBindGroupRelease(self.bind_group)")
+  emit("  wgpuBindGroupLayoutRelease(self.bind_layout)")
+  emit("  wgpuBufferRelease(self.uniform_buf)")
+  -- 阴影遮罩管线
+  emit("  wgpuRenderPipelineRelease(self.shadow_mask_pipeline)")
+  emit("  wgpuBindGroupRelease(self.shadow_mask_bg)")
+  emit("  wgpuBindGroupLayoutRelease(self.shadow_mask_bgl)")
+  emit("  wgpuBufferRelease(self.shadow_mask_ubuf)")
+  -- 模糊管线 h
+  emit("  wgpuRenderPipelineRelease(self.blur_h_pipeline)")
+  emit("  wgpuBindGroupRelease(self.blur_h_bg)")
+  emit("  wgpuBindGroupLayoutRelease(self.blur_h_bgl)")
+  emit("  wgpuBufferRelease(self.blur_h_ubuf)")
+  -- 模糊管线 v
+  emit("  wgpuRenderPipelineRelease(self.blur_v_pipeline)")
+  emit("  wgpuBindGroupRelease(self.blur_v_bg)")
+  emit("  wgpuBindGroupLayoutRelease(self.blur_v_bgl)")
+  emit("  wgpuBufferRelease(self.blur_v_ubuf)")
+  -- 合成管线
+  emit("  wgpuRenderPipelineRelease(self.composite_pipeline)")
+  emit("  wgpuBindGroupRelease(self.composite_bg)")
+  emit("  wgpuBindGroupLayoutRelease(self.composite_bgl)")
+  emit("  wgpuBufferRelease(self.composite_ubuf)")
+  -- 离屏纹理
+  emit("  wgpuTextureViewRelease(self.tex_a_view)")
+  emit("  wgpuTextureRelease(self.tex_a)")
+  emit("  wgpuTextureViewRelease(self.tex_b_view)")
+  emit("  wgpuTextureRelease(self.tex_b)")
+  -- 采样器
+  emit("  wgpuSamplerRelease(self.sampler)")
+  emit("end")
+
   return table.concat(L, "\n")
 end
-
-
-
--- =============================================================================
--- ★ Phase 3.5.1: 为标准 Visual 类型生成 Instanced Pipeline
---
--- 与 gen_pipeline_instanced 的区别：
 --   · 本函数的 instance_record 就是 <T>Uniforms（由 nebula_gen_uniform_layout 生成）
 --   · 这样 to_uniforms() 生成的数据可以直接上传到 Storage Buffer，实现零拷贝
 --   · 生成的管线名称为 <T>Pipeline（与原 simple 路径一致），新增 upload/draw_instanced/draw_single
@@ -598,6 +636,7 @@ local function gen_pipeline_standard_instanced(base, uniforms_record, wgsl_sourc
   emit("  }")
   emit("  self.pipeline = wgpuDeviceCreateRenderPipeline(renderer.device, &rp_desc)")
   emit("  wgpuShaderModuleRelease(shader)")
+  emit("  wgpuPipelineLayoutRelease(pipeline_layout)")
   emit("  if self.pipeline == nilptr then")
   emit(("    printf(\"wgpu: %s si: failed to create pipeline\\n\")\n    return false"):format(base:lower()))
   emit("  end")
@@ -640,12 +679,17 @@ local function gen_pipeline_standard_instanced(base, uniforms_record, wgsl_sourc
   emit("  end")
   emit("end")
 
+  -- ===== deinit（释放所有 GPU 资源，公理 B：L0 资源在 deinit 时销毁） =====
+  emit(("function %s:deinit(): void"):format(pipe))
+  emit("  wgpuRenderPipelineRelease(self.pipeline)")
+  emit("  wgpuBindGroupRelease(self.bind_group)")
+  emit("  wgpuBindGroupLayoutRelease(self.bind_layout)")
+  emit("  wgpuBufferRelease(self.storage_buf)")
+  emit("  wgpuBufferRelease(self.uniform_buf)")
+  emit("end")
+
   return table.concat(L, "\n")
 end
-
-
-
---- [gen_pipeline_instanced 已在 Phase 3.7 中删除]
 -- 请使用 gen_pipeline_standard_instanced（通过 nebula_derive 自动派生）
 
 -- =============================================================================
@@ -754,6 +798,18 @@ local function gen_pipeline_slug_text(base, uniforms_record, wgsl_source)
   emit("  wgpuRenderPassEncoderSetBindGroup(pass, 0, self.bind_group, 0, nilptr)")
   emit("  wgpuRenderPassEncoderSetVertexBuffer(pass, 0, self.vertex_buf, 0, self.vertex_buf_size)")
   emit("  wgpuRenderPassEncoderDraw(pass, self.vertex_count, 1, 0, 0)")
+  emit("end")
+
+  -- deinit（释放所有 GPU 资源，公理 B：L0 资源在 deinit 时销毁）
+  emit(("function %s:deinit(): void"):format(pipe))
+  emit("  wgpuRenderPipelineRelease(self.pipeline)")
+  emit("  if self.bind_group ~= nilptr then wgpuBindGroupRelease(self.bind_group) end")
+  emit("  wgpuBindGroupLayoutRelease(self.bind_layout)")
+  emit("  wgpuBufferRelease(self.uniform_buf)")
+  emit("  if self.curve_buf ~= nilptr then wgpuBufferRelease(self.curve_buf) end")
+  emit("  if self.band_meta_buf ~= nilptr then wgpuBufferRelease(self.band_meta_buf) end")
+  emit("  if self.band_ref_buf ~= nilptr then wgpuBufferRelease(self.band_ref_buf) end")
+  emit("  if self.vertex_buf ~= nilptr then wgpuBufferRelease(self.vertex_buf) end")
   emit("end")
 
   return table.concat(lines, "\n")

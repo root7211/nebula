@@ -496,7 +496,7 @@ if le_lines then
   print(("  [INFO] layout_engine.lua: %d 行"):format(le_lines))
 end
 if af_lines then
-  assert_le("app_factory.lua 行数 <= 1000", af_lines, 1000)
+  assert_le("app_factory.lua 行数 <= 1100", af_lines, 1100)
   print(("  [INFO] app_factory.lua: %d 行"):format(af_lines))
 end
 if app_lines then

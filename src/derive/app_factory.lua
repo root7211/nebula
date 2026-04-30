@@ -916,6 +916,57 @@ local function gen_app_draw(app_name, reg)
 end
 
 -- =============================================================================
+-- ★ Phase 4.2.2-fix: gen_app_deinit
+-- 生成 <App>:deinit() 方法，释放所有管线 GPU 资源
+-- 公理 B：L0 资源在 deinit 时销毁
+-- =============================================================================
+local function gen_app_deinit(app_name, reg)
+  local L = {}
+  local function emit(s) table.insert(L, s) end
+
+  emit(("-- === %s:deinit — GPU 资源释放（公理 B） ==="):format(app_name))
+  emit(("function %s:deinit(): void"):format(app_name))
+
+  -- 释放所有管线（去重：同一 pipeline_name 只释放一次）
+  local deinited_pipes = {}
+  for _, group in pairs(reg.type_groups) do
+    if not deinited_pipes[group.pipeline_name] then
+      emit(("  self.pipe_%s:deinit()"):format(group.base:lower()))
+      deinited_pipes[group.pipeline_name] = true
+    end
+  end
+
+  -- 释放阴影管线
+  for _, shd in ipairs(reg.shadows) do
+    emit(("  self.pipe_%s:deinit()"):format(shd.base:lower()))
+  end
+
+  -- 释放文本管线
+  if #reg.texts > 0 then
+    local has_sdf_txt  = false
+    local has_slug_txt = false
+    for _, txt in ipairs(reg.texts) do
+      local mode = txt.text_mode or "sdf"
+      if mode == "sdf" then has_sdf_txt = true end
+      if mode == "slug" then has_slug_txt = true end
+    end
+    if has_sdf_txt  then emit("  self.pipe_text:deinit()") end
+    if has_slug_txt then emit("  self.pipe_slug_text:deinit()") end
+
+    -- 释放文本 mesh 的 vertex buffer
+    for _, txt in ipairs(reg.texts) do
+      local mode = txt.text_mode or "sdf"
+      if mode == "sdf" then
+        emit(("  if self.%s.mesh.vertex_buffer ~= nilptr then wgpuBufferRelease(self.%s.mesh.vertex_buffer) end"):format(txt.name, txt.name))
+      end
+    end
+  end
+
+  emit("end")
+  return table.concat(L, "\n")
+end
+
+-- =============================================================================
 -- 主入口：nebula_app_generate(app_name)
 -- =============================================================================
 function nebula_app_generate(app_name)
@@ -953,6 +1004,8 @@ function nebula_app_generate(app_name)
     -- ★ Phase 3.10.5: 多 Pass 渲染支持
     gen_app_pre_pass(app_name, reg),
     gen_app_surface_pass(app_name, reg),
+    -- ★ Phase 4.2.2-fix: GPU 资源释放
+    gen_app_deinit(app_name, reg),
   }
 
   local source = table.concat(parts, "\n\n")

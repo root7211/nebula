@@ -259,6 +259,7 @@ end
 
 -- nebula_shutdown: 封装 WGPU/GLFW 资源释放
 global function nebula_shutdown(renderer: *NebulaRenderer): void
+  wgpuQueueRelease(renderer.queue)
   wgpuSurfaceRelease(renderer.surface)
   wgpuDeviceRelease(renderer.device)
   wgpuAdapterRelease(renderer.adapter)
@@ -505,5 +506,7 @@ end
     nebula_frame_render(#[renderer_ptr]#, #[app_ptr]#, #[input_ptr]#, _dt,
       #[cr]#, #[cg]#, #[cb]#)
   end
+  -- ★ Phase 4.2.2-fix: 循环退出后自动释放 App GPU 资源（公理 B）
+  #[app_ptr]#:deinit()
   ## end
 ## end

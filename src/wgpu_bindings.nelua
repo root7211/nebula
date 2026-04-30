@@ -626,6 +626,7 @@ global function wgpuDeviceCreateTexture(device: WGPUDevice, desc: *WGPUTextureDe
 global function wgpuDeviceCreateSampler(device: WGPUDevice, desc: *WGPUSamplerDescriptor): WGPUSampler <cimport, nodecl> end
 global function wgpuQueueWriteTexture(queue: WGPUQueue, destination: *WGPUTexelCopyTextureInfo, data: pointer, dataSize: csize, dataLayout: *WGPUTexelCopyBufferLayout, writeSize: *WGPUExtent3D): void <cimport, nodecl> end
 
+global function wgpuSamplerRelease(sampler: WGPUSampler): void <cimport, nodecl> end
 global function wgpuShaderModuleRelease(shaderModule: WGPUShaderModule): void <cimport, nodecl> end
 global function wgpuBindGroupLayoutRelease(bindGroupLayout: WGPUBindGroupLayout): void <cimport, nodecl> end
 global function wgpuPipelineLayoutRelease(pipelineLayout: WGPUPipelineLayout): void <cimport, nodecl> end

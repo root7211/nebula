@@ -262,7 +262,7 @@ end
 
 if factory_lines then
   print(("  pipeline_factory.lua: %d 行"):format(factory_lines))
-  assert_le("pipeline_factory.lua ≤ 900 行", factory_lines, 900)
+  assert_le("pipeline_factory.lua ≤ 950 行", factory_lines, 950)
 else
   failed = failed + 1
   print("[FAIL] 无法读取 pipeline_factory.lua")

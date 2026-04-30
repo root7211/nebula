@@ -382,7 +382,7 @@ if af_lines  then print(("  app_factory.lua:      %d 行"):format(af_lines))  en
 if tr_lines  then print(("  text_runtime.nelua:   %d 行"):format(tr_lines))  end
 
 assert_le("shader_compose.lua ≤ 620 行",    sc_lines or 9999, 620)
-assert_le("pipeline_factory.lua ≤ 900 行",  pf_lines or 9999, 900)
+assert_le("pipeline_factory.lua ≤ 950 行",  pf_lines or 9999, 950)
 assert_le("app_factory.lua ≤ 1100 行",      af_lines or 9999, 1100)
 assert_le("text_runtime.nelua ≤ 600 行",    tr_lines or 9999, 600)
 
