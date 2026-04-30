@@ -14,7 +14,7 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 进行中 | 38/38 回归测试全绿 | 深度审计缺口 #1 #2 已修复（2026-04-30）**
+**Era II 进行中 | 38/38 回归测试全绿 | 深度审计缺口 #1 #2 #3 已修复（2026-04-30）**
 
 ### 最近完成
 
@@ -31,7 +31,7 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 |:--|:-----------|:-----|:-----|:-----|
 | ~~1~~ | **4.3 S3** | ~~沙箱隔离~~ | ✅ 已修复 | Task D 实现 `axiom_validator` v2.0 三层防御（Proxy + Token 扫描 + NEBULA_INTRINSICS 白名单 + Trace），已在 `nebula_derive_app` 中接入编译流程 |
 | ~~2~~ | **4.3 S3** | ~~契约校验未接入编译流程~~ | ✅ 已修复 | `nebula_validate_static_asserts()` + `nebula_validate_process_body()` 均已接入 `app_factory.lua:940-944` |
-| 3 | **4.4 S1-S3** | **高级原语未内置到框架注册表** | ❌ 待修复 | `scrollable`、`dropdown_manager`、`multiline_editable` 均需用户在 .nelua 中手动注册 50+ 行样板代码，未内置到 `interaction_factory.lua` 的 `NEBULA_PRIMITIVES` |
+| ~~3~~ | **4.4 S1-S3** | ~~高级原语未内置到框架注册表~~ | ✅ 已修复 | `scrollable`、`dropdown_manager`、`multiline_editable` 已内置到 `interaction_factory.lua` 的 `NEBULA_PRIMITIVES`，用户只需在 `nebula_annotate` 中声明 `primitives = {...}` 即可使用，无需手动注册 |
 | 4 | **4.2.2** | **D-4.1-C benchmark 未执行** | ❌ 待评估 | 需在 10000 字符规模下测试 Storage Buffer 性能退化。阻塞 4.2.3 CJK 启动决策 |
 | 5 | **4.X** | **剪贴板 API 未绑定** | ❌ 待实施 | `glfw_bindings.nelua` 无 `GetClipboardString` / `SetClipboardString` 绑定 |
 | 6 | **4.X** | **Unicode char callback 无消费者** | ❌ 待实施 | `glfwSetCharCallback` 绑定存在但未被任何组件接入 |
@@ -42,14 +42,14 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 - **S2**：`draggable_value` 自定义原语端到端验证（slider_demo），67 条专项测试
 - **S3**：字段冲突检测 + `static_asserts` 编译期契约校验
 - **Task D**：`axiom_validator` v2.0 三层防御——① Proxy 类型感知 + 分支覆盖穷举 ② Token 扫描兜底 ③ NEBULA_INTRINSICS 白名单。已在 `nebula_derive_app` 编译流程中接入 `nebula_validate_process_body` + `nebula_validate_static_asserts`（`app_factory.lua:940-944`）
-- ⚠️ 三种高级原语（scrollable/dropdown_manager/multiline_editable）未内置到 `NEBULA_PRIMITIVES` 注册表（见缺口 #3）
+- ✅ 三种高级原语（scrollable/dropdown_manager/multiline_editable）已内置到 `NEBULA_PRIMITIVES` 注册表（缺口 #3 已修复）
 
 ### Phase 4.4 — 高级组件库（81/100）
 
 - **S1**：`scrollable` 原语 + scissor rect 裁剪 + scrollable_demo
 - **S2**：`dropdown_manager` 原语 + 弹出层 z-order 管理 + dropdown_demo
 - **S3**：`multiline_editable` 原语 + `NebulaMultiBuf{N,L}` 编译期泛型类型 + multiline_editable_demo
-- ⚠️ 三个高级原语均未内置到框架注册表，用户需手动注册（见缺口 #3）
+- ✅ 三个高级原语已内置到框架注册表，用户声明即用（缺口 #3 已修复）
 
 ---
 
