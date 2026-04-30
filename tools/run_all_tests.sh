@@ -142,6 +142,10 @@ run_test "smoke_phase4_3_s4 (Phase 4.3 Task D — process_body 公理校验)" \
 run_test "smoke_phase4_x_input (Phase 4.X — 剪贴板 + Unicode 输入 + extract_range)" \
   nelua-lua tests/smoke_phase4_x_input.lua
 
+# ★ Phase 4.2.3 S0: HarfBuzz 绑定 + CJK 字形预处理管线验证
+run_test "smoke_phase4_2_3 (Phase 4.2.3 S0 — HarfBuzz 绑定 + CJK shaping tables)" \
+  nelua-lua tests/smoke_phase4_2_3.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="

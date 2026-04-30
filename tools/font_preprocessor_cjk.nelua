@@ -1,0 +1,374 @@
+-- =============================================================================
+-- tools/font_preprocessor_cjk.nelua
+-- Nebula GUI Compiler — Phase 4.2.3-S0
+--
+-- CJK 字体预处理工具：
+--   · 通过 HarfBuzz 对声明的 CJK 字符集执行 shaping
+--   · 提取每个字形的 glyph_id、advance、bearing、extents
+--   · 检测字符对间的 kerning 偏移
+--   · 生成 assets/generated/cjk_shaping_tables.nelua（编译期常量）
+--
+-- 设计哲学（公理 A — 阶段封闭性）：
+--   · HarfBuzz 仅在此 S0 工具中运行，零运行时依赖。
+--   · 输出为静态查找表，S1 编译期注入，S2 运行时纯查表 O(1)。
+--
+-- 字符集子集化策略：
+--   · zh-CN-common: GB2312 一级汉字 3755 字（覆盖 99.7% 日常使用）
+--   · 本工具先用 20 字核心子集验证管线正确性，后续扩展到完整字符集。
+--
+-- 用法：
+--   mkdir -p assets/generated
+--   nelua -L src tools/font_preprocessor_cjk.nelua
+-- =============================================================================
+require 'harfbuzz_bindings'
+require 'io'
+
+##[==[
+linklib 'm'
+cinclude [[
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+]]
+]==]
+
+global function printf(fmt: cstring, ...: cvarargs): cint <cimport, nodecl> end
+
+local FILE: type <cimport,cinclude'<stdio.h>',forwarddecl> = @record{}
+local function fopen(pathname: cstring, mode: cstring): *FILE <cimport,cinclude'<stdio.h>'> end
+local function fclose(fp: *FILE): cint <cimport,cinclude'<stdio.h>'> end
+local function fread(ptr: pointer, size: csize, n: csize, fp: *FILE): csize <cimport,cinclude'<stdio.h>'> end
+local function fseek(fp: *FILE, offset: clong, whence: cint): cint <cimport,cinclude'<stdio.h>'> end
+local function ftell(fp: *FILE): clong <cimport,cinclude'<stdio.h>'> end
+local function malloc(size: csize): pointer <cimport,cinclude'<stdlib.h>'> end
+local function free(ptr: pointer): void <cimport,cinclude'<stdlib.h>'> end
+
+-- =============================================================================
+-- 配置常量
+-- =============================================================================
+local CJK_FONT_PATH <const> = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+local OUTPUT_SHAPING <const> = "assets/generated/cjk_shaping_tables.nelua"
+
+-- =============================================================================
+-- zh-CN-common 核心验证子集（20 字）
+-- 覆盖高频汉字 + 标点，用于验证 HarfBuzz 管线正确性。
+-- 后续通过 charset 声明机制扩展到 GB2312 一级 3755 字。
+-- =============================================================================
+local CHARSET_ZH_CN_CORE: [20]uint32 = {
+  0x4F60,  -- 你
+  0x597D,  -- 好
+  0x4E16,  -- 世
+  0x754C,  -- 界
+  0x4EBA,  -- 人
+  0x5927,  -- 大
+  0x5B66,  -- 学
+  0x4E2D,  -- 中
+  0x56FD,  -- 国
+  0x7684,  -- 的
+  0x662F,  -- 是
+  0x4E0D,  -- 不
+  0x4E86,  -- 了
+  0x6211,  -- 我
+  0x4EEC,  -- 们
+  0x8FD9,  -- 这
+  0x4E2A,  -- 个
+  0x6709,  -- 有
+  0x5728,  -- 在
+  0x4E3A,  -- 为
+}
+local CHARSET_SIZE <comptime> = 20
+
+-- =============================================================================
+-- 预处理结果记录
+-- =============================================================================
+local CjkGlyphEntry = @record{
+  codepoint:  uint32,
+  glyph_id:   uint32,
+  advance:    int32,   -- HarfBuzz units (= font units when scale = UPEM)
+  x_bearing:  int32,
+  y_bearing:  int32,
+  width:      int32,
+  height:     int32,
+}
+
+local CjkKernPair = @record{
+  left_cp:    uint32,
+  right_cp:   uint32,
+  kern_adj:   int32,   -- kerning adjustment in font units
+}
+
+-- =============================================================================
+-- 文件加载
+-- =============================================================================
+local function load_file(path: cstring): (pointer, csize)
+  local fp = fopen(path, "rb")
+  if fp == nilptr then return nilptr, 0 end
+  fseek(fp, 0, 2)
+  local sz = ftell(fp)
+  if sz <= 0 then fclose(fp) return nilptr, 0 end
+  fseek(fp, 0, 0)
+  local mem = malloc((@csize)(sz))
+  if mem == nilptr then fclose(fp) return nilptr, 0 end
+  local nread = fread(mem, 1, (@csize)(sz), fp)
+  fclose(fp)
+  if nread ~= (@csize)(sz) then free(mem) return nilptr, 0 end
+  return mem, (@csize)(sz)
+end
+
+-- =============================================================================
+-- 主函数
+-- =============================================================================
+local function main(): cint
+  -- 加载字体文件
+  local font_data, font_size = load_file(CJK_FONT_PATH)
+  if font_data == nilptr or font_size == 0 then
+    printf("cjk_preprocessor: failed to load font: %s\n", CJK_FONT_PATH)
+    return 1
+  end
+  printf("cjk_preprocessor: loaded %s (%ld bytes)\n", CJK_FONT_PATH, (@clong)(font_size))
+
+  -- 创建 HarfBuzz blob → face → font
+  local blob = hb_blob_create(
+    (@cstring)(font_data),
+    (@cuint)(font_size),
+    HB_MEMORY_MODE_READONLY,
+    nilptr,
+    nilptr
+  )
+  if blob == nilptr then
+    printf("cjk_preprocessor: hb_blob_create failed\n")
+    free(font_data)
+    return 1
+  end
+
+  local face = hb_face_create(blob, 0)  -- index 0 = first font in TTC
+  if face == nilptr then
+    printf("cjk_preprocessor: hb_face_create failed\n")
+    hb_blob_destroy(blob)
+    free(font_data)
+    return 1
+  end
+
+  local upem = hb_face_get_upem(face)
+  printf("cjk_preprocessor: UPEM = %d\n", (@cint)(upem))
+
+  local font = hb_font_create(face)
+  if font == nilptr then
+    printf("cjk_preprocessor: hb_font_create failed\n")
+    hb_face_destroy(face)
+    hb_blob_destroy(blob)
+    free(font_data)
+    return 1
+  end
+  -- 设置 scale = UPEM，使输出为 font units（与 Slug 管线一致）
+  hb_font_set_scale(font, (@cint)(upem), (@cint)(upem))
+
+  -- 创建 HarfBuzz buffer
+  local buf = hb_buffer_create()
+  if buf == nilptr then
+    printf("cjk_preprocessor: hb_buffer_create failed\n")
+    hb_font_destroy(font)
+    hb_face_destroy(face)
+    hb_blob_destroy(blob)
+    free(font_data)
+    return 1
+  end
+
+  -- =========================================================================
+  -- Pass 1: 逐字符 shaping，提取单字形度量
+  -- =========================================================================
+  local glyph_entries: [CHARSET_SIZE]CjkGlyphEntry
+  local shaped_count: cint = 0
+
+  for i = 0, <CHARSET_SIZE do
+    local cp = CHARSET_ZH_CN_CORE[i]
+
+    -- 重置 buffer
+    hb_buffer_clear_contents(buf)
+
+    -- 添加单个码点
+    local cps: [1]uint32 = { cp }
+    hb_buffer_add_utf32(buf, &cps[0], 1, 0, 1)
+
+    -- 设置 shaping 属性
+    hb_buffer_set_direction(buf, HB_DIRECTION_LTR)
+    hb_buffer_set_script(buf, HB_SCRIPT_HAN)
+    hb_buffer_set_language(buf, hb_language_from_string("zh-CN", 5))
+
+    -- 执行 shaping
+    hb_shape(font, buf, nilptr, 0)
+
+    -- 提取结果
+    local glyph_count: cuint = 0
+    local infos  = hb_buffer_get_glyph_infos(buf, &glyph_count)
+    local positions = hb_buffer_get_glyph_positions(buf, &glyph_count)
+
+    if glyph_count >= 1 then
+      local info_arr = (@*[0]hb_glyph_info_t)(infos)
+      local pos_arr  = (@*[0]hb_glyph_position_t)(positions)
+
+      local glyph_id = info_arr[0].codepoint  -- after shaping, codepoint = glyph index
+      local x_adv    = pos_arr[0].x_advance
+
+      -- 获取字形 extents
+      local extents: hb_glyph_extents_t
+      local has_extents = hb_font_get_glyph_extents(font, glyph_id, &extents)
+
+      glyph_entries[i] = CjkGlyphEntry{
+        codepoint = cp,
+        glyph_id  = glyph_id,
+        advance   = x_adv,
+        x_bearing = (has_extents ~= 0) and extents.x_bearing or 0,
+        y_bearing = (has_extents ~= 0) and extents.y_bearing or 0,
+        width     = (has_extents ~= 0) and extents.width or 0,
+        height    = (has_extents ~= 0) and extents.height or 0,
+      }
+      shaped_count = shaped_count + 1
+    else
+      printf("cjk_preprocessor: WARNING: no glyph for U+%04X\n", (@cint)(cp))
+      glyph_entries[i] = CjkGlyphEntry{
+        codepoint = cp,
+        glyph_id  = 0,
+        advance   = 0,
+        x_bearing = 0,
+        y_bearing = 0,
+        width     = 0,
+        height    = 0,
+      }
+    end
+  end
+
+  printf("cjk_preprocessor: shaped %d/%d glyphs\n", shaped_count, CHARSET_SIZE)
+
+  -- =========================================================================
+  -- Pass 2: 字符对 kerning 检测
+  -- 对所有相邻字符对执行双字符 shaping，与单字符 advance 比较。
+  -- 差异即为 kerning 调整量。
+  -- =========================================================================
+  local MAX_KERN_PAIRS <comptime> = CHARSET_SIZE * CHARSET_SIZE
+  local kern_pairs: [MAX_KERN_PAIRS]CjkKernPair
+  local kern_count: cint = 0
+
+  for li = 0, <CHARSET_SIZE do
+    for ri = 0, <CHARSET_SIZE do
+      local left_cp  = CHARSET_ZH_CN_CORE[li]
+      local right_cp = CHARSET_ZH_CN_CORE[ri]
+      local expected_adv = glyph_entries[li].advance
+
+      -- Shape 两个字符
+      hb_buffer_clear_contents(buf)
+      local pair: [2]uint32 = { left_cp, right_cp }
+      hb_buffer_add_utf32(buf, &pair[0], 2, 0, 2)
+      hb_buffer_set_direction(buf, HB_DIRECTION_LTR)
+      hb_buffer_set_script(buf, HB_SCRIPT_HAN)
+      hb_buffer_set_language(buf, hb_language_from_string("zh-CN", 5))
+      hb_shape(font, buf, nilptr, 0)
+
+      local gc: cuint = 0
+      local pos = hb_buffer_get_glyph_positions(buf, &gc)
+      if gc >= 2 then
+        local pos_arr = (@*[0]hb_glyph_position_t)(pos)
+        local actual_adv = pos_arr[0].x_advance
+        local kern_adj = actual_adv - expected_adv
+        if kern_adj ~= 0 then
+          kern_pairs[kern_count] = CjkKernPair{
+            left_cp  = left_cp,
+            right_cp = right_cp,
+            kern_adj = kern_adj,
+          }
+          kern_count = kern_count + 1
+        end
+      end
+    end
+  end
+
+  printf("cjk_preprocessor: detected %d kerning pairs\n", kern_count)
+
+  -- =========================================================================
+  -- 生成 Nelua 源文件
+  -- =========================================================================
+  local f = io.open(OUTPUT_SHAPING, "w")
+  if not f then
+    printf("cjk_preprocessor: failed to open output: %s\n", OUTPUT_SHAPING)
+    hb_buffer_destroy(buf)
+    hb_font_destroy(font)
+    hb_face_destroy(face)
+    hb_blob_destroy(blob)
+    free(font_data)
+    return 1
+  end
+
+  f:write("-- Auto-generated by tools/font_preprocessor_cjk.nelua (Phase 4.2.3-S0)\n")
+  f:write("-- DO NOT EDIT — regenerate with: nelua -L src tools/font_preprocessor_cjk.nelua\n")
+  f:write("-- Charset: zh-CN-common (core verification subset)\n\n")
+
+  -- 全局常量
+  f:write(("global NEBULA_CJK_FONT_PATH <const> = \"%s\"\n"):format(CJK_FONT_PATH))
+  f:write(("global NEBULA_CJK_UPEM <const> = %d\n"):format((@cint)(upem)))
+  f:write(("global NEBULA_CJK_GLYPH_COUNT <const> = %d\n"):format(CHARSET_SIZE))
+  f:write(("global NEBULA_CJK_KERN_PAIR_COUNT <const> = %d\n\n"):format(kern_count))
+
+  -- CJK 字形记录类型
+  f:write("global NebulaCjkGlyph = @record{\n")
+  f:write("  codepoint: uint32,\n")
+  f:write("  glyph_id:  uint32,\n")
+  f:write("  advance:   int32,\n")
+  f:write("  x_bearing: int32,\n")
+  f:write("  y_bearing: int32,\n")
+  f:write("  width:     int32,\n")
+  f:write("  height:    int32,\n")
+  f:write("}\n\n")
+
+  -- Kerning pair 记录类型
+  f:write("global NebulaCjkKernPair = @record{\n")
+  f:write("  left_cp:  uint32,\n")
+  f:write("  right_cp: uint32,\n")
+  f:write("  kern_adj: int32,\n")
+  f:write("}\n\n")
+
+  -- 字形表
+  f:write(("global NEBULA_CJK_GLYPHS: [%d]NebulaCjkGlyph <const> = {\n"):format(CHARSET_SIZE))
+  for i = 0, <CHARSET_SIZE do
+    local g = glyph_entries[i]
+    f:write(("  { codepoint=0x%04X, glyph_id=%d, advance=%d, x_bearing=%d, y_bearing=%d, width=%d, height=%d },\n"):format(
+      g.codepoint, g.glyph_id, g.advance, g.x_bearing, g.y_bearing, g.width, g.height))
+  end
+  f:write("}\n\n")
+
+  -- Kerning 表
+  if kern_count > 0 then
+    f:write(("global NEBULA_CJK_KERN_PAIRS: [%d]NebulaCjkKernPair <const> = {\n"):format(kern_count))
+    for i = 0, <kern_count do
+      local k = kern_pairs[i]
+      f:write(("  { left_cp=0x%04X, right_cp=0x%04X, kern_adj=%d },\n"):format(
+        k.left_cp, k.right_cp, k.kern_adj))
+    end
+    f:write("}\n")
+  else
+    f:write("-- No kerning pairs detected (expected for CJK monospaced advance)\n")
+    f:write("global NEBULA_CJK_KERN_PAIRS: [0]NebulaCjkKernPair <const> = {}\n")
+  end
+
+  -- 码点→索引查找函数（编译期内联）
+  f:write("\n-- Codepoint → index lookup (binary search for O(log N))\n")
+  f:write("-- For the core 20-char subset, linear scan is fine.\n")
+  f:write(("global NEBULA_CJK_CODEPOINTS: [%d]uint32 <const> = {\n"):format(CHARSET_SIZE))
+  for i = 0, <CHARSET_SIZE do
+    f:write(("  0x%04X,\n"):format(glyph_entries[i].codepoint))
+  end
+  f:write("}\n")
+
+  f:close()
+
+  printf("cjk_preprocessor: generated shaping tables -> %s\n", OUTPUT_SHAPING)
+
+  -- 清理
+  hb_buffer_destroy(buf)
+  hb_font_destroy(font)
+  hb_face_destroy(face)
+  hb_blob_destroy(blob)
+  free(font_data)
+  return 0
+end
+
+main()
