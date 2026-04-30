@@ -2,7 +2,7 @@
 # =============================================================================
 # Nebula GUI Compiler — Build Script
 #
-# 当前仓库状态：Phase 4.2.1 — 跨平台 PAL (Platform Abstraction Layer) 骨架
+# 当前仓库状态：Phase 4.2.2 — D-4.1-C Storage Buffer Scalability Benchmark
 #
 # Usage:
 #   ./build.sh [demo_name] [options]
@@ -47,7 +47,7 @@ done
 
 # 验证 Demo 目标
 case "$DEMO_TARGET" in
-  button_demo|layout_demo|login_demo|form_demo|dynamic_list_demo|shadow_demo|text_demo)
+  button_demo|layout_demo|login_demo|form_demo|dynamic_list_demo|shadow_demo|text_demo|slider_demo|scrollable_demo|dropdown_demo|multiline_editable_demo|slug_bench)
     ;;
   *)
     echo "[nebula] Error: unknown demo target '$DEMO_TARGET'"

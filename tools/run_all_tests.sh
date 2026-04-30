@@ -146,6 +146,10 @@ run_test "smoke_phase4_x_input (Phase 4.X — 剪贴板 + Unicode 输入 + extra
 run_test "smoke_phase4_2_3 (Phase 4.2.3 S0 — HarfBuzz 绑定 + CJK shaping tables)" \
   nelua-lua tests/smoke_phase4_2_3.lua
 
+# ★ Phase 4.2.2 D-4.1-C: Storage Buffer 可扩展性基准审计
+run_test "smoke_phase4_2_2_bench (Phase 4.2.2 D-4.1-C — Storage Buffer scalability audit)" \
+  nelua-lua tests/smoke_phase4_2_2_bench.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="
@@ -221,6 +225,17 @@ run_test "compile multiline_editable_demo (Phase 4.4 S3 — multiline_editable �
   --cflags="-I./vendor/wgpu-native/include" \
   --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
   examples/multiline_editable_demo.nelua -o ~/.cache/nelua/multiline_editable_demo
+
+# ★ Phase 4.2.2 D-4.1-C: slug_bench 编译回归（Storage Buffer benchmark）
+run_test "compile slug_bench (Phase 4.2.2 D-4.1-C — Storage Buffer scalability benchmark)" \
+  nelua -c -L src -L assets/generated --add-path . --add-path examples --add-path assets/generated \
+  --cflags="-I./vendor/wgpu-native/include" \
+  --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
+  examples/slug_bench.nelua -o ~/.cache/nelua/slug_bench
+
+# ★ Phase 4.2.2 D-4.1-C: Storage Buffer 基础设施静态分析测试
+run_test "smoke_phase4_2_2_bench (Phase 4.2.2 D-4.1-C — Storage Buffer infrastructure audit)" \
+  nelua-lua tests/smoke_phase4_2_2_bench.lua
 
 # ---- 总结 ----
 echo ""
