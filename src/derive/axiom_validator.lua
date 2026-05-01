@@ -369,24 +369,74 @@ local function collect_boolean_fields(prim_meta, resolved_deps)
 end
 
 -- ★ Layer 0 辅助：笛卡尔展开 — 生成 2^n 个 boolean 组合
+-- Phase 3.7+: 当 n > MAX_BOOLEAN_BITS 时退化为随机采样，避免编译时指数爆炸
+local MAX_BOOLEAN_COMBOS = 256  -- 2^8，超过此数量使用采样
+
 local function cartesian_booleans(booleans)
-  local combos = { {} }  -- 初始：一个空组合
+  local n = #booleans
 
-  for _, bool_field in ipairs(booleans) do
-    local new_combos = {}
-    for _, combo in ipairs(combos) do
-      local combo_true = {}
-      for k, v in pairs(combo) do combo_true[k] = v end
-      combo_true[bool_field.path] = true
+  -- 完全展开路径：2^n <= MAX_BOOLEAN_COMBOS
+  if n <= 8 then
+    local combos = { {} }
+    for _, bool_field in ipairs(booleans) do
+      local new_combos = {}
+      for _, combo in ipairs(combos) do
+        local combo_true = {}
+        for k, v in pairs(combo) do combo_true[k] = v end
+        combo_true[bool_field.path] = true
 
-      local combo_false = {}
-      for k, v in pairs(combo) do combo_false[k] = v end
-      combo_false[bool_field.path] = false
+        local combo_false = {}
+        for k, v in pairs(combo) do combo_false[k] = v end
+        combo_false[bool_field.path] = false
 
-      table.insert(new_combos, combo_true)
-      table.insert(new_combos, combo_false)
+        table.insert(new_combos, combo_true)
+        table.insert(new_combos, combo_false)
+      end
+      combos = new_combos
     end
-    combos = new_combos
+    return combos
+  end
+
+  -- 采样路径：n > 8，随机采样 MAX_BOOLEAN_COMBOS 个组合
+  -- 始终包含全 true 和全 false 作为边界用例
+  io.stderr:write(("[axiom_validator] WARNING: %d boolean fields → 2^%d combos; "
+    .. "sampling %d instead of full expansion\n"):format(n, n, MAX_BOOLEAN_COMBOS))
+
+  local seen = {}
+  local combos = {}
+
+  -- 辅助：从位掩码生成组合
+  local function combo_from_bits(bits)
+    local combo = {}
+    for i, bool_field in ipairs(booleans) do
+      combo[bool_field.path] = (math.floor(bits / (2 ^ (i - 1))) % 2) == 1
+    end
+    return combo
+  end
+
+  -- 辅助：组合去重键
+  local function combo_key(bits) return tostring(bits) end
+
+  -- 边界用例：全 false (0) 和全 true (2^n - 1)
+  local all_false = 0
+  local all_true = (2 ^ n) - 1
+  table.insert(combos, combo_from_bits(all_false))
+  seen[combo_key(all_false)] = true
+  table.insert(combos, combo_from_bits(all_true))
+  seen[combo_key(all_true)] = true
+
+  -- 随机填充剩余
+  math.randomseed(42)  -- 固定种子保证确定性
+  while #combos < MAX_BOOLEAN_COMBOS do
+    local bits = 0
+    for i = 1, n do
+      if math.random() > 0.5 then bits = bits + 2 ^ (i - 1) end
+    end
+    local key = combo_key(bits)
+    if not seen[key] then
+      seen[key] = true
+      table.insert(combos, combo_from_bits(bits))
+    end
   end
 
   return combos
