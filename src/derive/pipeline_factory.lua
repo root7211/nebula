@@ -824,6 +824,18 @@ function nebula_gen_pipeline_source(spec)
   assert(spec.base,            "nebula_gen_pipeline_source: spec.base required")
   assert(spec.uniforms_record, "nebula_gen_pipeline_source: spec.uniforms_record required")
 
+  -- Phase 3.7+: 互斥标志校验——四条路径最多只能激活一条
+  local _path_flags = { "has_shadow", "standard_instanced", "textured", "slug_text" }
+  local _active = {}
+  for _, flag in ipairs(_path_flags) do
+    if spec[flag] then _active[#_active + 1] = flag end
+  end
+  if #_active > 1 then
+    error("nebula_gen_pipeline_source: conflicting pipeline paths for '" ..
+          tostring(spec.base) .. "': " .. table.concat(_active, ", ") ..
+          " are mutually exclusive — set exactly one.")
+  end
+
   if spec.has_shadow then
     -- 阴影多 Pass 路径：需要四个子着色器源码
     assert(spec.shadow_mask_source, "nebula_gen_pipeline_source: shadow_mask_source required when has_shadow")
