@@ -1,8 +1,9 @@
-# Nebula 架构总纲领 v3.4
+# Nebula 架构总纲领 v3.5
 
-**修订日期**：2026-04-30（v3.4 修订）  
+**修订日期**：2026-05-01（v3.5 修订）  
 **修订历史**：  
-- **v3.4 (2026-04-30)**：深度审计。Phase 4.3/4.4 标记为"S1-S3 核心已完成，存在结构性缺口"：沙箱隔离未实现、契约校验未接入编译流程、高级原语未内置。Phase 4.2.2 D-4.1-C benchmark 已通过（2026-05-01 补执行）。
+- **v3.5 (2026-05-01)**：全面同步。Phase 4.2.2 标记完成（D-4.1-A/B/C 全通过）。Phase 4.2.3 描述更新为 v3 分级查表方案（废弃 HarfBuzz/DFA）。记录代码质量改进：renderer 管线重构（-196 行）、pipeline_factory 互斥校验、axiom_validator 笛卡尔上限、interaction_factory 函数拆分。Era II 路线图与 `PLAN_ERA2_MASTER.md` 四梯队对齐。
+- **v3.4 (2026-04-30)**：深度审计。Phase 4.3/4.4 标记为"S1-S3 核心已完成，存在结构性缺口"。
 - **v3.3 (2026-04-30)**：同步 Era II 路线图至实际完成状态。Phase 4.3（可编程原语注册表 S1-S3）和 Phase 4.4（高级组件库 S1-S3）已全部合入主线。清理过时规划文档。  
 - **v3.2 (2026-04-28)**：重置项目愿景。废弃 Era III "计算统一"的极客路线，转向构建工业级 GUI 框架。目标是对标 Qt、ImGui 和 SwiftUI，提供兼具高性能渲染、极高开发效率和声明式编程体验的"GUI 编译器"。
 
@@ -91,20 +92,33 @@ Nebula 的目标不是做一个小众的研究项目，而是成为一个能与�
 | :--- | :--- | :--- | :--- | :--- |
 | **4.2.1** | 跨平台 PAL 骨架 | 源码级支持 Linux/Windows/Web，实现多端对齐。 | **已完成** | 83/100 |
 | **4.2.2** | Slug 渲染内核生产级化 | 清算 MVP 债务，支持任意仿射变换与 Latin 全量字符。 | **已完成**（D-4.1-A/B/C 全部通过） | 79/100 |
-| **4.3** | **可编程原语注册表** | 允许开发者安全注入自定义交互逻辑，框架从工具库升维为开放元系统。 | **S1+S2+S3 核心已完成**；沙箱隔离未实现，契约校验未接入编译流程 | **90/100** |
-| **4.4** | **高级组件库** | 实现 scrollable、dropdown、multiline_editable 标准组件。 | **S1+S2+S3 核心已完成**；三个高级原语未内置到框架注册表 | **81/100** |
-| 4.2.3 | HarfBuzz + CJK 集成 | 7000 常用 CJK 字形 shaping 预处理。 | 规划中 | 82/100 |
-| 4.X | 高密度文本 + 输入补全 | Atlas 文本通道 + Unicode char callback + clipboard | 规划中 | 待评分 |
+| **4.3** | **可编程原语注册表** | 允许开发者安全注入自定义交互逻辑，框架从工具库升维为开放元系统。 | **S1-S3 核心已完成**；沙箱隔离、契约校验编译接入待补 | **90/100** |
+| **4.4** | **高级组件库** | 实现 scrollable、dropdown、multiline_editable 标准组件。 | **S1-S3 核心已完成**；三个高级原语待内置注册表 | **81/100** |
+| **4.2.3** | **分级文本 Shaping + CJK** | 分级查表架构（Tier 1 cmap+metrics+kern / Tier 2 连字 / Tier 3 留 Phase 5+）；零运行时 HarfBuzz 依赖。详见 `PLAN_PHASE4_2_3_CJK.md` v3。 | **架构定稿，待实施**（S0 部分已完成） | 82/100 |
+| 4.X | 高密度文本渲染通道 | 8192 字符 per-char 颜色等宽文本网格（终端/代码编辑器基础）。 | 规划中 | 待评分 |
 | 4.5 | 注册原语语法糖 | 基于 4.4 真实用例提炼重复模式，简化 DX | 规划中 | 待评分 |
-| 4.6 | Indirect Drawing | GPU 端实例剔除与间接绘制 | 规划中 | 78/100 |
-| 4.7 | 文本编辑器原型 | 验证 Era II 工业级能力 | 规划中 | 待评分 |
+| 4.6 | Indirect Drawing | GPU 端实例剔除与间接绘制（当前不做，instanced draw 性能足够） | 规划中 | 78/100 |
+| 4.7 | 文本编辑器原型 | 验证 Era II 工业级能力（50 行愿景中间里程碑） | 规划中 | 待评分 |
 | 5.0 | 生态与 CI/CD | 完善文档、包管理支持与多端自动化测试。 | 规划中 | 待评分 |
 
 > 重要度评分基于五个维度（架构奠基性、公理合规性、开发者体验、工业化就绪度、下游解锁度）加权综合评分，详见 [`docs/PHASE_IMPORTANCE_SCORECARD.md`](PHASE_IMPORTANCE_SCORECARD.md)。
 
 ---
 
-## 4. 愿景：50 行终态（文本编辑器）
+## 4. 代码质量改进记录（2026-05-01）
+
+| 提交 | 文件 | 改进 |
+|:-----|:-----|:-----|
+| `1046e33` | `src/renderer.nelua` | 提取 `_nebula_build_render_pipeline` + `_nebula_make_textured_bgl_entries` 共享辅助函数，消除三处管线初始化的 ~400 行重复代码，净减 196 行 |
+| `dc300b8` | `src/derive/pipeline_factory.lua` | `nebula_gen_pipeline_source` 入口添加四条管线路径（`has_shadow`/`standard_instanced`/`textured`/`slug_text`）互斥校验，防止无效标志组合静默生成垃圾代码 |
+| `a854546` | `src/derive/axiom_validator.lua` | `cartesian_booleans` 添加 `MAX_BOOLEAN_COMBOS = 256` 上限，超限退化为确定性随机采样（固定种子 42），防止编译期 2^n 指数爆炸 |
+| `5f034b7` | `src/derive/interaction_factory.lua` | 269 行 `nebula_gen_text_buffer` 拆分为 `_gen_cursor_helpers` / `_gen_process_text_input` / `_gen_selection_helpers` / `_gen_text_accessors` 四个职责单一的子生成器 |
+
+所有改进零行为变更，43/43 回归测试全绿。
+
+---
+
+## 5. 愿景：50 行终态（文本编辑器）
 
 当 Era II 的路线图全部完成后，一个功能完备的小型文本编辑器将是这样的：
 
