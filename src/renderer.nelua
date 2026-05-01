@@ -290,6 +290,206 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
 end
 
 -- =============================================================================
+-- ★ BUG-3 修复：nebula_create_uniform_buffer
+--
+-- 创建一个 Uniform Buffer。Slug 管线的 init 方法需要此函数。
+-- 前置声明，供后续 pipeline_base_init / textured_init / textured_vertex_init 调用。
+-- =============================================================================
+global function nebula_create_uniform_buffer(
+  out_buf:  *WGPUBuffer,
+  renderer: *NebulaRenderer,
+  size:     csize,
+  label:    cstring
+): boolean
+  local buf_desc = WGPUBufferDescriptor{
+    nextInChain      = nilptr,
+    label            = wgpu_str(label),
+    usage            = (@uint32)(WGPUBufferUsage_Uniform) | (@uint32)(WGPUBufferUsage_CopyDst),
+    size             = (@uint64)(size),
+    mappedAtCreation = false,
+  }
+  $out_buf = wgpuDeviceCreateBuffer(renderer.device, &buf_desc)
+  if $out_buf == nilptr then
+    printf("wgpu: failed to create uniform buffer (%s)\n", label)
+    return false
+  end
+  return true
+end
+
+-- =============================================================================
+-- ★ 内部辅助函数：消除管线初始化的重复代码
+--
+-- _nebula_build_render_pipeline:
+--   封装 Shader 编译 + PipelineLayout + BlendState + RenderPipeline 创建。
+--   三个公共 init 函数（base / textured / textured_vertex）共享此逻辑。
+--
+-- _nebula_make_textured_bgl_entries:
+--   填充带纹理管线的 3 个 BindGroupLayout 条目（uniform + texture + sampler）。
+--   textured_init 和 textured_vertex_init 共享此逻辑。
+-- =============================================================================
+
+local function _nebula_build_render_pipeline(
+  out_pipeline:   *WGPURenderPipeline,
+  device:         WGPUDevice,
+  bgl:            *WGPUBindGroupLayout,
+  wgsl_source:    cstring,
+  target_format:  WGPUTextureFormat,
+  vertex_layout:  *WGPUVertexBufferLayout,
+  label:          cstring
+): boolean
+  -- 1. Shader 模块
+  local wgsl_src = WGPUShaderSourceWGSL{
+    chain = WGPUChainedStruct{
+      next  = nilptr,
+      sType = WGPUSType_ShaderSourceWGSL,
+    },
+    code = wgpu_str(wgsl_source),
+  }
+  local shader_desc = WGPUShaderModuleDescriptor{
+    nextInChain = (@*WGPUChainedStruct)(&wgsl_src),
+    label       = wgpu_str(label),
+  }
+  local shader = wgpuDeviceCreateShaderModule(device, &shader_desc)
+  if shader == nilptr then
+    printf("wgpu: failed to create shader module (%s)\n", label)
+    return false
+  end
+
+  -- 2. PipelineLayout
+  local pl_desc = WGPUPipelineLayoutDescriptor{
+    nextInChain          = nilptr,
+    label                = wgpu_str(label),
+    bindGroupLayoutCount = 1,
+    bindGroupLayouts     = bgl,
+  }
+  local pipeline_layout = wgpuDeviceCreatePipelineLayout(device, &pl_desc)
+
+  -- 3. Alpha 混合状态（所有 nebula 管线共用标准 SrcAlpha over 混合）
+  local blend_state = WGPUBlendState{
+    color = WGPUBlendComponent{
+      operation = WGPUBlendOperation_Add,
+      srcFactor = WGPUBlendFactor_SrcAlpha,
+      dstFactor = WGPUBlendFactor_OneMinusSrcAlpha,
+    },
+    alpha = WGPUBlendComponent{
+      operation = WGPUBlendOperation_Add,
+      srcFactor = WGPUBlendFactor_One,
+      dstFactor = WGPUBlendFactor_OneMinusSrcAlpha,
+    },
+  }
+  local color_target = WGPUColorTargetState{
+    nextInChain = nilptr,
+    format      = target_format,
+    blend       = &blend_state,
+    writeMask   = (@uint32)(WGPUColorWriteMask_All),
+  }
+  local frag_state = WGPUFragmentState{
+    nextInChain   = nilptr,
+    module        = shader,
+    entryPoint    = wgpu_str("fs_main"),
+    constantCount = 0,
+    constants     = nilptr,
+    targetCount   = 1,
+    targets       = &color_target,
+  }
+
+  -- 4. 顶点缓冲配置
+  local buf_count: csize = 0
+  local buf_ptr: *WGPUVertexBufferLayout = nilptr
+  if vertex_layout ~= nilptr then
+    buf_count = 1
+    buf_ptr = vertex_layout
+  end
+
+  -- 5. RenderPipeline
+  local rp_desc = WGPURenderPipelineDescriptor{
+    nextInChain = nilptr,
+    label       = wgpu_str(label),
+    layout      = pipeline_layout,
+    vertex      = {
+      nextInChain   = nilptr,
+      module        = shader,
+      entryPoint    = wgpu_str("vs_main"),
+      constantCount = 0,
+      constants     = nilptr,
+      bufferCount   = buf_count,
+      buffers       = buf_ptr,
+    },
+    primitive = {
+      nextInChain       = nilptr,
+      topology          = WGPUPrimitiveTopology_TriangleList,
+      stripIndexFormat  = 0,
+      frontFace         = 0,
+      cullMode          = 0,
+      unclippedDepth    = false,
+    },
+    depthStencil = nilptr,
+    multisample  = {
+      nextInChain             = nilptr,
+      count                   = 1,
+      mask                    = 0xFFFFFFFF,
+      alphaToCoverageEnabled  = false,
+    },
+    fragment = &frag_state,
+  }
+  $out_pipeline = wgpuDeviceCreateRenderPipeline(device, &rp_desc)
+  wgpuShaderModuleRelease(shader)
+  wgpuPipelineLayoutRelease(pipeline_layout)
+  if $out_pipeline == nilptr then
+    printf("wgpu: failed to create render pipeline (%s)\n", label)
+    return false
+  end
+
+  return true
+end
+
+local function _nebula_make_textured_bgl_entries(
+  entries: *[3]WGPUBindGroupLayoutEntry,
+  uniform_size: csize
+): void
+  -- binding 0: uniform buffer
+  entries[0] = WGPUBindGroupLayoutEntry{
+    nextInChain = nilptr,
+    binding     = 0,
+    visibility  = (@uint64)(WGPUShaderStage_Vertex) | (@uint64)(WGPUShaderStage_Fragment),
+    buffer      = {
+      nextInChain      = nilptr,
+      type             = (@uint32)(WGPUBufferBindingType_Uniform),
+      hasDynamicOffset = 0,
+      minBindingSize   = (@uint64)(uniform_size),
+    },
+    sampler        = {nextInChain = nilptr, type = 0},
+    texture        = {nextInChain = nilptr, sampleType = 0, viewDimension = 0, multisampled = 0},
+    storageTexture = {nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0},
+  }
+  -- binding 1: texture
+  entries[1] = WGPUBindGroupLayoutEntry{
+    nextInChain = nilptr,
+    binding     = 1,
+    visibility  = (@uint64)(WGPUShaderStage_Fragment),
+    buffer      = {nextInChain = nilptr, type = 0, hasDynamicOffset = 0, minBindingSize = 0},
+    sampler     = {nextInChain = nilptr, type = 0},
+    texture     = {
+      nextInChain    = nilptr,
+      sampleType     = (@uint32)(WGPUTextureSampleType_Float),
+      viewDimension  = (@uint32)(WGPUTextureViewDimension_2D),
+      multisampled   = 0,
+    },
+    storageTexture = {nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0},
+  }
+  -- binding 2: sampler
+  entries[2] = WGPUBindGroupLayoutEntry{
+    nextInChain = nilptr,
+    binding     = 2,
+    visibility  = (@uint64)(WGPUShaderStage_Fragment),
+    buffer      = {nextInChain = nilptr, type = 0, hasDynamicOffset = 0, minBindingSize = 0},
+    sampler     = {nextInChain = nilptr, type = (@uint32)(WGPUSamplerBindingType_Filtering)},
+    texture     = {nextInChain = nilptr, sampleType = 0, viewDimension = 0, multisampled = 0},
+    storageTexture = {nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0},
+  }
+end
+
+-- =============================================================================
 -- Phase 2.3.1: nebula_pipeline_base_init
 --
 -- 所有派生的 <T>Pipeline:init 都将委托调用此函数。本函数封装：
@@ -328,20 +528,11 @@ global function nebula_pipeline_base_init(
   local device = renderer.device
 
   -- 1. Uniform Buffer
-  local buf_desc = WGPUBufferDescriptor{
-    nextInChain      = nilptr,
-    label            = wgpu_str(label),
-    usage            = (@uint32)(WGPUBufferUsage_Uniform) | (@uint32)(WGPUBufferUsage_CopyDst),
-    size             = (@uint64)(uniform_size),
-    mappedAtCreation = false,
-  }
-  $out_ubuf = wgpuDeviceCreateBuffer(device, &buf_desc)
-  if $out_ubuf == nilptr then
-    printf("wgpu: failed to create uniform buffer (%s)\n", label)
+  if not nebula_create_uniform_buffer(out_ubuf, renderer, uniform_size, label) then
     return false
   end
 
-  -- 2. BindGroupLayout
+  -- 2. BindGroupLayout（单个 uniform binding）
   local entry = WGPUBindGroupLayoutEntry{
     nextInChain = nilptr,
     binding     = 0,
@@ -391,102 +582,11 @@ global function nebula_pipeline_base_init(
     return false
   end
 
-  -- 4. Shader 模块
-  local wgsl_src = WGPUShaderSourceWGSL{
-    chain = WGPUChainedStruct{
-      next  = nilptr,
-      sType = WGPUSType_ShaderSourceWGSL,
-    },
-    code = wgpu_str(wgsl_source),
-  }
-  local shader_desc = WGPUShaderModuleDescriptor{
-    nextInChain = (@*WGPUChainedStruct)(&wgsl_src),
-    label       = wgpu_str(label),
-  }
-  local shader = wgpuDeviceCreateShaderModule(device, &shader_desc)
-  if shader == nilptr then
-    printf("wgpu: failed to create shader module (%s)\n", label)
-    return false
-  end
-
-  -- 5. PipelineLayout
-  local pl_desc = WGPUPipelineLayoutDescriptor{
-    nextInChain          = nilptr,
-    label                = wgpu_str(label),
-    bindGroupLayoutCount = 1,
-    bindGroupLayouts     = out_bgl,
-  }
-  local pipeline_layout = wgpuDeviceCreatePipelineLayout(device, &pl_desc)
-
-  -- 6. Alpha 混合状态（所有 nebula 管线共用标准 SrcAlpha over 混合）
-  local blend_state = WGPUBlendState{
-    color = WGPUBlendComponent{
-      operation = WGPUBlendOperation_Add,
-      srcFactor = WGPUBlendFactor_SrcAlpha,
-      dstFactor = WGPUBlendFactor_OneMinusSrcAlpha,
-    },
-    alpha = WGPUBlendComponent{
-      operation = WGPUBlendOperation_Add,
-      srcFactor = WGPUBlendFactor_One,
-      dstFactor = WGPUBlendFactor_OneMinusSrcAlpha,
-    },
-  }
-  local color_target = WGPUColorTargetState{
-    nextInChain = nilptr,
-    format      = renderer.format,
-    blend       = &blend_state,
-    writeMask   = (@uint32)(WGPUColorWriteMask_All),
-  }
-  local frag_state = WGPUFragmentState{
-    nextInChain   = nilptr,
-    module        = shader,
-    entryPoint    = wgpu_str("fs_main"),
-    constantCount = 0,
-    constants     = nilptr,
-    targetCount   = 1,
-    targets       = &color_target,
-  }
-
-  -- 7. RenderPipeline
-  local rp_desc = WGPURenderPipelineDescriptor{
-    nextInChain = nilptr,
-    label       = wgpu_str(label),
-    layout      = pipeline_layout,
-    vertex      = {
-      nextInChain   = nilptr,
-      module        = shader,
-      entryPoint    = wgpu_str("vs_main"),
-      constantCount = 0,
-      constants     = nilptr,
-      bufferCount   = 0,
-      buffers       = nilptr,
-    },
-    primitive = {
-      nextInChain       = nilptr,
-      topology          = WGPUPrimitiveTopology_TriangleList,
-      stripIndexFormat  = 0,
-      frontFace         = 0,
-      cullMode          = 0,
-      unclippedDepth    = false,
-    },
-    depthStencil = nilptr,
-    multisample  = {
-      nextInChain             = nilptr,
-      count                   = 1,
-      mask                    = 0xFFFFFFFF,
-      alphaToCoverageEnabled  = false,
-    },
-    fragment = &frag_state,
-  }
-  $out_pipeline = wgpuDeviceCreateRenderPipeline(device, &rp_desc)
-  wgpuShaderModuleRelease(shader)
-  wgpuPipelineLayoutRelease(pipeline_layout)
-  if $out_pipeline == nilptr then
-    printf("wgpu: failed to create render pipeline (%s)\n", label)
-    return false
-  end
-
-  return true
+  -- 4. Shader + Pipeline（委托公共辅助函数）
+  return _nebula_build_render_pipeline(
+    out_pipeline, device, out_bgl, wgsl_source,
+    renderer.format, nilptr, label
+  )
 end
 
 -- =============================================================================
@@ -732,62 +832,14 @@ global function nebula_pipeline_textured_init(
 ): boolean
   local device = renderer.device
 
-  -- 1. Uniform Buffer（用于传递模糊方向、半径等参数）
-  local buf_desc = WGPUBufferDescriptor{
-    nextInChain      = nilptr,
-    label            = wgpu_str(label),
-    usage            = (@uint32)(WGPUBufferUsage_Uniform) | (@uint32)(WGPUBufferUsage_CopyDst),
-    size             = (@uint64)(uniform_size),
-    mappedAtCreation = false,
-  }
-  $out_ubuf = wgpuDeviceCreateBuffer(device, &buf_desc)
-  if $out_ubuf == nilptr then
-    printf("wgpu: failed to create blur uniform buffer (%s)\n", label)
+  -- 1. Uniform Buffer
+  if not nebula_create_uniform_buffer(out_ubuf, renderer, uniform_size, label) then
     return false
   end
 
   -- 2. BindGroupLayout（3 entries: uniform + texture + sampler）
   local entries: [3]WGPUBindGroupLayoutEntry
-  -- binding 0: uniform buffer
-  entries[0] = WGPUBindGroupLayoutEntry{
-    nextInChain = nilptr,
-    binding     = 0,
-    visibility  = (@uint64)(WGPUShaderStage_Vertex) | (@uint64)(WGPUShaderStage_Fragment),
-    buffer      = {
-      nextInChain      = nilptr,
-      type             = (@uint32)(WGPUBufferBindingType_Uniform),
-      hasDynamicOffset = 0,
-      minBindingSize   = (@uint64)(uniform_size),
-    },
-    sampler        = {nextInChain = nilptr, type = 0},
-    texture        = {nextInChain = nilptr, sampleType = 0, viewDimension = 0, multisampled = 0},
-    storageTexture = {nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0},
-  }
-  -- binding 1: texture
-  entries[1] = WGPUBindGroupLayoutEntry{
-    nextInChain = nilptr,
-    binding     = 1,
-    visibility  = (@uint64)(WGPUShaderStage_Fragment),
-    buffer      = {nextInChain = nilptr, type = 0, hasDynamicOffset = 0, minBindingSize = 0},
-    sampler     = {nextInChain = nilptr, type = 0},
-    texture     = {
-      nextInChain    = nilptr,
-      sampleType     = (@uint32)(WGPUTextureSampleType_Float),
-      viewDimension  = (@uint32)(WGPUTextureViewDimension_2D),
-      multisampled   = 0,
-    },
-    storageTexture = {nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0},
-  }
-  -- binding 2: sampler
-  entries[2] = WGPUBindGroupLayoutEntry{
-    nextInChain = nilptr,
-    binding     = 2,
-    visibility  = (@uint64)(WGPUShaderStage_Fragment),
-    buffer      = {nextInChain = nilptr, type = 0, hasDynamicOffset = 0, minBindingSize = 0},
-    sampler     = {nextInChain = nilptr, type = (@uint32)(WGPUSamplerBindingType_Filtering)},
-    texture     = {nextInChain = nilptr, sampleType = 0, viewDimension = 0, multisampled = 0},
-    storageTexture = {nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0},
-  }
+  _nebula_make_textured_bgl_entries(&entries, uniform_size)
 
   local bgl_desc = WGPUBindGroupLayoutDescriptor{
     nextInChain = nilptr,
@@ -801,102 +853,11 @@ global function nebula_pipeline_textured_init(
     return false
   end
 
-  -- 3. Shader 模块
-  local wgsl_src = WGPUShaderSourceWGSL{
-    chain = WGPUChainedStruct{
-      next  = nilptr,
-      sType = WGPUSType_ShaderSourceWGSL,
-    },
-    code = wgpu_str(wgsl_source),
-  }
-  local shader_desc = WGPUShaderModuleDescriptor{
-    nextInChain = (@*WGPUChainedStruct)(&wgsl_src),
-    label       = wgpu_str(label),
-  }
-  local shader = wgpuDeviceCreateShaderModule(device, &shader_desc)
-  if shader == nilptr then
-    printf("wgpu: failed to create shader module (%s)\n", label)
-    return false
-  end
-
-  -- 4. PipelineLayout
-  local pl_desc = WGPUPipelineLayoutDescriptor{
-    nextInChain          = nilptr,
-    label                = wgpu_str(label),
-    bindGroupLayoutCount = 1,
-    bindGroupLayouts     = out_bgl,
-  }
-  local pipeline_layout = wgpuDeviceCreatePipelineLayout(device, &pl_desc)
-
-  -- 5. Alpha 混合状态（与 base_init 一致：标准 SrcAlpha over）
-  local blend_state = WGPUBlendState{
-    color = WGPUBlendComponent{
-      operation = WGPUBlendOperation_Add,
-      srcFactor = WGPUBlendFactor_SrcAlpha,
-      dstFactor = WGPUBlendFactor_OneMinusSrcAlpha,
-    },
-    alpha = WGPUBlendComponent{
-      operation = WGPUBlendOperation_Add,
-      srcFactor = WGPUBlendFactor_One,
-      dstFactor = WGPUBlendFactor_OneMinusSrcAlpha,
-    },
-  }
-  local color_target = WGPUColorTargetState{
-    nextInChain = nilptr,
-    format      = target_format,
-    blend       = &blend_state,
-    writeMask   = (@uint32)(WGPUColorWriteMask_All),
-  }
-  local frag_state = WGPUFragmentState{
-    nextInChain   = nilptr,
-    module        = shader,
-    entryPoint    = wgpu_str("fs_main"),
-    constantCount = 0,
-    constants     = nilptr,
-    targetCount   = 1,
-    targets       = &color_target,
-  }
-
-  -- 6. RenderPipeline
-  local rp_desc = WGPURenderPipelineDescriptor{
-    nextInChain = nilptr,
-    label       = wgpu_str(label),
-    layout      = pipeline_layout,
-    vertex      = {
-      nextInChain   = nilptr,
-      module        = shader,
-      entryPoint    = wgpu_str("vs_main"),
-      constantCount = 0,
-      constants     = nilptr,
-      bufferCount   = 0,
-      buffers       = nilptr,
-    },
-    primitive = {
-      nextInChain       = nilptr,
-      topology          = WGPUPrimitiveTopology_TriangleList,
-      stripIndexFormat  = 0,
-      frontFace         = 0,
-      cullMode          = 0,
-      unclippedDepth    = false,
-    },
-    depthStencil = nilptr,
-    multisample  = {
-      nextInChain             = nilptr,
-      count                   = 1,
-      mask                    = 0xFFFFFFFF,
-      alphaToCoverageEnabled  = false,
-    },
-    fragment = &frag_state,
-  }
-  $out_pipeline = wgpuDeviceCreateRenderPipeline(device, &rp_desc)
-  wgpuShaderModuleRelease(shader)
-  wgpuPipelineLayoutRelease(pipeline_layout)
-  if $out_pipeline == nilptr then
-    printf("wgpu: failed to create textured render pipeline (%s)\n", label)
-    return false
-  end
-
-  return true
+  -- 3. Shader + Pipeline（委托公共辅助函数）
+  return _nebula_build_render_pipeline(
+    out_pipeline, device, out_bgl, wgsl_source,
+    target_format, nilptr, label
+  )
 end
 
 -- =============================================================================
@@ -921,57 +882,14 @@ global function nebula_pipeline_textured_vertex_init(
 ): boolean
   local device = renderer.device
 
-  local buf_desc = WGPUBufferDescriptor{
-    nextInChain      = nilptr,
-    label            = wgpu_str(label),
-    usage            = (@uint32)(WGPUBufferUsage_Uniform) | (@uint32)(WGPUBufferUsage_CopyDst),
-    size             = (@uint64)(uniform_size),
-    mappedAtCreation = false,
-  }
-  $out_ubuf = wgpuDeviceCreateBuffer(device, &buf_desc)
-  if $out_ubuf == nilptr then
-    printf("wgpu: failed to create textured vertex uniform buffer (%s)\n", label)
+  -- 1. Uniform Buffer
+  if not nebula_create_uniform_buffer(out_ubuf, renderer, uniform_size, label) then
     return false
   end
 
+  -- 2. BindGroupLayout（3 entries: uniform + texture + sampler）
   local entries: [3]WGPUBindGroupLayoutEntry
-  entries[0] = WGPUBindGroupLayoutEntry{
-    nextInChain = nilptr,
-    binding     = 0,
-    visibility  = (@uint64)(WGPUShaderStage_Vertex) | (@uint64)(WGPUShaderStage_Fragment),
-    buffer      = {
-      nextInChain      = nilptr,
-      type             = (@uint32)(WGPUBufferBindingType_Uniform),
-      hasDynamicOffset = 0,
-      minBindingSize   = (@uint64)(uniform_size),
-    },
-    sampler        = {nextInChain = nilptr, type = 0},
-    texture        = {nextInChain = nilptr, sampleType = 0, viewDimension = 0, multisampled = 0},
-    storageTexture = {nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0},
-  }
-  entries[1] = WGPUBindGroupLayoutEntry{
-    nextInChain = nilptr,
-    binding     = 1,
-    visibility  = (@uint64)(WGPUShaderStage_Fragment),
-    buffer      = {nextInChain = nilptr, type = 0, hasDynamicOffset = 0, minBindingSize = 0},
-    sampler     = {nextInChain = nilptr, type = 0},
-    texture     = {
-      nextInChain   = nilptr,
-      sampleType    = (@uint32)(WGPUTextureSampleType_Float),
-      viewDimension = (@uint32)(WGPUTextureViewDimension_2D),
-      multisampled  = 0,
-    },
-    storageTexture = {nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0},
-  }
-  entries[2] = WGPUBindGroupLayoutEntry{
-    nextInChain = nilptr,
-    binding     = 2,
-    visibility  = (@uint64)(WGPUShaderStage_Fragment),
-    buffer      = {nextInChain = nilptr, type = 0, hasDynamicOffset = 0, minBindingSize = 0},
-    sampler     = {nextInChain = nilptr, type = (@uint32)(WGPUSamplerBindingType_Filtering)},
-    texture     = {nextInChain = nilptr, sampleType = 0, viewDimension = 0, multisampled = 0},
-    storageTexture = {nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0},
-  }
+  _nebula_make_textured_bgl_entries(&entries, uniform_size)
 
   local bgl_desc = WGPUBindGroupLayoutDescriptor{
     nextInChain = nilptr,
@@ -985,98 +903,11 @@ global function nebula_pipeline_textured_vertex_init(
     return false
   end
 
-  local wgsl_src = WGPUShaderSourceWGSL{
-    chain = WGPUChainedStruct{
-      next  = nilptr,
-      sType = WGPUSType_ShaderSourceWGSL,
-    },
-    code = wgpu_str(wgsl_source),
-  }
-  local shader_desc = WGPUShaderModuleDescriptor{
-    nextInChain = (@*WGPUChainedStruct)(&wgsl_src),
-    label       = wgpu_str(label),
-  }
-  local shader = wgpuDeviceCreateShaderModule(device, &shader_desc)
-  if shader == nilptr then
-    printf("wgpu: failed to create textured vertex shader module (%s)\n", label)
-    return false
-  end
-
-  local pl_desc = WGPUPipelineLayoutDescriptor{
-    nextInChain          = nilptr,
-    label                = wgpu_str(label),
-    bindGroupLayoutCount = 1,
-    bindGroupLayouts     = out_bgl,
-  }
-  local pipeline_layout = wgpuDeviceCreatePipelineLayout(device, &pl_desc)
-
-  local blend_state = WGPUBlendState{
-    color = WGPUBlendComponent{
-      operation = WGPUBlendOperation_Add,
-      srcFactor = WGPUBlendFactor_SrcAlpha,
-      dstFactor = WGPUBlendFactor_OneMinusSrcAlpha,
-    },
-    alpha = WGPUBlendComponent{
-      operation = WGPUBlendOperation_Add,
-      srcFactor = WGPUBlendFactor_One,
-      dstFactor = WGPUBlendFactor_OneMinusSrcAlpha,
-    },
-  }
-  local color_target = WGPUColorTargetState{
-    nextInChain = nilptr,
-    format      = target_format,
-    blend       = &blend_state,
-    writeMask   = (@uint32)(WGPUColorWriteMask_All),
-  }
-  local frag_state = WGPUFragmentState{
-    nextInChain   = nilptr,
-    module        = shader,
-    entryPoint    = wgpu_str("fs_main"),
-    constantCount = 0,
-    constants     = nilptr,
-    targetCount   = 1,
-    targets       = &color_target,
-  }
-
-  local rp_desc = WGPURenderPipelineDescriptor{
-    nextInChain = nilptr,
-    label       = wgpu_str(label),
-    layout      = pipeline_layout,
-    vertex      = {
-      nextInChain   = nilptr,
-      module        = shader,
-      entryPoint    = wgpu_str("vs_main"),
-      constantCount = 0,
-      constants     = nilptr,
-      bufferCount   = 1,
-      buffers       = vertex_layout,
-    },
-    primitive = {
-      nextInChain      = nilptr,
-      topology         = WGPUPrimitiveTopology_TriangleList,
-      stripIndexFormat = 0,
-      frontFace        = 0,
-      cullMode         = 0,
-      unclippedDepth   = false,
-    },
-    depthStencil = nilptr,
-    multisample  = {
-      nextInChain            = nilptr,
-      count                  = 1,
-      mask                   = 0xFFFFFFFF,
-      alphaToCoverageEnabled = false,
-    },
-    fragment = &frag_state,
-  }
-  $out_pipeline = wgpuDeviceCreateRenderPipeline(device, &rp_desc)
-  wgpuShaderModuleRelease(shader)
-  wgpuPipelineLayoutRelease(pipeline_layout)
-  if $out_pipeline == nilptr then
-    printf("wgpu: failed to create textured vertex render pipeline (%s)\n", label)
-    return false
-  end
-
-  return true
+  -- 3. Shader + Pipeline（委托公共辅助函数，传入 vertex_layout）
+  return _nebula_build_render_pipeline(
+    out_pipeline, device, out_bgl, wgsl_source,
+    target_format, vertex_layout, label
+  )
 end
 
 -- =============================================================================
@@ -1193,32 +1024,6 @@ global function nebula_create_storage_buffer(
     wgpuQueueWriteBuffer(renderer.queue, $out_buf, 0, data, size)
   end
   printf("wgpu: storage buffer created (%s, %llu bytes)\n", label, (@uint64)(size))
-  return true
-end
-
--- =============================================================================
--- ★ BUG-3 修复：nebula_create_uniform_buffer
---
--- 创建一个 Uniform Buffer。Slug 管线的 init 方法需要此函数。
--- =============================================================================
-global function nebula_create_uniform_buffer(
-  out_buf:  *WGPUBuffer,
-  renderer: *NebulaRenderer,
-  size:     csize,
-  label:    cstring
-): boolean
-  local buf_desc = WGPUBufferDescriptor{
-    nextInChain      = nilptr,
-    label            = wgpu_str(label),
-    usage            = (@uint32)(WGPUBufferUsage_Uniform) | (@uint32)(WGPUBufferUsage_CopyDst),
-    size             = (@uint64)(size),
-    mappedAtCreation = false,
-  }
-  $out_buf = wgpuDeviceCreateBuffer(renderer.device, &buf_desc)
-  if $out_buf == nilptr then
-    printf("wgpu: failed to create uniform buffer (%s)\n", label)
-    return false
-  end
   return true
 end
 
