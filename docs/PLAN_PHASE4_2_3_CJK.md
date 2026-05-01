@@ -1,367 +1,310 @@
-# Phase 4.2.3 实施计划 v2：字体自动机编译 + 动态文本排版
+# Phase 4.2.3 实施计划 v3：分级文本 Shaping + 动态排版
 
-**目标**：在 S0 阶段将字体文件编译为确定性有限自动机（DFA），使 S2 运行时能够对**任意输入文本**（包括用户键入、网络加载、剪贴板粘贴）执行正确的 shaping 和排版，且运行时零 HarfBuzz 依赖、零规则解析，纯状态转移 + 查表。
+**目标**：使 Nebula 能对任意运行时文本（用户输入、网络加载、剪贴板粘贴）执行正确的排版和渲染，且 S2 运行时零 HarfBuzz 依赖，仅需查表操作。
 
-**v2 修订摘要**（2026-05-01）：
-- 废弃 v1 的 `charset = "zh-CN-common"` 子集化方案——该方案无法处理运行时不可预知的输入
-- 引入"字体自动机"架构：S0 编译字体全量 OpenType 规则为静态 DFA + 查找表
-- 新增分级部署模型（内嵌 / 侧载 / notdef）
-- 新增 Unicode UAX#14 换行表预生成，解决动态文本的运行时排版
-- 明确公理合规性的理论基础：字体是封闭有限集
+**v3 修订摘要**（2026-05-01）：
+- 废弃 v1 的 `charset` 子集化方案——无法处理运行时不可预知输入
+- 废弃 v2 的 GSUB DFA 全量编译方案——对 CJK + Latin 场景过度工程化，且 OpenType GSUB Type 5/6（上下文/链式替换）无法可靠地压入简单 DFA
+- v3 采用分级策略：Tier 1（cmap + metrics + kern）覆盖 95% 场景，Tier 2（连字查找表）覆盖 99%，Tier 3（复杂文字）明确标记为 Phase 5+ 范围
+- Shaping 数据与 Slug 渲染数据解耦——shaping 表 < 1 MB 全量内嵌，渲染数据独立管理
 
 > **依赖声明**：硬依赖 Phase 4.2.1（PAL）与 Phase 4.2.2（Slug 生产级化）已完成。
 
 ---
 
-## 1. 架构背景与核心洞察
+## 1. 架构背景
 
-### 1.1 v1 方案的根本缺陷
+### 1.1 v1 的缺陷：子集化无法处理动态输入
 
-v1 要求开发者在 `nebula_annotate` 中显式声明字符集（`charset = "zh-CN-common"`），然后仅对声明的字符集预处理 shaping 规则。这带来了一个无法回避的问题：
+v1 要求开发者声明 `charset = "zh-CN-common"`，仅预处理声明范围内的字符。用户输入声明之外的字符只能显示 tofu。对通用 GUI 框架不可接受。
 
-> **用户输入了声明之外的字符怎么办？**
+### 1.2 v2 的缺陷：DFA 方案过度工程化
 
-网络加载的文本、剪贴板粘贴的内容、IME 输入的生僻字——这些都无法在编译时预知。v1 的回答是"超出范围显示 tofu"，但这对于通用 GUI 框架是不可接受的。
+v2 试图将字体全量 GSUB 规则编译为 Aho-Corasick DFA。审视后发现三个问题：
 
-### 1.2 核心洞察：字体是封闭有限集
+1. **GSUB Type 5/6 不可压入简单 DFA**：上下文替换和链式上下文替换涉及回溯、前瞻和条件分支，本质上是解释器行为，不是正则匹配。Aho-Corasick 只能覆盖 Type 1-4。
 
-关键认识是：**"不可预知"有上界——上界就是字体文件本身。**
+2. **CJK 根本不需要 GSUB**：CJK 文字无连字、无上下文形态变换、极少 kerning。对于 Nebula 最现实的 CJK + Latin 场景，只需要 cmap + metrics + kern 三张表。
 
-一个 `.ttf/.otf` 文件包含：
-- **有限的字形集**：NotoSansCJK ~65K glyphs，不会更多
-- **有限的 GSUB 规则**：连字替换（f+f+i → ﬃ）在字体中穷举定义
-- **有限的 GPOS 规则**：字距调整对（A+V → -30 units）在字体中穷举定义
-- **有限的 Script/Language 标签**：字体声明自己支持哪些书写系统
+3. **180 MB 的体积来自渲染数据而非 shaping 数据**：v2 将 Slug band 数据混入 `.nfp` 文件，导致概念混淆。Shaping 数据（cmap/metrics/kern）实际只有 ~1 MB，应当全量内嵌。渲染数据（Slug bands）是独立问题，由 Phase 4.2.2 管理。
 
-因此：
+### 1.3 核心洞察
 
-```
-shaping(font_rules, char_sequence) → glyph_sequence
-```
+**字体是封闭有限集**——这个洞察仍然成立。但正确的推论不是"把所有规则编译为 DFA"，而是：
 
-其中 `font_rules` 在 S0 **完全已知且有限**。用户输入再不可预知，也不可能超出字体的 glyph 覆盖范围。超出的部分就是 `.notdef`（tofu □），不需要 shaping。
-
-**这意味着我们可以在 S0 将字体的全部 shaping 能力编译为确定性自动机，而无需预知运行时的具体输入。**
-
-### 1.3 与 HarfBuzz 的关系
-
-HarfBuzz 在运行时做的事情本质上是：
-1. 读取字体的 OpenType Layout 表
-2. 构建内部状态机
-3. 对输入文本执行状态转移
-
-Nebula 的策略是将步骤 1-2 推到 S0，S2 只执行步骤 3。HarfBuzz 仍然是 S0 的工具（用于提取和验证规则），但**不是 S2 的运行时依赖**。
+> 对于 CJK + Latin（Nebula 的目标场景），字体的 shaping 规则简单到只需要三张预计算查找表。不需要状态机。
 
 ---
 
-## 2. 实施路径
+## 2. 分级 Shaping 架构
 
-### 2.1 S0 阶段：字体自动机编译
+### Tier 1：cmap + metrics + kern（覆盖 95% 场景）
 
-#### 2.1.1 全量规则提取
+绝大多数文本排版只需要三个操作：
+1. 将 codepoint 映射到 glyph_id（cmap）
+2. 获取 glyph 的步进宽度（metrics）
+3. 查询相邻 glyph 的字距调整（kern）
 
-在 S0 阶段，使用 HarfBuzz C API 对字体文件进行完整分析，提取所有 shaping 规则：
+CJK 文字只需前两步（无 kerning）。Latin 文字三步全用。
 
-```
-输入：font.ttf
-输出：
-  ┌─ glyph_metrics[glyph_id]    → {advance_x, advance_y, lsb, bbox}
-  ├─ kern_pairs[(glyph_a, glyph_b)] → {x_offset, y_offset}
-  ├─ gsub_rules[{script, feature, input_seq}] → output_glyph_seq
-  ├─ gpos_rules[{script, feature, glyph_seq}] → position_adjustments
-  ├─ cmap[codepoint] → glyph_id
-  └─ glyph_bands[glyph_id] → Slug band data（复用 Phase 4.2.2）
-```
-
-**关键约束**：不做子集化。提取字体中**所有** glyph 的完整数据。
-
-#### 2.1.2 GSUB 规则编译为 DFA
-
-OpenType GSUB 表定义了有限的替换规则。将这些规则编译为确定性有限自动机：
+#### S0 输出
 
 ```
-S0 处理流程：
-  1. 枚举字体所有 GSUB Lookup（按 script + feature 分组）
-  2. 对每个 Lookup，提取所有 (input_sequence → output_sequence) 映射
-  3. 构建 Aho-Corasick 多模式匹配自动机
-  4. 最小化状态数（Hopcroft 算法）
-  5. 输出为紧凑的状态转移表
+font_shaping.nelua（编译期常量，全量内嵌）:
 
-输出格式：
-  gsub_dfa = {
-    states: [N]DFAState,          -- 状态数组
-    transitions: [N][M]StateID,   -- 转移表（state × input_class → next_state）
-    outputs: [N]?GlyphSubst,      -- 输出表（若该状态为接受态，记录替换结果）
-    input_classes: [65536]ClassID -- codepoint → input_class 映射（压缩输入空间）
+  -- 1. cmap：两级分页表，覆盖全 Unicode
+  -- codepoint → glyph_id, 支持 BMP (U+0000-U+FFFF) + SMP (U+10000-U+10FFFF)
+  NEBULA_CMAP_STAGE1: [4352]uint16     -- 第一级索引（codepoint >> 8）
+  NEBULA_CMAP_STAGE2: [N][256]uint16   -- 第二级（glyph_id, 0 = .notdef）
+  -- 压缩后约 80-130 KB（大量 block 共享相同页面）
+
+  -- 2. metrics：平铺数组，glyph_id 直接索引
+  NEBULA_GLYPH_METRICS: [glyph_count]record{
+    advance_x: int16,   -- 步进宽度（font units）
+    advance_y: int16,   -- 步进高度（竖排用，通常 0）
+    lsb:       int16,   -- 左侧轴承
   }
-```
+  -- 65K glyphs × 6 bytes = ~390 KB
 
-典型的 Latin 字体 GSUB 规则约 200-500 条，生成的 DFA 状态数约 1000-3000。CJK 字体 GSUB 规则极少（CJK 文字基本不做连字），状态数更少。
-
-#### 2.1.3 GPOS/Kerning 编译为哈希表
-
-```
-S0 处理流程：
-  1. 提取所有 kern pair（从 GPOS PairPos 或旧式 kern 表）
-  2. 构建 (glyph_a, glyph_b) → offset 的完美哈希表（MPH）
-  3. 对于 Class-based kerning，展开为 glyph pair 级别
-
-输出格式：
-  kern_table = {
-    hash_seeds: [bucket_count]uint32,   -- 完美哈希种子
-    entries: [pair_count]KernEntry,      -- {glyph_a, glyph_b, x_offset, y_offset}
+  -- 3. kern：完美哈希表
+  NEBULA_KERN_SEEDS:   [bucket_count]uint32
+  NEBULA_KERN_ENTRIES: [pair_count]record{
+    glyph_a:  uint16,
+    glyph_b:  uint16,
+    x_offset: int16,
   }
+  -- Latin 字体 ~8000 pairs × 6 bytes + seeds ≈ 80 KB
+  -- CJK 字体 ~100 pairs ≈ 1 KB
 ```
 
-典型字体的 kern pair 数量：Latin ~3000-8000 对，CJK ~0-100 对。完美哈希查找为严格 O(1)。
+**合计：< 1 MB，全量内嵌到二进制 `.rodata`，零运行时文件依赖。**
 
-#### 2.1.4 Unicode UAX#14 换行属性表
-
-为支持动态文本的运行时折行，预生成 Unicode 换行属性表：
-
-```
-S0 处理流程：
-  1. 解析 Unicode Character Database 的 LineBreak.txt
-  2. 为 0x0000-0x10FFFF 的每个 codepoint 分配 Line_Break 类别（共 43 类）
-  3. 使用两级分页表压缩（大部分 block 共享相同模式）
-  4. 生成 UAX#14 pair table（43×43 矩阵，定义相邻字符间是否允许断行）
-
-输出格式：
-  line_break = {
-    stage1: [2176]uint8,            -- 第一级索引（codepoint >> 8）
-    stage2: [N][256]uint8,          -- 第二级（LineBreak class, 6 bit 够用）
-    pair_table: [43][43]BreakAction -- {PROHIBITED, ALLOWED, MANDATORY}
-  }
-```
-
-压缩后的两级表约 40-80 KB。
-
-#### 2.1.5 输出文件结构
-
-S0 的最终产物是一组 `.nfp`（Nebula Font Package）文件：
-
-```
-my_font.nfp（单文件，内部分段）:
-  ├─ header        (magic + version + section offsets)
-  ├─ cmap          (codepoint → glyph_id, 两级分页表)
-  ├─ metrics       (glyph_id → advance/bearing/bbox)
-  ├─ gsub_dfa      (状态转移表 + 输出表)
-  ├─ kern_mph      (完美哈希 kerning 表)
-  ├─ line_break    (UAX#14 两级分页表 + pair table)
-  └─ slug_bands    (glyph_id → Slug 渲染数据，按 Unicode block 分段)
-```
-
-### 2.2 S1 阶段：分级部署策略
-
-编译期根据开发者声明决定数据的部署方式：
+#### S2 运行时
 
 ```nelua
-##[[
-  nebula_annotate("MyVisual", {
-    -- 分级部署声明
-    font = "NotoSansCJK-Regular.ttf",
-    font_deploy = {
-      embedded = {"latin", "cjk_common_3500"},  -- 内嵌到二进制 .rodata
-      sidecar  = "full",                         -- 全量 .nfp 侧载文件
-      fallback = "notdef"                        -- 超出字体覆盖：□
-    }
-  })
-]]
-```
+-- 对任意运行时文本执行排版
+local function nebula_shape_text(text: *[0]uint32, len: int32, out: *[0]ShapedGlyph)
+  local prev_glyph: uint16 = 0
+  for i = 0, len - 1 do
+    local cp = text[i]
+    -- Step 1: cmap 查表 — O(1)
+    local page = NEBULA_CMAP_STAGE1[cp >> 8]
+    local glyph_id = NEBULA_CMAP_STAGE2[page][cp & 0xFF]
 
-| 部署层级 | 数据来源 | 首次访问延迟 | 后续延迟 | 适用场景 |
-|:---------|:---------|:-------------|:---------|:---------|
-| **embedded** | 二进制 `.rodata` 段 | 0 | 0 | UI 标签、按钮文字等确定内容 |
-| **sidecar** | mmap `.nfp` 文件 | ~1ms (page fault) | 0 | 用户输入、网络文本、文件内容 |
-| **notdef** | 硬编码 □ glyph | 0 | 0 | 字体不覆盖的 codepoint |
+    -- Step 2: metrics 查表 — O(1)
+    local advance = NEBULA_GLYPH_METRICS[glyph_id].advance_x
 
-S1 代码生成器的职责：
-1. 将 `embedded` 声明的 Unicode block 对应的数据直接内联为 Nelua 编译期常量
-2. 生成 sidecar 加载器代码（mmap + page table 索引）
-3. 生成 fallback 路径代码（直接返回 `.notdef` glyph 数据）
-
-### 2.3 S2 阶段：纯查表运行时
-
-运行时的文本处理退化为三个线性扫描：
-
-#### 2.3.1 Shaping（GSUB 替换）
-
-```
--- 伪代码：对输入文本执行 GSUB DFA
-state = DFA_START
-for i = 0, text.len - 1 do
-  local cls = gsub_dfa.input_classes[text[i]]  -- O(1) codepoint → class
-  state = gsub_dfa.transitions[state][cls]      -- O(1) 状态转移
-  if gsub_dfa.outputs[state] then
-    apply_substitution(gsub_dfa.outputs[state])  -- 替换 glyph
-  end
-end
-```
-
-**复杂度**：O(N)，每字符两次数组索引。无分支预测失败（转移表是连续内存）。
-
-#### 2.3.2 Positioning（GPOS/Kerning）
-
-```
--- 伪代码：查 kerning
-for i = 1, glyphs.len - 1 do
-  local offset = kern_mph.lookup(glyphs[i-1], glyphs[i])  -- O(1) 完美哈希
-  positions[i].x += offset.x
-  positions[i].y += offset.y
-end
-```
-
-**复杂度**：O(N)，每字符一次哈希查找。
-
-#### 2.3.3 Line Breaking（换行）
-
-```
--- 伪代码：贪心换行
-line_x = 0
-for i = 0, glyphs.len - 1 do
-  local w = metrics[glyphs[i]].advance_x       -- O(1)
-  if line_x + w > container_width then
-    local cls_prev = line_break.lookup(text[i-1]) -- O(1) 两级分页
-    local cls_curr = line_break.lookup(text[i])   -- O(1)
-    local action = line_break.pair_table[cls_prev][cls_curr] -- O(1)
-    if action == ALLOWED or action == MANDATORY then
-      emit_line_break()
-      line_x = 0
+    -- Step 3: kern 查表 — O(1)
+    local kern_offset: int16 = 0
+    if prev_glyph ~= 0 then
+      kern_offset = nebula_kern_lookup(prev_glyph, glyph_id)
     end
+
+    out[i] = { glyph_id = glyph_id, advance = advance, kern = kern_offset }
+    prev_glyph = glyph_id
   end
-  line_x += w
 end
 ```
 
-**复杂度**：O(N)，每字符最多三次数组索引。
+三次数组索引，无分支，无外部依赖。
 
-#### 2.3.4 运行时禁止清单
+### Tier 2：Latin 连字（覆盖 99% 场景）
 
-`axiom_validator.lua` 新增规则——以下符号在 S2 代码中**禁止出现**：
+Latin 字体的常见连字（fi, fl, ff, ffi, ffl）数量极少（通常 < 50 条），不值得构建 DFA。直接用一个小型硬编码查找表：
 
-```lua
-S2_FORBIDDEN_SYMBOLS = {
-  "hb_shape", "hb_buffer_create", "hb_font_create",  -- HarfBuzz
-  "stbtt_GetCodepointHMetrics", "stbtt_GetGlyphKernAdvance",  -- stb_truetype shaping
-  "FT_Load_Glyph", "FT_Get_Kerning",  -- FreeType
+#### S0 输出
+
+```
+-- S0 从字体 GSUB 表中提取 Ligature Substitution (Type 4) 规则
+-- 通常只有 Latin 连字，CJK 字体通常无此规则
+NEBULA_LIGATURES: [lig_count]record{
+  input:  [4]uint16,    -- 输入 glyph 序列（最长 4，末尾 0 填充）
+  output: uint16,       -- 输出 glyph_id
+  length: uint8,        -- 输入序列长度
 }
+NEBULA_LIGATURE_COUNT: uint16
 ```
 
-允许的 S2 操作：数组索引、哈希查找、mmap、memcpy。
+#### S2 运行时
+
+```nelua
+-- 连字匹配：在 shaped glyph 序列上做一趟扫描
+-- 对于 < 50 条规则，线性扫描比任何复杂数据结构都快（cache-friendly）
+local function nebula_apply_ligatures(glyphs: *[0]ShapedGlyph, len: *int32)
+  local i = 0
+  while i < $len do
+    for li = 0, NEBULA_LIGATURE_COUNT - 1 do
+      local lig = &NEBULA_LIGATURES[li]
+      if glyphs[i].glyph_id == lig.input[0] and match_sequence(glyphs, i, $len, lig) then
+        glyphs[i].glyph_id = lig.output
+        remove_glyphs(glyphs, i + 1, lig.length - 1, len)
+        break
+      end
+    end
+    i = i + 1
+  end
+end
+```
+
+50 条规则 × N 字符 = O(50N) ≈ O(N)。无需 DFA 编译、Hopcroft 最小化。
+
+### Tier 3：复杂文字（Phase 5+ 范围）
+
+阿拉伯语（上下文形态）、天城文（元音标记重排）、泰语（复合簇）需要：
+- GSUB Type 5/6 链式上下文替换 → 本质上需要解释器
+- UAX#9 双向算法 → 独立子系统
+- 复合簇分割 → Unicode Grapheme Cluster 边界算法
+
+**这些不在 Phase 4.2.3 范围内。** 理由：
+1. Nebula 当前目标场景（系统 UI、工具软件、开发者工具）的用户群以 CJK + Latin 为主
+2. 复杂文字支持需要的不只是 shaping，还有 bidi 和簇分割，是一个完整的子系统
+3. 在没有真实用户需求驱动的情况下预设计，大概率产出不可用的抽象
+
+当 Tier 3 进入 scope 时，正确的做法可能是引入一个轻量级的 S2 shaping 解释器（类似 HarfBuzz 的子集）——这**不违反公理 A**，因为复杂文字的 shaping 输入（字符上下文）只在 S2 可知。
 
 ---
 
-## 3. 尺寸估算
+## 3. Unicode UAX#14 换行
 
-### 3.1 典型字体的 .nfp 文件大小
+动态文本需要运行时换行。换行判定的输入是两张静态表 + 一个运行时值（容器宽度）。
 
-| 字体 | Glyphs | GSUB 规则 | Kern Pairs | .nfp 估算 |
-|:------|:-------|:----------|:-----------|:----------|
-| Inter (Latin) | ~2,500 | ~300 | ~5,000 | ~8 MB |
-| NotoSansCJK | ~65,000 | ~50 | ~100 | ~180 MB |
-| NotoSans-Regular | ~3,500 | ~400 | ~8,000 | ~12 MB |
+### S0 输出
 
-CJK 字体的体积主要来自 `slug_bands`（每个字形的矢量渲染数据）。如果使用 SDF atlas 替代 Slug，可降至 ~40 MB。
+```
+-- UAX#14 Line Break 属性：两级分页表
+NEBULA_LB_STAGE1: [2176]uint8            -- codepoint >> 8 → page index
+NEBULA_LB_STAGE2: [N][256]uint8          -- → Line_Break class (43 类, 6 bit)
+NEBULA_LB_PAIR_TABLE: [43][43]uint8      -- 相邻类别的断行动作
 
-### 3.2 内嵌与侧载的权衡
+-- 压缩后约 40-60 KB
+```
 
-| 策略 | 二进制体积增量 | 运行时延迟 | 适用场景 |
-|:-----|:---------------|:-----------|:---------|
-| 全量内嵌 | +180 MB | 0 | 嵌入式设备（Flash 足够大） |
-| Latin 内嵌 + CJK 侧载 | +8 MB | 首次 ~1ms | 桌面应用 |
-| 全量侧载 | +0 | 首次 ~1ms | 包体积敏感场景 |
+### S2 运行时
 
----
-
-## 4. 公理合规性论证
-
-### 4.1 公理 A（阶段封闭性）
-
-> 每个操作必须归属于其输入最早全部可知的阶段。
-
-- **字体规则**在 S0 全部可知 → shaping 规则编译（DFA 构建）属于 S0 ✓
-- **用户输入文本**在 S2 才可知 → 对 DFA 执行状态转移属于 S2 ✓
-- **容器宽度**在 S2 才可知 → 换行判定属于 S2 ✓
-
-没有操作被放在错误的阶段。S2 执行的不是"shaping 计算"，而是"对预编译自动机的线性执行"——正如 regex 区分"编译"和"匹配"。
-
-### 4.2 公理 B（生命周期三层）
-
-- DFA 转移表、kern hash 表、line break pair table → **L0（永久）**，程序启动后不变
-- mmap 的 sidecar 页面 → **L1（持久）**，按需加载后持久驻留
-- 排版结果（glyph positions, line breaks） → **L2（帧级）**，每帧可能因窗口 resize 重算
-
-### 4.3 公理 C（形即渲染）
-
-字体自动机不改变 Visual 类型到管线签名的映射关系——它只影响管线的**输入数据**（哪些 glyph、什么位置），不影响管线**结构**。
+```nelua
+local function nebula_line_break(
+  glyphs: *[0]ShapedGlyph, text: *[0]uint32, len: int32,
+  container_width: float32, font_scale: float32
+)
+  local line_x: float32 = 0
+  for i = 0, len - 1 do
+    local w = glyphs[i].advance * font_scale + glyphs[i].kern * font_scale
+    if line_x + w > container_width and i > 0 then
+      local cls_prev = nebula_lb_lookup(text[i - 1])  -- O(1)
+      local cls_curr = nebula_lb_lookup(text[i])       -- O(1)
+      local action = NEBULA_LB_PAIR_TABLE[cls_prev][cls_curr]
+      if action ~= LB_PROHIBITED then
+        emit_line_break(i)
+        line_x = 0
+      end
+    end
+    line_x = line_x + w
+  end
+end
+```
 
 ---
 
-## 5. 实施步骤
+## 4. Shaping 与 Rendering 的解耦
 
-### S1：全量规则提取器（font_compiler）
+v2 的一个错误是将 shaping 数据和 Slug 渲染数据混在同一个 `.nfp` 文件中。v3 明确解耦：
 
-- 扩展 `font_preprocessor.nelua`，调用 HarfBuzz 枚举字体的全部 GSUB/GPOS Lookup
-- 输出中间格式：规则列表 JSON（用于调试和验证）
-- 验证：对比 HarfBuzz 运行时 shaping 结果与提取的规则是否一致
+| 关注点 | 数据 | 大小 | 部署方式 | 负责 Phase |
+|:-------|:-----|:-----|:---------|:-----------|
+| **Shaping** | cmap + metrics + kern + ligatures + UAX#14 | < 1 MB | 全量内嵌 `.rodata` | **4.2.3**（本文档） |
+| **Rendering** | Slug band data / SDF atlas | 10-180 MB | 独立管理（内嵌/侧载/按需） | 4.2.2 |
 
-### S2：DFA 编译器 + MPH 构建器
+这意味着：
+- Phase 4.2.3 的产出是一个 < 1 MB 的编译期常量文件，不需要 mmap、不需要侧载文件
+- Slug 渲染数据的部署策略（内嵌 vs 侧载）是 Phase 4.2.2 的职责，与 shaping 无关
 
-- 实现 GSUB 规则 → Aho-Corasick DFA 的编译
-- 实现 Hopcroft DFA 最小化
-- 实现 kern pairs → 完美哈希表（CHD 算法）
-- 实现 UAX#14 两级分页表生成
-- 输出 `.nfp` 二进制文件
+---
 
-### S3：S2 运行时集成
+## 5. 公理合规性
 
-- 实现 `.nfp` mmap 加载器（`nebula_font_load`）
-- 重构 `text_runtime.nelua`：用 DFA 执行替代 `stbtt_GetCodepointHMetrics`
-- 实现换行算法（贪心 + UAX#14 pair table）
+### 公理 A（阶段封闭性）
+
+| 操作 | 输入最早全部可知的阶段 | 实际执行阶段 | 合规 |
+|:-----|:---------------------|:------------|:-----|
+| 提取 cmap/metrics/kern | S0（字体文件已知） | S0 | ✓ |
+| 提取连字规则 | S0（字体 GSUB 表已知） | S0 | ✓ |
+| 生成 UAX#14 表 | S0（Unicode 标准已知） | S0 | ✓ |
+| cmap 查表 | S2（用户输入的 codepoint 才可知） | S2 | ✓ |
+| kern 查表 | S2（相邻 glyph pair 才可知） | S2 | ✓ |
+| 换行判定 | S2（容器宽度才可知） | S2 | ✓ |
+
+### 公理 B（生命周期三层）
+
+- cmap/metrics/kern/ligatures/UAX#14 表 → **L0（永久）**，编译期常量
+- shaped glyph 序列、行断点列表 → **L2（帧级）**，每帧或内容变化时重算
+
+### 公理 C（形即渲染）
+
+Shaping 不改变 Visual 类型到管线签名的映射。仅影响管线输入数据。
+
+---
+
+## 6. 实施步骤
+
+### S1：全量表提取器
+
+- 使用 HarfBuzz C API 从字体提取完整 cmap、glyph metrics、kern pairs
+- 使用 HarfBuzz 提取 GSUB Type 4（连字）规则列表
+- 解析 Unicode LineBreak.txt 生成 UAX#14 两级分页表
+- 输出：`font_shaping_tables.nelua`（编译期常量）
+- 验证：对 1000 个随机 codepoint，对比提取的 advance 与 HarfBuzz `hb_font_get_glyph_h_advance` 结果
+
+### S2：运行时集成
+
+- 重构 `text_runtime.nelua`：用 cmap + metrics 表替代 `stbtt_GetCodepointHMetrics` 调用
+- 实现 `nebula_kern_lookup`（完美哈希）
+- 实现 `nebula_apply_ligatures`（线性扫描）
+- 实现 `nebula_line_break`（贪心 + UAX#14）
 - `axiom_validator` 新增 S2 禁止符号规则
 
-### S4：验证与基准
+### S3：验证
 
-- 正确性：对 1000 组随机文本，对比 DFA 执行结果与 HarfBuzz 运行时结果
-- 性能：CJK 500 字/屏的 shaping + layout 延迟 ≤ 0.1ms
-- 尺寸：验证 .nfp 文件大小符合预期
-
----
-
-## 6. 验收标准
-
-1. **动态文本正确性**：对任意运行时输入（包括编译时未声明的字符），shaping 结果与 HarfBuzz 运行时一致
-2. **公理合规性**：S2 代码中无 HarfBuzz/stb_truetype/FreeType 的 shaping 函数调用；`axiom_validator` 通过
-3. **性能**：500 字 CJK 文本的 shaping + positioning + line breaking 合计 ≤ 0.1ms/帧
-4. **分级部署**：embedded 路径零延迟；sidecar 路径首次 page fault ≤ 2ms
-5. **三端一致性**：Linux/Windows/Web 上相同输入文本的 glyph 序列和位置完全一致
-6. **尺寸**：NotoSansCJK 的 .nfp 文件 ≤ 200 MB；embedded Latin subset ≤ 10 MB
+- 正确性：Latin + CJK 混合文本的排版结果与 HarfBuzz 运行时一致
+- 性能：500 字文本 shaping + layout ≤ 0.05ms（纯查表，应远快于此）
+- 回归：全量回归测试通过
 
 ---
 
-## 7. 与其他 Phase 的关系
+## 7. 验收标准
+
+1. **排版正确性**：Latin + CJK 混合文本的 glyph 序列、advance、kerning 与 HarfBuzz 运行时结果一致
+2. **连字正确性**：fi/fl/ffi/ffl 等 Latin 连字正确替换
+3. **换行正确性**：中英混排文本在 CJK 字符间、Latin 单词边界正确断行
+4. **公理合规性**：S2 代码无 `hb_*`、`stbtt_*`、`FT_*` shaping 函数；`axiom_validator` 通过
+5. **内嵌体积**：shaping 数据 < 1 MB（不含渲染数据）
+6. **性能**：500 字 shaping + layout ≤ 0.1ms/帧
+7. **动态文本**：运行时输入编译期未见过的字符，正确渲染（前提：字体覆盖该字符）
+
+---
+
+## 8. 与其他 Phase 的关系
 
 | 关系 | 对象 | 说明 |
 |:-----|:-----|:-----|
-| **硬前置** | Phase 4.2.1（PAL） | 三端 mmap 实现差异需 PAL 抽象 |
-| **硬前置** | Phase 4.2.2（Slug 生产级化） | slug_bands 数据生成依赖 4.2.2 的 band 分割算法 |
-| **解锁** | Phase 4.X（高密度文本） | 字体自动机提供 per-char metrics，高密度文本通道需要 |
-| **解锁** | Phase 4.7（文本编辑器） | 换行算法 + 动态 shaping 是编辑器的硬前置 |
-| **不再阻塞** | 用户输入场景 | v1 的 charset 限制被移除 |
+| **硬前置** | Phase 4.2.2（Slug 生产级化） | 渲染数据依赖 4.2.2 |
+| **解耦** | Phase 4.2.2 | Shaping 表独立于渲染数据，两者可并行开发 |
+| **解锁** | Phase 4.X（高密度文本） | 提供 per-char metrics |
+| **解锁** | Phase 4.7（文本编辑器） | 提供换行算法 |
+| **不覆盖** | 复杂文字（Arabic/Devanagari/Thai） | 留待 Phase 5+，需求驱动 |
 
 ---
 
-## 8. 相对于 v1 的变化总结
+## 9. v1 → v2 → v3 演进总结
 
-| 维度 | v1（子集化方案） | v2（字体自动机方案） |
-|:-----|:-----------------|:--------------------|
-| 覆盖范围 | 仅声明的 charset | 字体全量 glyph |
-| 动态文本 | 不支持（tofu） | 完全支持 |
-| S2 依赖 | 无 | 无 |
-| 输出体积 | ≤ 4 MB | 8-200 MB（分级部署） |
-| 开发者负担 | 必须声明 charset | 可选声明 embedded 范围 |
-| 公理合规性 | 合规 | 合规（更强的理论基础） |
-| 核心权衡 | 功能受限换体积小 | 体积大换功能完整 |
+| 维度 | v1（子集化） | v2（DFA 全量编译） | v3（分级查表） |
+|:-----|:------------|:------------------|:--------------|
+| 覆盖范围 | 声明的 charset | 字体全量 | 字体全量（CJK+Latin） |
+| 复杂文字 | 不支持 | 声称支持（实际 Type 5/6 有缺陷） | 明确不支持，留 Phase 5+ |
+| 动态文本 | 不支持 | 支持 | 支持 |
+| S2 依赖 | 无 | 无 | 无 |
+| Shaping 数据体积 | ≤ 4 MB | 8-200 MB（混入渲染数据） | **< 1 MB** |
+| 实现复杂度 | 中 | 极高（DFA 编译器） | **低**（查表 + 哈希） |
+| 工程诚实度 | 回避问题 | 夸大能力 | 承认边界 |
 
 ---
 
@@ -369,6 +312,4 @@ CJK 字体的体积主要来自 `slug_bands`（每个字形的矢量渲染数据
 
 [1] HarfBuzz Contributors. "HarfBuzz text shaping engine". GitHub. https://github.com/harfbuzz/harfbuzz
 [2] Unicode Consortium. "UAX #14: Unicode Line Breaking Algorithm". https://www.unicode.org/reports/tr14/
-[3] Aho, A. & Corasick, M. "Efficient String Matching: An Aid to Bibliographic Search". CACM, 1975.
-[4] Belazzougui, D. et al. "Hash, Displace, and Compress" (CHD perfect hashing). ESA, 2009.
-[5] Hopcroft, J. "An n log n algorithm for minimizing states in a finite automaton". 1971.
+[3] Belazzougui, D. et al. "Hash, Displace, and Compress" (CHD perfect hashing). ESA, 2009.
