@@ -834,19 +834,13 @@ end
 --                                  可覆盖为 "text_origin_x" 等）
 --   pixel_height_field  : string — visual 中像素高度字段名（默认 "pixel_height"）
 -- =============================================================================
-function nebula_gen_text_buffer(spec)
-  assert(spec.base, "nebula_gen_text_buffer: spec.base required")
-  local ctx      = spec.base .. "Context"
-  local cap_val  = spec.max_text_len or 255
-  local lines    = {}
 
-  -- -------------------------------------------------------------------------
-  -- ★ Phase 3.9 修复：生成顺序调整
-  --   Nelua 要求被调方法在调用方之前声明。
-  --   process_text_input 调用了 mouse_to_cursor 和 sync_cursor_to，
-  --   因此先生成这两个方法。
-  -- -------------------------------------------------------------------------
-  -- ★ Phase 3.6.2: mouse_to_cursor(mouse_x, pixel_height) -> uint32
+-- ---------------------------------------------------------------------------
+-- 子生成器 1: mouse_to_cursor + sync_cursor_to
+-- Nelua 要求被调方法在调用方之前声明，因此这两个方法必须先于 process_text_input。
+-- ---------------------------------------------------------------------------
+local function _gen_cursor_helpers(lines, ctx, cap_val)
+  -- mouse_to_cursor(mouse_x, pixel_height) -> uint32
   table.insert(lines, ("-- [editable/gap_buffer] %s: mouse_to_cursor (Phase 3.6.2)"):format(ctx))
   table.insert(lines, ("function %s:mouse_to_cursor(mouse_x: float32, pixel_height: float32): uint32"):format(ctx))
   table.insert(lines, ("  local tmp_flat: [%d]uint8"):format(cap_val + 1))
@@ -862,7 +856,7 @@ function nebula_gen_text_buffer(spec)
   table.insert(lines,  "  local local_x = mouse_x - text_origin_x")
   table.insert(lines,  "  return nebula_text_hit_test(local_x, &tmp_adv[0], char_count)")
   table.insert(lines,  "end")
-  -- ★ Phase 3.6.2: sync_cursor_to(target_pos) -> void
+  -- sync_cursor_to(target_pos) -> void
   table.insert(lines, ("-- [editable/gap_buffer] %s: sync_cursor_to (Phase 3.6.2)"):format(ctx))
   table.insert(lines, ("function %s:sync_cursor_to(target_pos: uint32): void"):format(ctx))
   table.insert(lines,  "  while self.visual.gap_buf.gap_start > (@uint16)(target_pos) do")
@@ -872,17 +866,18 @@ function nebula_gen_text_buffer(spec)
   table.insert(lines,  "    self.visual.gap_buf:move_cursor_right()")
   table.insert(lines,  "  end")
   table.insert(lines,  "end")
-  -- -------------------------------------------------------------------------
-  -- process_text_input：消费键盘事件，委托给 Gap Buffer 方法
-  -- Phase 3.6.2: 在 just_clicked 时额外执行鼠标命中测试并同步光标
-  -- -------------------------------------------------------------------------
+end
+
+-- ---------------------------------------------------------------------------
+-- 子生成器 2: process_text_input — 消费键盘/鼠标事件，委托给 Gap Buffer
+-- ---------------------------------------------------------------------------
+local function _gen_process_text_input(lines, ctx)
   table.insert(lines, ("-- [editable/gap_buffer] %s: process_text_input (Phase 3.6.2)"):format(ctx))
   table.insert(lines, ("function %s:process_text_input(input: *NebulaInputState): boolean"):format(ctx))
   table.insert(lines,  "  if input.focused_id ~= self.component_id then return false end")
   table.insert(lines,  "  local changed = false")
 
   -- ★ Phase 3.6.2: just_clicked → 鼠标命中测试，同步光标位置
-  -- 在栈上分配临时 advances 数组，用完即丢，不写入任何持久字段（公理 B）
   table.insert(lines,  "  -- ★ Phase 3.6.2: mouse click → hit-test → cursor sync")
   table.insert(lines,  "  -- ★ Phase 3.6.3: Shift+Click 扩展选区；普通点击重置 anchor")
   table.insert(lines,  "  if self.click.just_clicked then")
@@ -1053,16 +1048,12 @@ function nebula_gen_text_buffer(spec)
   table.insert(lines,  "  end")
   table.insert(lines,  "  return changed")
   table.insert(lines,  "end")
+end
 
-  -- -------------------------------------------------------------------------
-  -- ★ Phase 3.6.3: 选区辅助方法注入
-  --
-  -- selection_anchor : uint32 — 选区固定端（L1 持久状态，注入到 InputContext）
-  -- is_dragging      : boolean — 鼠标拖拽选区进行中标志
-  -- has_selection()  — 检查是否有活动选区
-  -- get_selection()  — 返回规范化选区 [sel_start, sel_end)
-  -- clear_selection() — 清除选区（anchor 同步到当前光标）
-  -- -------------------------------------------------------------------------
+-- ---------------------------------------------------------------------------
+-- 子生成器 3: 选区辅助方法 (has_selection / get_selection / clear_selection)
+-- ---------------------------------------------------------------------------
+local function _gen_selection_helpers(lines, ctx)
   table.insert(lines, ("-- [editable/selection] %s: has_selection (Phase 3.6.3)"):format(ctx))
   table.insert(lines, ("function %s:has_selection(): boolean"):format(ctx))
   table.insert(lines,  "  return self.selection_anchor ~= (@uint32)(self.visual.gap_buf:cursor())")
@@ -1078,15 +1069,17 @@ function nebula_gen_text_buffer(spec)
   table.insert(lines, ("function %s:clear_selection(): void"):format(ctx))
   table.insert(lines,  "  self.selection_anchor = (@uint32)(self.visual.gap_buf:cursor())")
   table.insert(lines,  "end")
-  -- -------------------------------------------------------------------------
-  -- get_text_len：直接从 Gap Buffer 读取文本长度（无变化）
-  -- -------------------------------------------------------------------------
+end
+
+-- ---------------------------------------------------------------------------
+-- 子生成器 4: 文本访问器 (get_text_len / get_text)
+-- ---------------------------------------------------------------------------
+local function _gen_text_accessors(lines, ctx)
   table.insert(lines, ("-- [editable/gap_buffer] %s: get_text_len"):format(ctx))
   table.insert(lines, ("function %s:get_text_len(): uint16"):format(ctx))
   table.insert(lines,  "  return self.visual.gap_buf:len()")
   table.insert(lines,  "end")
 
-  -- -------------------------------------------------------------------------
   -- ★ Phase 3.6.2: get_text(out, max) — 修复 L1/L2 渗透
   --
   -- 旧版（3.6.1）将展平结果写入 visual.flat_buf（持久 L1 字段），违反公理 B。
@@ -1095,12 +1088,31 @@ function nebula_gen_text_buffer(spec)
   -- 调用方示例：
   --   local flat: [256]uint8
   --   local text = ctx:get_text(&flat[0], 255)
-  -- -------------------------------------------------------------------------
   table.insert(lines, ("-- [editable/gap_buffer] %s: get_text (Phase 3.6.2: 栈上缓冲区，修复 L1/L2 渗透)"):format(ctx))
   table.insert(lines, ("function %s:get_text(out: *[0]uint8, max_out: uint16): cstring"):format(ctx))
   table.insert(lines,  "  self.visual.gap_buf:flatten(out, max_out)")
   table.insert(lines,  "  return (@cstring)(out)")
   table.insert(lines,  "end")
+end
+
+-- ---------------------------------------------------------------------------
+-- 主入口：编排所有子生成器，保持 Nelua 所需的声明顺序
+-- ---------------------------------------------------------------------------
+function nebula_gen_text_buffer(spec)
+  assert(spec.base, "nebula_gen_text_buffer: spec.base required")
+  local ctx      = spec.base .. "Context"
+  local cap_val  = spec.max_text_len or 255
+  local lines    = {}
+
+  -- 生成顺序严格遵循 Nelua 前向声明规则：
+  -- 1. cursor helpers (mouse_to_cursor, sync_cursor_to) — 被 process_text_input 调用
+  -- 2. process_text_input — 主事件处理
+  -- 3. selection helpers — 独立辅助方法
+  -- 4. text accessors — 独立辅助方法
+  _gen_cursor_helpers(lines, ctx, cap_val)
+  _gen_process_text_input(lines, ctx)
+  _gen_selection_helpers(lines, ctx)
+  _gen_text_accessors(lines, ctx)
 
   return table.concat(lines, "\n")
 end
