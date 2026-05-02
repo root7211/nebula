@@ -69,7 +69,20 @@ GPU 渲染 ← DenseCharInstance[1920] ← TermBuffer ← ANSI parser ← PTY re
 LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/term_demo
 ```
 
-需要 Linux + GPU（Vulkan 或其他 WebGPU 后端）+ GLFW + libutil。
+需要 Linux + GPU（Vulkan 或 llvmpipe/Zink）+ GLFW + libutil。
+
+> **已验证**：2026-05-02 WSL2 + llvmpipe 环境下编译运行通过（signal 15 为正常超时退出）。
+
+## 已修复问题（2026-05-02）
+
+### pty_bindings.nelua
+
+- **`cdefine` 宏与系统头冲突**：`F_GETFL`/`F_SETFL`/`O_NONBLOCK`/`TIOCSWINSZ`/`SIGTERM`/`EAGAIN`/`EINTR` 的 `cdefine` 生成无值 `#define`，覆盖系统头文件中有值的定义。修复为直接赋值常量。
+- **`winsize` 缺少 `ctypedef`**：`<cimport, nodecl>` record 不生成 `typedef struct winsize winsize`，导致 C 编译报 `unknown type name`。添加 `ctypedef` 注解修复。
+
+### text_runtime.nelua
+
+- **PGM header 常量折叠**：nelua 编译器将 `[3]cchar` 数组的 `magic[0] ~= 'P'` 在编译期优化为 `true`（因为初始化为零）。改为 `fgetc` 逐字节读取绕过折叠。
 
 ## 公理合规
 

@@ -20,6 +20,7 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
+| **Phase 4.X Terminal Emulator** | 终端模拟器原型——PTY + ANSI 解析器 + Dense Text 渲染，term_demo 编译运行通过 | `21ee560` |
 | **Phase 4.X Step 1-5** | 高密度文本渲染通道——着色器组合 + 管线生成 + Record 定义 + 派生入口 + 辅助函数 + dense_text_demo（120×50 = 6000 字符网格）+ 65 条冒烟测试 | — |
 | **Phase 4.2.3-S2** | CJK 运行时排版——零 HarfBuzz 依赖，O(log N) 表查找，CJK+ASCII 混排 Slug 渲染，cjk_text_demo | `a6336e5` |
 | **Phase 4.2.3-S1** | GB2312 一级 3755 字 shaping 表生成（v3 直接 API，102.7 KB，3755/3755 映射成功，0 .notdef） | `c1cd8ee` |
@@ -118,6 +119,7 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 | **4.4** | 高级组件库 | **S1+S2+S3 已完成** | **81** |
 | 4.2.3 | HarfBuzz + CJK 集成 | **S0+S1+S2 已完成**（绑定 + 预处理 + shaping 表 + 运行时排版） | 82 |
 | 4.X | 高密度文本渲染通道 | **Step 1-5 已完成**（着色器 + 管线 + Record + 派生 + 辅助函数 + demo + 测试） | 85 |
+| 4.X-T | 终端模拟器原型 | **已完成**（PTY + ANSI 解析器 + Dense Text 渲染 + term_demo） | 78 |
 | 4.5 | 注册原语语法糖 | 规划中 | — |
 | 4.6 | Indirect Drawing | 规划中 | 78 |
 | 4.7 | 文本编辑器原型 | 规划中 | — |
@@ -180,6 +182,9 @@ main()
 chmod +x build.sh
 ./build.sh form_demo
 LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/form_demo
+# 或运行终端模拟器
+./build.sh term_demo
+LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/term_demo
 ```
 
 全量回归测试：
@@ -227,7 +232,12 @@ nebula/
 │   ├── multiline_editable_demo.nelua  # 多行编辑器
 │   ├── slug_bench.nelua          # Storage Buffer 可扩展性基准
 │   ├── cjk_text_demo.nelua      # CJK + ASCII 混排 Slug 渲染
-│   └── dense_text_demo.nelua    # 高密度文本网格（120×50 = 6000 chars）
+│   ├── dense_text_demo.nelua    # 高密度文本网格（120×50 = 6000 chars）
+│   ├── term_demo.nelua          # 终端模拟器原型（PTY + ANSI + Dense Text）
+│   └── term/                    # 终端模拟器子模块
+│       ├── pty_bindings.nelua   # POSIX PTY C FFI 绑定
+│       ├── ansi_parser.nelua    # ANSI/VT100 转义序列状态机
+│       └── term_buffer.nelua    # 终端单元格缓冲区
 ├── tests/                        # 测试套件 (49 项)
 ├── tools/                        # 构建与测试工具（含 font_preprocessor_cjk）
 ├── assets/                       # 字体/纹理预处理产物（含 CJK shaping 表）
