@@ -14,12 +14,13 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 进行中 | 43/43 回归测试全绿 | Phase 4.2.2 D-4.1-C benchmark PASSED（2026-05-01）**
+**Era II 进行中 | 43/43 回归测试全绿 | 全代码库审计 10 项修复已合并（2026-05-02）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
+| **全代码库审计修复** | 修复 10 项问题（2 高危 BUG + 4 中危 BUG + 2 低危 BUG + 2 内存安全），43/43 回归 + 6 demo 编译验证通过 | `8647048` |
 | **Phase 4.2.2 D-4.1-C** | Storage Buffer scalability benchmark PASSED — 1K=1.41ms, 5K=1.45ms, 10K=1.45ms, 退化+2.5%<20%阈值 | `ebd7333` |
 | **Phase 4.2.3-S0** | HarfBuzz 绑定 + CJK shaping 预处理（zh-CN-common 20 字验证） | `afab95e` |
 | **Phase 4.2.2-fix** | GPU 资源 deinit — 修复 ~40+ GPU 对象泄漏，公理 B 合规 | `2b2d9cb` |
@@ -38,6 +39,23 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 | ~~4~~ | **4.2.2** | ~~D-4.1-C benchmark 未执行~~ | ✅ PASSED | `slug_bench.nelua` WSL2+llvmpipe Vulkan 运行时通过：1K=1.41ms/帧, 5K=1.45ms/帧, 10K=1.45ms/帧，退化+2.5% 远低于 20% 阈值。Storage Buffer 路径在 CJK 规模下完全可行。commit `ebd7333` |
 | ~~5~~ | **4.X** | ~~剪贴板 API 未绑定~~ | ✅ 已修复 | `glfw_bindings.nelua` 已绑定 `glfwGetClipboardString` / `glfwSetClipboardString`；`editable` 原语支持 Ctrl+C/V/X/A 剪贴板操作 |
 | ~~6~~ | **4.X** | ~~Unicode char callback 无消费者~~ | ✅ 已修复 | `editable` 原语已扩展为接受全 Unicode 可打印字符（UTF-8 编码插入），Ctrl+C/V/X/A 快捷键已集成 |
+
+### 全代码库审计修复（2026-05-02）
+
+> 基于 ~8,900 行核心代码 + ~3,200 行示例的全面审查，发现并修复以下问题（commit `8647048`）：
+
+| # | 严重度 | 文件 | 问题 | 修复 |
+|:--|:-------|:-----|:-----|:-----|
+| ~~BUG-1~~ | **高** | `app.nelua` | WASM 帧回调将 renderer 指针误传为 app 指针 | ✅ 新增独立 `_nebula_ml_app` 全局指针 |
+| ~~BUG-2~~ | **高** | `pipeline_factory.lua` | Shadow 管线 deinit() 无条件释放可能未初始化的 GPU 句柄 | ✅ 全部 21 个 release 调用加 nilptr 守卫 |
+| ~~BUG-3~~ | **中** | `app_factory.lua` | `comp.prims` 从未填充，Phase 4.3 公理校验不触发 | ✅ register_component 从 nebula_registry 查询并填充 |
+| ~~BUG-4~~ | **中** | `scrollable_demo.nelua` | hit-test 在滚动偏移应用之前执行 | ✅ 偏移应用移至 app:update() 之前 |
+| ~~BUG-5~~ | **中** | `dropdown_demo.nelua` | 隐藏项过渡帧 hit-test 错位 | ✅ 位置更新移至业务逻辑之前 |
+| ~~BUG-6~~ | **低** | `gap_buffer.nelua` | 与 factory 版本缺少 extract_range 方法 | ✅ 同步方法 + 交叉引用注释 |
+| ~~MEM-1~~ | **高** | `renderer.nelua` | 重复 init() 泄漏 GPU 句柄 | ✅ init() 头部加重复初始化检测 |
+| ~~MEM-2~~ | **中** | `text_runtime.nelua` | malloc/free 违反零堆设计 | ✅ 改为模块级静态缓冲区 |
+| ~~MEM-3~~ | **中** | `app_factory.lua` | `_batch[N]` 栈分配可能溢出 WASM 栈 | ✅ 增加 128 实例上限 |
+| ~~MEM-4~~ | **低** | `axiom_validator.lua` | 布尔笛卡尔 2^N 爆炸 | ✅ 阈值降至 2^6 + single-flip 覆盖 |
 
 ### Phase 4.3 — 可编程原语注册表（90/100）
 
@@ -193,7 +211,7 @@ nebula/
 │   ├── scrollable_demo.nelua     # 滚动容器
 │   ├── dropdown_demo.nelua       # 下拉选择器
 │   └── multiline_editable_demo.nelua  # 多行编辑器
-├── tests/                        # 测试套件 (40 项)
+├── tests/                        # 测试套件 (43 项)
 ├── tools/                        # 构建与测试工具
 ├── assets/                       # 字体/纹理预处理产物
 ├── vendor/                       # 第三方依赖 (wgpu-native, GLFW)
