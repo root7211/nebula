@@ -14,12 +14,15 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 进行中 | 49/49 回归测试全绿 | Phase 4.X 实施中（2026-05-02）**
+**Era II 进行中 | 49/49 回归测试全绿 | Phase 4.X-J 规划中（2026-05-02）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
+| **wgpu-native v29.0.0.0 绑定对齐** | 12 个结构体布局修复（新增字段、类型宽度、字段顺序），14/14 demo 编译通过，42/42 结构体尺寸验证 OK | `f051974` |
+| **Phase 4.X-J JSON Viewer 规划** | JSON 树形浏览器设计——DenseText 语法着色 + 折叠/展开 + 滚动 + 行号，为 4.5 语法糖积累样本 | — |
+| **Phase 4.7→4.5 调序方案** | 先做 4.7-S1~S4（编辑器前置）积累 4 个新 demo 样本，再设计 4.5 语法糖，避免过早固化 API | — |
 | **Phase 4.X Terminal Emulator** | 终端模拟器原型——PTY + ANSI 解析器 + Dense Text 渲染，term_demo 编译运行通过 | `21ee560` |
 | **Phase 4.X Step 1-5** | 高密度文本渲染通道——着色器组合 + 管线生成 + Record 定义 + 派生入口 + 辅助函数 + dense_text_demo（120×50 = 6000 字符网格）+ 65 条冒烟测试 | — |
 | **Phase 4.2.3-S2** | CJK 运行时排版——零 HarfBuzz 依赖，O(log N) 表查找，CJK+ASCII 混排 Slug 渲染，cjk_text_demo | `a6336e5` |
@@ -120,7 +123,8 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 | 4.2.3 | HarfBuzz + CJK 集成 | **S0+S1+S2 已完成**（绑定 + 预处理 + shaping 表 + 运行时排版） | 82 |
 | 4.X | 高密度文本渲染通道 | **Step 1-5 已完成**（着色器 + 管线 + Record + 派生 + 辅助函数 + demo + 测试） | 85 |
 | 4.X-T | 终端模拟器原型 | **已完成**（PTY + ANSI 解析器 + Dense Text 渲染 + term_demo） | 78 |
-| 4.5 | 注册原语语法糖 | 规划中 | — |
+| 4.X-J | JSON Viewer | **规划中**（DenseText 语法着色 + 折叠/展开 + 滚动 + 行号） | — |
+| 4.5 | 注册原语语法糖 | 规划中（**调序：4.7-S1~S4 之后**，待样本充分后设计） | — |
 | 4.6 | Indirect Drawing | 规划中 | 78 |
 | 4.7 | 文本编辑器原型 | 规划中 | — |
 | 5.0 | 生态与 CI/CD | 规划中 | — |
@@ -263,6 +267,8 @@ nebula/
 | [`PLAN_PHASE4_3_TASK_D.md`](docs/PLAN_PHASE4_3_TASK_D.md) | process_body 公理校验补丁（从公理 A+B 推导） |
 | [`PLAN_PHASE4_2_3_CJK.md`](docs/PLAN_PHASE4_2_3_CJK.md) | HarfBuzz + CJK 集成规划 |
 | [`PLAN_PHASE4_X_DENSE_TEXT.md`](docs/PLAN_PHASE4_X_DENSE_TEXT.md) | 高密度文本 + 输入系统规划（待实施） |
+| [`PLAN_PHASE4_X_JSON_VIEWER.md`](docs/PLAN_PHASE4_X_JSON_VIEWER.md) | JSON Viewer 实施方案（DenseText + 折叠 + 着色） |
+| [`PLAN_PHASE4_7_BEFORE_4_5.md`](docs/PLAN_PHASE4_7_BEFORE_4_5.md) | Phase 4.7→4.5 调序方案（先积累样本再提炼语法糖） |
 | [`PLAN_ERA2_MASTER.md`](docs/PLAN_ERA2_MASTER.md) | Era II 总体实施规划 |
 | [`REPORT_PHASE4_2_2_BENCH.md`](docs/REPORT_PHASE4_2_2_BENCH.md) | Phase 4.2.2 Storage Buffer 基准测试报告 |
 | [`TEXT_EDITOR_ROADMAP.md`](docs/TEXT_EDITOR_ROADMAP.md) | 文本编辑器长期愿景 |
