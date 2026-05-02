@@ -202,17 +202,20 @@ global WGPUSurfaceConfiguration <cimport, nodecl> = @record{
   nextInChain:     pointer,
   device:          WGPUDevice,
   format:          WGPUTextureFormat,
-  usage:           uint32,
+  usage:           uint64,
+  width:           uint32,
+  height:          uint32,
   viewFormatCount: csize,
   viewFormats:     pointer,
   alphaMode:       uint32,
-  width:           uint32,
-  height:          uint32,
   presentMode:     WGPUPresentMode,
 }
 
 global WGPUInstanceDescriptor <cimport, nodecl> = @record{
-  nextInChain: pointer,
+  nextInChain:          pointer,
+  requiredFeatureCount: csize,
+  requiredFeatures:     pointer,
+  requiredLimits:       pointer,
 }
 
 -- wgpu-native v29 扩展：实例附加信息
@@ -232,10 +235,11 @@ global WGPUInstanceExtras <cimport, nodecl> = @record{
 
 global WGPURequestAdapterOptions <cimport, nodecl> = @record{
   nextInChain:          pointer,
-  compatibleSurface:    WGPUSurface,
+  featureLevel:         uint32,
   powerPreference:      uint32,
+  forceFallbackAdapter: uint32,
   backendType:          uint32,
-  forceFallbackAdapter: boolean,
+  compatibleSurface:    WGPUSurface,
 }
 
 global WGPURequestAdapterCallbackInfo <cimport, nodecl> = @record{
@@ -268,15 +272,16 @@ global WGPUDeviceDescriptor <cimport, nodecl> = @record{
 global WGPUBufferDescriptor <cimport, nodecl> = @record{
   nextInChain:      pointer,
   label:            WGPUStringView,
-  usage:            uint32,
+  usage:            uint64,
   size:             uint64,
-  mappedAtCreation: boolean,
+  mappedAtCreation: uint32,
 }
 
 global WGPUBindGroupLayoutEntry <cimport, nodecl> = @record{
   nextInChain:      pointer,
   binding:          uint32,
   visibility:       uint64,   -- WGPUShaderStage = WGPUFlags = uint64_t
+  bindingArraySize: uint32,
   buffer:           record{
     nextInChain:      pointer,
     type:             uint32,
@@ -318,6 +323,7 @@ global WGPUPipelineLayoutDescriptor <cimport, nodecl> = @record{
   label:                WGPUStringView,
   bindGroupLayoutCount: csize,
   bindGroupLayouts:     *WGPUBindGroupLayout,
+  immediateSize:        uint32,
 }
 
 -- 着色器模块结构体
@@ -378,14 +384,14 @@ global WGPURenderPipelineDescriptor <cimport, nodecl> = @record{
     stripIndexFormat: uint32,
     frontFace:    uint32,
     cullMode:     uint32,
-    unclippedDepth: boolean,
+    unclippedDepth: uint32,
   },
   depthStencil: pointer,
   multisample:  record{
     nextInChain:            pointer,
     count:                  uint32,
     mask:                   uint32,
-    alphaToCoverageEnabled: boolean,
+    alphaToCoverageEnabled: uint32,
   },
   fragment:     *WGPUFragmentState,
 }
@@ -453,7 +459,7 @@ global WGPUTextureViewDescriptor <cimport, nodecl> = @record{
   baseArrayLayer:  uint32,
   arrayLayerCount: uint32,
   aspect:          uint32,
-  usage:           uint32,
+  usage:           uint64,
 }
 
 -- =============================================================================
@@ -576,12 +582,14 @@ global WGPUTexelCopyBufferLayout <cimport, nodecl> = @record{
 }
 
 global WGPUVertexAttribute <cimport, nodecl> = @record{
+  nextInChain:    pointer,
   format:         WGPUVertexFormat,
   offset:         uint64,
   shaderLocation: uint32,
 }
 
 global WGPUVertexBufferLayout <cimport, nodecl> = @record{
+  nextInChain:   pointer,
   stepMode:      WGPUVertexStepMode,
   arrayStride:   uint64,
   attributeCount: csize,
@@ -592,7 +600,7 @@ global WGPUVertexBufferLayout <cimport, nodecl> = @record{
 global WGPUTextureDescriptor <cimport, nodecl> = @record{
   nextInChain:     pointer,
   label:           WGPUStringView,
-  usage:           uint32,
+  usage:           uint64,
   dimension:       WGPUTextureDimension,
   size:            WGPUExtent3D,
   format:          WGPUTextureFormat,
