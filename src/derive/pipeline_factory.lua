@@ -1,6 +1,6 @@
 -- =============================================================================
 -- derive/pipeline_factory.lua
--- Nebula GUI Compiler — Phase 3.7
+-- Nebula GUI Compiler — Phase 3.7 / Phase 4.X
 --
 -- 管线代码生成器（Pipeline Factory）
 --
@@ -8,6 +8,10 @@
 --   · gen_pipeline_standard_instanced  — 所有标准 Visual 的默认路径
 --   · gen_pipeline_textured_vertex     — 文本 SDF 路径
 --   · gen_pipeline_shadow              — 阴影多 Pass 路径
+-- Phase 4.2.2:
+--   · gen_pipeline_slug_text           — Slug 矢量文本路径
+-- Phase 4.X:
+--   · gen_pipeline_dense_text          — 高密度文本路径 (Instanced + SDF Atlas)
 --
 -- 已删除（Phase 3.7 死代码清理）：
 --   · gen_pipeline_simple              — Phase 2.3 占位符路径
@@ -21,6 +25,9 @@
 --   has_shadow           : boolean  — 选择 shadow_multipass 路径
 --   standard_instanced   : boolean  — 选择 standard_instanced 路径（默认）
 --   textured             : boolean  — 选择 textured_vertex 路径
+--   slug_text            : boolean  — 选择 slug_text 路径
+--   atlas_dense          : boolean  — 选择 dense_text 路径 (Phase 4.X)
+--   max_chars            : number   — dense_text 最大字符数（默认 4096）
 --   shadow_mask_source   : string   — 阴影遮罩 WGSL
 --   blur_h_source        : string   — 水平模糊 WGSL
 --   blur_v_source        : string   — 垂直模糊 WGSL
@@ -826,6 +833,274 @@ local function gen_pipeline_slug_text(base, uniforms_record, wgsl_source)
 end
 
 -- =============================================================================
+-- ★ Phase 4.X: 高密度文本管线生成 (Dense Text — Instanced + SDF Atlas)
+--
+-- 生成 <T>DenseTextPipeline 的完整 Nelua 源码。
+-- 绑定布局：
+--   Binding 0: Uniform Buffer  — DenseTextUniforms (16B: viewport + cell_size)
+--   Binding 1: Storage Buffer  — array<DenseCharInstance> (32B/char, 只读)
+--   Binding 2: Texture 2D      — SDF glyph atlas
+--   Binding 3: Sampler         — glyph sampler
+-- 绘制模型：零 vertex buffer，6 顶点/instance 程序化生成。
+--
+-- 生成的方法：
+--   :init(renderer, max_chars)            — 创建 pipeline + buffers（atlas 延迟绑定）
+--   :update_atlas(renderer, tex_view, sampler) — 绑定/重绑 SDF atlas 纹理
+--   :update_viewport(renderer, vw, vh, cell_w, cell_h) — 更新 uniform buffer
+--   :upload(renderer, data, count)        — 写入 DenseCharInstance 数组到 Storage Buffer
+--   :draw(pass, count)                    — instanced draw
+--   :deinit()                             — 释放所有 GPU 资源
+-- =============================================================================
+local function gen_pipeline_dense_text(base, wgsl_source, max_chars)
+  local pipe = base .. "DenseTextPipeline"
+  local L = {}
+  local function emit(s) table.insert(L, s) end
+
+  max_chars = max_chars or 4096
+
+  emit(("-- === Derived dense-text pipeline: %s (max_chars=%d) ==="):format(pipe, max_chars))
+
+  -- record 定义
+  emit(("global %s = @record{"):format(pipe))
+  emit("  pipeline:      WGPURenderPipeline,")
+  emit("  bind_layout:   WGPUBindGroupLayout,")
+  emit("  uniform_buf:   WGPUBuffer,       -- binding 0: DenseTextUniforms (16B)")
+  emit("  storage_buf:   WGPUBuffer,       -- binding 1: array<DenseCharInstance>")
+  emit("  storage_size:  uint64,")
+  emit("  bind_group:    WGPUBindGroup,    -- may be nil until atlas is bound")
+  emit("  max_chars:     uint32,")
+  emit("  atlas_view:    WGPUTextureView,  -- cached for rebind detection")
+  emit("  atlas_sampler: WGPUSampler,      -- cached for rebind detection")
+  emit("}")
+
+  -- WGSL 源码常量
+  local wgsl_const = "NEBULA_WGSL_" .. base:upper() .. "_DENSE"
+  emit(("local %s <comptime> = %s"):format(wgsl_const, escape_to_long_bracket(wgsl_source)))
+
+  -- ===== init =====
+  emit(("function %s:init(renderer: *NebulaRenderer, max_ch: uint32): boolean"):format(pipe))
+  emit("  self.max_chars = max_ch")
+  emit("  self.bind_group = nilptr")
+  emit("  self.atlas_view = nilptr")
+  emit("  self.atlas_sampler = nilptr")
+  emit("")
+  emit("  -- 1. Uniform Buffer（16 字节：viewport.x, viewport.y, cell_w, cell_h）")
+  emit("  local vp_desc = WGPUBufferDescriptor{")
+  emit("    nextInChain      = nilptr,")
+  emit(("    label            = wgpu_str(\"%s-ubuf\"),"):format("nebula-" .. base:lower() .. "-dt"))
+  emit("    usage            = (@uint32)(WGPUBufferUsage_Uniform) | (@uint32)(WGPUBufferUsage_CopyDst),")
+  emit("    size             = 16,")
+  emit("    mappedAtCreation = false,")
+  emit("  }")
+  emit("  self.uniform_buf = wgpuDeviceCreateBuffer(renderer.device, &vp_desc)")
+  emit("  if self.uniform_buf == nilptr then")
+  emit(("    printf(\"wgpu: %s dt: failed to create uniform buffer\\n\")\n    return false"):format(base:lower()))
+  emit("  end")
+  emit("")
+  emit("  -- 2. Storage Buffer（max_chars * 32 字节 = DenseCharInstance）")
+  emit("  self.storage_size = (@uint64)(max_ch) * 32")
+  emit("  local sb_desc = WGPUBufferDescriptor{")
+  emit("    nextInChain      = nilptr,")
+  emit(("    label            = wgpu_str(\"%s-sbuf\"),"):format("nebula-" .. base:lower() .. "-dt"))
+  emit("    usage            = (@uint32)(WGPUBufferUsage_Storage) | (@uint32)(WGPUBufferUsage_CopyDst),")
+  emit("    size             = self.storage_size,")
+  emit("    mappedAtCreation = false,")
+  emit("  }")
+  emit("  self.storage_buf = wgpuDeviceCreateBuffer(renderer.device, &sb_desc)")
+  emit("  if self.storage_buf == nilptr then")
+  emit(("    printf(\"wgpu: %s dt: failed to create storage buffer\\n\")\n    return false"):format(base:lower()))
+  emit("  end")
+  emit("")
+  emit("  -- 3. BindGroupLayout（4 entries: uniform, storage, texture_2d, sampler）")
+  emit("  local entries: [4]WGPUBindGroupLayoutEntry")
+  emit("  -- binding 0: uniform (vertex + fragment)")
+  emit("  entries[0] = WGPUBindGroupLayoutEntry{")
+  emit("    nextInChain = nilptr, binding = 0,")
+  emit("    visibility  = (@uint64)(WGPUShaderStage_Vertex) | (@uint64)(WGPUShaderStage_Fragment),")
+  emit("    buffer      = { nextInChain = nilptr, type = (@uint32)(WGPUBufferBindingType_Uniform), hasDynamicOffset = 0, minBindingSize = 16 },")
+  emit("    sampler = { nextInChain = nilptr, type = 0 }, texture = { nextInChain = nilptr, sampleType = 0, viewDimension = 0, multisampled = 0 },")
+  emit("    storageTexture = { nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0 },")
+  emit("  }")
+  emit("  -- binding 1: read-only storage (vertex)")
+  emit("  entries[1] = WGPUBindGroupLayoutEntry{")
+  emit("    nextInChain = nilptr, binding = 1,")
+  emit("    visibility  = (@uint64)(WGPUShaderStage_Vertex),")
+  emit("    buffer      = { nextInChain = nilptr, type = (@uint32)(WGPUBufferBindingType_ReadOnlyStorage), hasDynamicOffset = 0, minBindingSize = 0 },")
+  emit("    sampler = { nextInChain = nilptr, type = 0 }, texture = { nextInChain = nilptr, sampleType = 0, viewDimension = 0, multisampled = 0 },")
+  emit("    storageTexture = { nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0 },")
+  emit("  }")
+  emit("  -- binding 2: texture_2d (fragment — SDF glyph atlas)")
+  emit("  entries[2] = WGPUBindGroupLayoutEntry{")
+  emit("    nextInChain = nilptr, binding = 2,")
+  emit("    visibility  = (@uint64)(WGPUShaderStage_Fragment),")
+  emit("    buffer      = { nextInChain = nilptr, type = 0 },")
+  emit("    sampler     = { nextInChain = nilptr, type = 0 },")
+  emit("    texture     = { nextInChain = nilptr, sampleType = (@uint32)(WGPUTextureSampleType_Float), viewDimension = (@uint32)(WGPUTextureViewDimension_2D), multisampled = 0 },")
+  emit("    storageTexture = { nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0 },")
+  emit("  }")
+  emit("  -- binding 3: sampler (fragment)")
+  emit("  entries[3] = WGPUBindGroupLayoutEntry{")
+  emit("    nextInChain = nilptr, binding = 3,")
+  emit("    visibility  = (@uint64)(WGPUShaderStage_Fragment),")
+  emit("    buffer      = { nextInChain = nilptr, type = 0 },")
+  emit("    sampler     = { nextInChain = nilptr, type = (@uint32)(WGPUSamplerBindingType_Filtering) },")
+  emit("    texture     = { nextInChain = nilptr, sampleType = 0, viewDimension = 0, multisampled = 0 },")
+  emit("    storageTexture = { nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0 },")
+  emit("  }")
+  emit("  local bgl_desc = WGPUBindGroupLayoutDescriptor{")
+  emit("    nextInChain = nilptr,")
+  emit(("    label       = wgpu_str(\"%s-dt-bgl\"),"):format("nebula-" .. base:lower()))
+  emit("    entryCount  = 4, entries = &entries[0],")
+  emit("  }")
+  emit("  self.bind_layout = wgpuDeviceCreateBindGroupLayout(renderer.device, &bgl_desc)")
+  emit("  if self.bind_layout == nilptr then")
+  emit(("    printf(\"wgpu: %s dt: failed to create bgl\\n\")\n    return false"):format(base:lower()))
+  emit("  end")
+  emit("")
+  emit("  -- 4. 着色器模块")
+  emit("  local wgsl_src = WGPUShaderSourceWGSL{")
+  emit("    chain = WGPUChainedStruct{ next = nilptr, sType = WGPUSType_ShaderSourceWGSL },")
+  emit(("    code  = wgpu_str(%s),"):format(wgsl_const))
+  emit("  }")
+  emit("  local shader_desc = WGPUShaderModuleDescriptor{")
+  emit("    nextInChain = (@*WGPUChainedStruct)(&wgsl_src),")
+  emit(("    label       = wgpu_str(\"%s-dt-shader\"),"):format("nebula-" .. base:lower()))
+  emit("  }")
+  emit("  local shader = wgpuDeviceCreateShaderModule(renderer.device, &shader_desc)")
+  emit("  if shader == nilptr then")
+  emit(("    printf(\"wgpu: %s dt: failed to create shader\\n\")\n    return false"):format(base:lower()))
+  emit("  end")
+  emit("")
+  emit("  -- 5. PipelineLayout")
+  emit("  local pl_desc = WGPUPipelineLayoutDescriptor{")
+  emit("    nextInChain = nilptr,")
+  emit(("    label       = wgpu_str(\"%s-dt-pl\"),"):format("nebula-" .. base:lower()))
+  emit("    bindGroupLayoutCount = 1, bindGroupLayouts = &self.bind_layout,")
+  emit("  }")
+  emit("  local pipeline_layout = wgpuDeviceCreatePipelineLayout(renderer.device, &pl_desc)")
+  emit("")
+  emit("  -- 6. Alpha 混合状态")
+  emit("  local blend_state = WGPUBlendState{")
+  emit("    color = WGPUBlendComponent{ operation = WGPUBlendOperation_Add, srcFactor = WGPUBlendFactor_SrcAlpha, dstFactor = WGPUBlendFactor_OneMinusSrcAlpha },")
+  emit("    alpha = WGPUBlendComponent{ operation = WGPUBlendOperation_Add, srcFactor = WGPUBlendFactor_One, dstFactor = WGPUBlendFactor_OneMinusSrcAlpha },")
+  emit("  }")
+  emit("  local color_target = WGPUColorTargetState{")
+  emit("    nextInChain = nilptr, format = renderer.format, blend = &blend_state,")
+  emit("    writeMask   = (@uint32)(WGPUColorWriteMask_All),")
+  emit("  }")
+  emit("  local frag_state = WGPUFragmentState{")
+  emit("    nextInChain = nilptr, module = shader, entryPoint = wgpu_str(\"fs_main\"),")
+  emit("    constantCount = 0, constants = nilptr, targetCount = 1, targets = &color_target,")
+  emit("  }")
+  emit("")
+  emit("  -- 7. RenderPipeline（无顶点缓冲，instance_index + vertex_index 驱动）")
+  emit("  local rp_desc = WGPURenderPipelineDescriptor{")
+  emit("    nextInChain = nilptr,")
+  emit(("    label       = wgpu_str(\"%s-dt-rp\"),"):format("nebula-" .. base:lower()))
+  emit("    layout      = pipeline_layout,")
+  emit("    vertex      = { nextInChain = nilptr, module = shader, entryPoint = wgpu_str(\"vs_main\"),")
+  emit("                    constantCount = 0, constants = nilptr, bufferCount = 0, buffers = nilptr },")
+  emit("    primitive   = { nextInChain = nilptr, topology = WGPUPrimitiveTopology_TriangleList,")
+  emit("                    stripIndexFormat = 0, frontFace = 0, cullMode = 0, unclippedDepth = false },")
+  emit("    depthStencil = nilptr,")
+  emit("    multisample  = { nextInChain = nilptr, count = 1, mask = 0xFFFFFFFF, alphaToCoverageEnabled = false },")
+  emit("    fragment     = &frag_state,")
+  emit("  }")
+  emit("  self.pipeline = wgpuDeviceCreateRenderPipeline(renderer.device, &rp_desc)")
+  emit("  wgpuShaderModuleRelease(shader)")
+  emit("  wgpuPipelineLayoutRelease(pipeline_layout)")
+  emit("  if self.pipeline == nilptr then")
+  emit(("    printf(\"wgpu: %s dt: failed to create pipeline\\n\")\n    return false"):format(base:lower()))
+  emit("  end")
+  emit("")
+  emit(("  printf(\"wgpu: %s dense-text pipeline created (max=%%u)\\n\", max_ch)"):format(base:lower()))
+  emit("  return true")
+  emit("end")
+
+  -- ===== update_atlas（绑定/重绑 SDF atlas 纹理 + sampler，创建 BindGroup） =====
+  emit(("function %s:update_atlas(renderer: *NebulaRenderer, tex_view: WGPUTextureView, sampler: WGPUSampler): boolean"):format(pipe))
+  emit("  if tex_view == nilptr or sampler == nilptr then return false end")
+  emit("  -- 如果纹理未变，跳过重建")
+  emit("  if tex_view == self.atlas_view and sampler == self.atlas_sampler and self.bind_group ~= nilptr then return true end")
+  emit("  -- 释放旧 bind group")
+  emit("  if self.bind_group ~= nilptr then")
+  emit("    wgpuBindGroupRelease(self.bind_group)")
+  emit("    self.bind_group = nilptr")
+  emit("  end")
+  emit("  self.atlas_view = tex_view")
+  emit("  self.atlas_sampler = sampler")
+  emit("  local bg_entries: [4]WGPUBindGroupEntry")
+  emit("  bg_entries[0] = WGPUBindGroupEntry{")
+  emit("    nextInChain = nilptr, binding = 0,")
+  emit("    buffer = self.uniform_buf, offset = 0, size = 16,")
+  emit("    sampler = nilptr, textureView = nilptr,")
+  emit("  }")
+  emit("  bg_entries[1] = WGPUBindGroupEntry{")
+  emit("    nextInChain = nilptr, binding = 1,")
+  emit("    buffer = self.storage_buf, offset = 0, size = self.storage_size,")
+  emit("    sampler = nilptr, textureView = nilptr,")
+  emit("  }")
+  emit("  bg_entries[2] = WGPUBindGroupEntry{")
+  emit("    nextInChain = nilptr, binding = 2,")
+  emit("    buffer = nilptr, offset = 0, size = 0,")
+  emit("    sampler = nilptr, textureView = tex_view,")
+  emit("  }")
+  emit("  bg_entries[3] = WGPUBindGroupEntry{")
+  emit("    nextInChain = nilptr, binding = 3,")
+  emit("    buffer = nilptr, offset = 0, size = 0,")
+  emit("    sampler = sampler, textureView = nilptr,")
+  emit("  }")
+  emit("  local bg_desc = WGPUBindGroupDescriptor{")
+  emit("    nextInChain = nilptr,")
+  emit(("    label       = wgpu_str(\"%s-dt-bg\"),"):format("nebula-" .. base:lower()))
+  emit("    layout = self.bind_layout, entryCount = 4, entries = &bg_entries[0],")
+  emit("  }")
+  emit("  self.bind_group = wgpuDeviceCreateBindGroup(renderer.device, &bg_desc)")
+  emit("  if self.bind_group == nilptr then")
+  emit(("    printf(\"wgpu: %s dt: failed to create bind group\\n\")\n    return false"):format(base:lower()))
+  emit("  end")
+  emit("  return true")
+  emit("end")
+
+  -- ===== update_viewport =====
+  emit(("function %s:update_viewport(renderer: *NebulaRenderer, vw: float32, vh: float32, cell_w: float32, cell_h: float32): void"):format(pipe))
+  emit("  local data: [4]float32 = { vw, vh, cell_w, cell_h }")
+  emit("  wgpuQueueWriteBuffer(renderer.queue, self.uniform_buf, 0, &data[0], 16)")
+  emit("end")
+
+  -- ===== upload（批量上传 DenseCharInstance 数组到 Storage Buffer） =====
+  emit(("function %s:upload(renderer: *NebulaRenderer, data: pointer, count: uint32): boolean"):format(pipe))
+  emit("  if count == 0 or data == nilptr then return true end")
+  emit("  if count > self.max_chars then")
+  emit(("    printf(\"nebula: %s dt: count %%u exceeds max_chars %%u\\n\", count, self.max_chars)"):format(base:lower()))
+  emit("    count = self.max_chars")
+  emit("  end")
+  emit("  local byte_size = (@uint64)(count) * 32  -- sizeof(DenseCharInstance) = 32")
+  emit("  wgpuQueueWriteBuffer(renderer.queue, self.storage_buf, 0, data, (@csize)(byte_size))")
+  emit("  return true")
+  emit("end")
+
+  -- ===== draw（instanced 绘制） =====
+  emit(("function %s:draw(pass: WGPURenderPassEncoder, count: uint32): void"):format(pipe))
+  emit("  if count == 0 or self.bind_group == nilptr then return end")
+  emit("  wgpuRenderPassEncoderSetPipeline(pass, self.pipeline)")
+  emit("  wgpuRenderPassEncoderSetBindGroup(pass, 0, self.bind_group, 0, nilptr)")
+  emit("  wgpuRenderPassEncoderDraw(pass, 6, count, 0, 0)")
+  emit("end")
+
+  -- ===== deinit（释放所有 GPU 资源，公理 B：L0 资源在 deinit 时销毁） =====
+  emit(("function %s:deinit(): void"):format(pipe))
+  emit("  if self.pipeline ~= nilptr then wgpuRenderPipelineRelease(self.pipeline) end")
+  emit("  if self.bind_group ~= nilptr then wgpuBindGroupRelease(self.bind_group) end")
+  emit("  if self.bind_layout ~= nilptr then wgpuBindGroupLayoutRelease(self.bind_layout) end")
+  emit("  if self.storage_buf ~= nilptr then wgpuBufferRelease(self.storage_buf) end")
+  emit("  if self.uniform_buf ~= nilptr then wgpuBufferRelease(self.uniform_buf) end")
+  emit("end")
+
+  return table.concat(L, "\n")
+end
+
+-- =============================================================================
 -- 主入口：生成完整的 <T>Pipeline 源码
 --
 -- Phase 3.7: 三条显式路径，无 else 兑底。任何未识别的 spec 触发 error()。
@@ -834,8 +1109,8 @@ function nebula_gen_pipeline_source(spec)
   assert(spec.base,            "nebula_gen_pipeline_source: spec.base required")
   assert(spec.uniforms_record, "nebula_gen_pipeline_source: spec.uniforms_record required")
 
-  -- Phase 3.7+: 互斥标志校验——四条路径最多只能激活一条
-  local _path_flags = { "has_shadow", "standard_instanced", "textured", "slug_text" }
+  -- Phase 3.7+: 互斥标志校验——五条路径最多只能激活一条
+  local _path_flags = { "has_shadow", "standard_instanced", "textured", "slug_text", "atlas_dense" }
   local _active = {}
   for _, flag in ipairs(_path_flags) do
     if spec[flag] then _active[#_active + 1] = flag end
@@ -870,6 +1145,11 @@ function nebula_gen_pipeline_source(spec)
     -- ★ Phase 4.1: Slug 文本管线路径
     assert(spec.wgsl_source, "nebula_gen_pipeline_source: wgsl_source required for slug_text path")
     return gen_pipeline_slug_text(spec.base, spec.uniforms_record, spec.wgsl_source)
+  elseif spec.atlas_dense then
+    -- ★ Phase 4.X: 高密度文本管线路径
+    assert(spec.wgsl_source, "nebula_gen_pipeline_source: wgsl_source required for atlas_dense path")
+    local max_ch = spec.max_chars or 4096
+    return gen_pipeline_dense_text(spec.base, spec.wgsl_source, max_ch)
   else
     error("nebula_gen_pipeline_source: unrecognized spec for '" .. tostring(spec.base) .. "'. " ..
           "All standard Visuals must use standard_instanced path (set via nebula_derive). " ..
