@@ -150,6 +150,10 @@ run_test "smoke_phase4_2_3 (Phase 4.2.3 S0 — HarfBuzz 绑定 + CJK shaping tab
 run_test "smoke_phase4_2_2_bench (Phase 4.2.2 D-4.1-C — Storage Buffer scalability audit)" \
   nelua-lua tests/smoke_phase4_2_2_bench.lua
 
+# ★ 交互原语运行时行为验证（BUG-4/5/6 回归守护）
+run_test "verify_interaction_behavior (Runtime — 交互原语行为验证 & 回归守护)" \
+  nelua-lua tests/verify_interaction_behavior.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="
