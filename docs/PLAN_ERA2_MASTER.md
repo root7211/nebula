@@ -1,7 +1,8 @@
 # Nebula Era II 后半段实施总计划
 
 **创建日期**：2026-05-01
-**基准状态**：43/43 回归测试全绿 | D-4.1-C DISMISSED | Phase 4.2.3-S0 已完成
+**最后更新**：2026-05-02
+**基准状态**：47/47 回归测试全绿 | D-4.1-C PASSED | Phase 4.2.3-S2 已完成
 
 ---
 
@@ -10,11 +11,15 @@
 | Phase | 状态 | 核心产出 |
 |:------|:-----|:---------|
 | 4.2.2-fix | ✅ | GPU deinit 40+ 泄漏修复 |
-| 4.2.2 D-4.1-C | ✅ DISMISSED | Storage Buffer 1K→10K 退化仅 +2.5%，路径确认可行 |
+| 4.2.2 D-4.1-C | ✅ PASSED | Storage Buffer 1K→10K 退化仅 +2.5%，路径确认可行 |
 | 4.2.3-S0 | ✅ | HarfBuzz 绑定 + CJK 20 字 shaping 表生成 |
+| 4.2.3-S1 | ✅ | GB2312 一级 3755 字 shaping 表（102.7 KB，commit `c1cd8ee`） |
+| 4.2.3-S2 | ✅ | CJK 运行时排版——零 HarfBuzz 依赖，O(log N) 表查找（commit `a6336e5`） |
 | 4.3 S1-S4 | ✅ | 可编程原语注册表 + axiom_validator v2.0 |
 | 4.4 S1-S3 | ✅ | scrollable / dropdown / multiline_editable |
 | 4.X input | ✅ | 剪贴板 + Unicode 字符输入 |
+| 全代码库审计 | ✅ | 10 项修复（2 高危 + 4 中危 + 2 低危 BUG + 2 内存安全，commit `8647048`） |
+| 交互原语行为验证 | ✅ | 40 条运行时行为断言 + BUG-4/5/6 回归守护（commit `c424005`） |
 
 ---
 
@@ -31,9 +36,9 @@
 
 ## 2. 实施路线图（四个梯队）
 
-### 第一梯队：CJK 渲染闭环（Phase 4.2.3 S1-S2）
+### 第一梯队：CJK 渲染闭环（Phase 4.2.3 S1-S2）— ✅ 已完成
 
-**目标**：完成 4.2.3 剩余阶段，实现 CJK 文本零运行时排版。
+**目标**：~~完成 4.2.3 剩余阶段，实现 CJK 文本零运行时排版。~~ ✅ 已实现。
 
 #### Step 1: S1 — 编译期常量注入
 
@@ -71,11 +76,13 @@
 
 ---
 
-### 第二梯队：高密度文本渲染通道（Phase 4.X）
+### 第二梯队：高密度文本渲染通道（Phase 4.X）— 🔜 下一步
 
 **目标**：实现 8192 字符 per-char 颜色的等宽文本网格（终端/代码编辑器基础）。
 
-**前置**：D-4.1-C DISMISSED ✅ → 直接走方案 B（Instanced）
+**前置**：D-4.1-C PASSED ✅ → 直接走方案 B（Instanced）
+
+**新增 scope**：UAX#14 换行算法从 Phase 4.2.3 移入（换行是布局问题，与 dense grid 天然耦合）
 
 | Step | 任务 | 文件 |
 |:-----|:-----|:-----|
@@ -142,6 +149,7 @@
 |:-----|:-----|
 | Phase 4.6 Indirect Drawing | 过早优化，当前 instanced draw 性能足够 |
 | 三端一致性验证 | Phase 4.2.1 PAL 骨架完成但 Windows/Web 端未搭建测试环境 |
+| Latin 连字（Tier 2） | 装饰性功能（fi/fl/ffi），CJK 无需求，留给 Phase 5+ |
 | IME 预编辑 | 需要 OS 级集成，复杂度高，留给 5.0 |
 | Rope/Piece Table | Gap Buffer 对小型编辑器足够，超大文件支持留给 5.0 |
 | 动画系统 | 非核心路径，待文本编辑器原型后再考虑 |
@@ -173,12 +181,11 @@
 ## 6. 里程碑时间线（相对顺序）
 
 ```
-现在
+现在（2026-05-02）
  │
- ├─ 第一梯队: 4.2.3 S1 (字符集扩展 + Slug 曲线生成)
- │   └─ 4.2.3 S2 (零开销运行时排版 + cjk_text_demo)
+ ├─ 第一梯队: 4.2.3 S0+S1+S2 ✅ 已完成
  │
- ├─ 第二梯队: 4.X (高密度文本 Instanced 通道 + dense_text_demo)
+ ├─ 第二梯队: 4.X (高密度文本 Instanced 通道 + UAX#14 换行 + dense_text_demo) ← 当前
  │
  ├─ 第三梯队: 4.5 (语法糖) + L1 State 基础
  │
@@ -192,10 +199,11 @@
 
 ## 7. 立即可执行的下一步
 
-**Phase 4.2.3-S1 Step 1.1**：扩展 `font_preprocessor_cjk.nelua` 的字符集从 20 字核心验证子集扩展到 GB2312 一级 3755 字。
+**Phase 4.X Step 1**：在 `src/derive/shader_compose.lua` 新增 `nebula_compose_dense_text_shader(opts)`。
 
 具体操作：
-1. 在 `tools/font_preprocessor_cjk.nelua` 中定义 `CHARSET_GB2312_L1: [3755]uint32` 数组
-2. 将 HarfBuzz shaping 循环改为遍历完整字符集
-3. 验证内存（3755 × 28B ≈ 103KB shaping 表，远低于 4MB 上限）
-4. 运行预处理工具，确认 3755/3755 shaped 成功
+1. 参考 `nebula_compose_shader_instanced` 的 Storage Buffer + 程序化顶点模式
+2. 着色器包含：DenseTextUniforms (16B) + DenseCharInstance Storage Buffer + SDF atlas 纹理采样
+3. Vertex shader 程序化生成 unit quad（6 顶点），从 Storage Buffer 读取 per-char pos/uv/fg/bg
+4. Fragment shader 做 bg+fg SDF alpha 混合
+5. 详见 `PLAN_PHASE4_X_DENSE_TEXT.md` Section 3.1

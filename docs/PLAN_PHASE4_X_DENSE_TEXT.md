@@ -23,9 +23,11 @@
 - max_chars 参数化至 8192
 - Per-character 前景色 + 背景色
 - L0/L1 GPU buffer（替代栈分配）
+- UAX#14 换行算法（从 PLAN_PHASE4_2_3_CJK.md 移入，文本编辑器硬依赖）
 
 **不在 scope 内**：
 - 变宽富文本排版（Phase 4.2.3 HarfBuzz 的职责）
+- Latin 连字（Tier 2，推迟到 Phase 5+，装饰性功能不影响核心流程）
 - PTY / ANSI 解析（终端应用层代码）
 - IME 预编辑（未来 Phase）
 - 输入系统补全（已完成：缺口 #5/#6）
@@ -39,8 +41,8 @@
 | 路径 | spec 标志 | vertex 格式 | 字节/vertex | 适用场景 | 代码位置 |
 |:-----|:----------|:------------|:-----------|:---------|:---------|
 | SDF atlas | `textured=true` | NebulaPosUvVertex (pos+uv) | 16B | 按钮标签 | pipeline_factory.lua:50 |
-| Slug 矢量 | `slug_text=true` | NebulaSlugVertex (5×Vec4) | 80B | 高质量文本 | pipeline_factory.lua:662 |
-| **standard_instanced** | `standard_instanced=true` | 无 vertex buffer（程序化） | 0B | UI 组件 | pipeline_factory.lua:444 |
+| Slug 矢量 | `slug_text=true` | NebulaSlugVertex (5×Vec4) | 80B | 高质量文本 | pipeline_factory.lua:707 |
+| **standard_instanced** | `standard_instanced=true` | 无 vertex buffer（程序化） | 0B | UI 组件 | pipeline_factory.lua:483 |
 
 ### 1.2 关键限制
 
@@ -50,7 +52,7 @@
 
 ### 1.3 Standard Instanced 路径的启示
 
-standard_instanced 路径（pipeline_factory.lua:444-644）为高密度文本提供了一个成熟的参考模式：
+standard_instanced 路径（pipeline_factory.lua:483-700）为高密度文本提供了一个成熟的参考模式：
 
 - **零 vertex buffer**：vertex shader 用 `instance_index` + `vertex_index` 程序化生成 6 顶点
 - **Storage Buffer**：per-instance 数据通过 `storage<read>` 传递（binding 1）
@@ -78,7 +80,7 @@ NebulaDenseCharVertex = @record{
 
 **优点**：
 - 实现简单，CPU 端逐字符填入 vertex array
-- 不依赖 Storage Buffer（规避 D-4.1-C 风险）
+- 不依赖 Storage Buffer（规避 D-4.1-C 风险——注：D-4.1-C 已通过，此风险不再成立）
 
 **缺点**：
 - 每字符 6 顶点存在大量冗余（同一字符的 6 个顶点共享 fg/bg color）
@@ -342,17 +344,11 @@ global function nebula_dense_grid_fill_instance(
 
 ---
 
-## 5. D-4.1-C 风险声明
+## 5. D-4.1-C 风险状态（已消除）
 
-方案 B 依赖 Storage Buffer 在 8192 instance 规模下的性能。当前 D-4.1-C（10000 字符规模 Storage Buffer benchmark）未执行。
+~~方案 B 依赖 Storage Buffer 在 8192 instance 规模下的性能。~~
 
-**风险缓解策略**：
-
-1. **先实施方案 B**，在 `dense_text_demo` 中实测 8192 字符帧时间。
-2. 如果帧时间退化 ≥ 20%（对比同规模空 draw call），记录到 D-4.1-C 报告。
-3. 如果不可接受，回退到方案 A（per-vertex）：
-   - 改动范围：vertex shader（加回 vertex buffer）、upload 函数（vertex array）、pipeline layout（增加 VBO）
-   - 预计 ~200 行 diff，不影响 API 层
+**D-4.1-C 已通过**（commit `ebd7333`）：Storage Buffer 在 1K→5K→10K 实例规模下退化仅 +2.5%，远低于 20% 阈值。方案 B（Instanced）无性能风险，可直接实施。详见 `REPORT_PHASE4_2_2_BENCH.md`。
 
 ---
 
@@ -360,7 +356,7 @@ global function nebula_dense_grid_fill_instance(
 
 1. **容量**：`dense_text_demo` 渲染 120×50 = 6000 字符网格，每字符独立 fg/bg color。
 2. **公理合规**：axiom_validator 对 DenseTextVisual 的管线签名审查通过。
-3. **回归**：39/39 回归测试全绿 + 新增专项测试。
+3. **回归**：47/47 回归测试全绿 + 新增专项测试。
 4. **性能基线**：记录 6000 字符帧时间，作为 D-4.1-C 数据点。
 5. **API 简洁性**：应用层调用不超过 3 步：① 填充 DenseCharInstance 数组 ② upload ③ draw。
 
@@ -393,5 +389,5 @@ global function nebula_dense_grid_fill_instance(
 | resize 通知 | 需新增 | 已有（Phase 3.12） |
 | 剪贴板 | 需新增 | 已完成（缺口 #5） |
 | Unicode 输入 | 需新增 | 已完成（缺口 #6） |
-| D-4.1-C | 回避 | 显式风险声明 + 回退策略 |
+| D-4.1-C | 回避 | ✅ 已通过（+2.5% 退化），风险消除 |
 | Dense vs Rich | 未界定 | 明确仅等宽网格 |

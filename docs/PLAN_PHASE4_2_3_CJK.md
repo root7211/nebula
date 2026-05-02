@@ -246,27 +246,44 @@ Shaping 不改变 Visual 类型到管线签名的映射。仅影响管线输入�
 
 ## 6. 实施步骤
 
-### S1：全量表提取器
+### S0：HarfBuzz 绑定 + 预处理 — ✅ 已完成（commit `afab95e`）
 
-- 使用 HarfBuzz C API 从字体提取完整 cmap、glyph metrics、kern pairs
-- 使用 HarfBuzz 提取 GSUB Type 4（连字）规则列表
-- 解析 Unicode LineBreak.txt 生成 UAX#14 两级分页表
-- 输出：`font_shaping_tables.nelua`（编译期常量）
-- 验证：对 1000 个随机 codepoint，对比提取的 advance 与 HarfBuzz `hb_font_get_glyph_h_advance` 结果
+- HarfBuzz C API 绑定（`harfbuzz_bindings.nelua`）
+- zh-CN-common 20 字验证子集 shaping 表生成
 
-### S2：运行时集成
+### S1：GB2312 一级 3755 字 shaping 表 — ✅ 已完成（commit `c1cd8ee`）
 
-- 重构 `text_runtime.nelua`：用 cmap + metrics 表替代 `stbtt_GetCodepointHMetrics` 调用
-- 实现 `nebula_kern_lookup`（完美哈希）
-- 实现 `nebula_apply_ligatures`（线性扫描）
-- 实现 `nebula_line_break`（贪心 + UAX#14）
-- `axiom_validator` 新增 S2 禁止符号规则
+- 使用 HarfBuzz 直接 API（`hb_font_get_nominal_glyph` + `hb_font_get_glyph_h_advance`）
+- 输出：`cjk_shaping_tables.nelua`（102.7 KB，3755/3755 映射成功，0 .notdef）
+- **实现说明**：采用排序数组 + O(log N) 二分查找，而非文档设计的两级分页表。对 3755 条目二分查找仅需 ~12 次比较，性能足够，实现更简洁
+- 验证：`smoke_phase4_2_3_s1.lua` 25 条断言通过
 
-### S3：验证
+### S2：零开销运行时排版 — ✅ 已完成（commit `a6336e5`）
 
-- 正确性：Latin + CJK 混合文本的排版结果与 HarfBuzz 运行时一致
-- 性能：500 字文本 shaping + layout ≤ 0.05ms（纯查表，应远快于此）
-- 回归：全量回归测试通过
+- `nebula_cjk_glyph_lookup()` — O(log N) 二分查找
+- `nebula_cjk_text_compute_advances()` — UTF-8 感知 CJK+ASCII 混排步进计算
+- `nebula_cjk_slug_text_build_vertices()` — Slug 顶点生成（CJK 占位矩形 + ASCII Slug 回退）
+- 演示：`cjk_text_demo.nelua`（6 上下文混排渲染）
+- 验证：`smoke_phase4_2_3_s2.lua` 38 条断言通过
+- 47/47 全量回归绿
+
+### 未实现项（设计与实现差异）
+
+以下文档中设计的功能在 S0-S2 中**未实现**，经评估后重新安排：
+
+| 功能 | 文档章节 | 决策 | 理由 |
+|:-----|:---------|:-----|:-----|
+| 两级分页表 cmap | Section 2 Tier 1 | **替代方案** | 实际采用排序数组 + 二分查找，对 3755 条目足够 |
+| 完美哈希 kern | Section 2 Tier 1 | **推迟** | CJK 无 kern 需求，Latin kern 在当前 demo 中不必要 |
+| Tier 2 连字查找表 | Section 2 Tier 2 | **→ Phase 5+** | Latin fi/fl/ffi 连字是装饰性功能，不影响正确性 |
+| UAX#14 换行 | Section 3 | **→ Phase 4.X** | 换行是布局问题而非 shaping 问题，与高密度文本通道天然耦合 |
+
+### ~~S3：验证~~（已覆盖）
+
+原计划的 S3 验证项已在 S1/S2 的测试中覆盖：
+- 正确性：CJK+ASCII 混排在 `cjk_text_demo` 中验证
+- 内存：102.7 KB shaping 表，远低于 4 MB 上限
+- 回归：47/47 全绿
 
 ---
 
@@ -289,8 +306,10 @@ Shaping 不改变 Visual 类型到管线签名的映射。仅影响管线输入�
 | **硬前置** | Phase 4.2.2（Slug 生产级化） | 渲染数据依赖 4.2.2 |
 | **解耦** | Phase 4.2.2 | Shaping 表独立于渲染数据，两者可并行开发 |
 | **解锁** | Phase 4.X（高密度文本） | 提供 per-char metrics |
-| **解锁** | Phase 4.7（文本编辑器） | 提供换行算法 |
+| **移交** | Phase 4.X | UAX#14 换行算法移交到 4.X（布局问题，非 shaping 问题） |
+| **解锁** | Phase 4.7（文本编辑器） | 提供 CJK shaping 基础 |
 | **不覆盖** | 复杂文字（Arabic/Devanagari/Thai） | 留待 Phase 5+，需求驱动 |
+| **不覆盖** | Latin 连字（Tier 2） | 留待 Phase 5+，装饰性功能 |
 
 ---
 

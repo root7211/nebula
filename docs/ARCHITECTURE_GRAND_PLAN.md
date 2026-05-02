@@ -94,8 +94,8 @@ Nebula 的目标不是做一个小众的研究项目，而是成为一个能与�
 | **4.2.2** | Slug 渲染内核生产级化 | 清算 MVP 债务，支持任意仿射变换与 Latin 全量字符。 | **已完成**（D-4.1-A/B/C 全部通过） | 79/100 |
 | **4.3** | **可编程原语注册表** | 允许开发者安全注入自定义交互逻辑，框架从工具库升维为开放元系统。 | **已完成**（含 Task D process_body 公理校验，已接入编译流程） | **90/100** |
 | **4.4** | **高级组件库** | 实现 scrollable、dropdown、multiline_editable 标准组件。 | **已完成**（三个原语已内置注册表，契约校验已接入编译流程） | **81/100** |
-| **4.2.3** | **分级文本 Shaping + CJK** | 分级查表架构（Tier 1 cmap+metrics+kern / Tier 2 连字 / Tier 3 留 Phase 5+）；零运行时 HarfBuzz 依赖。详见 `PLAN_PHASE4_2_3_CJK.md` v3。 | **架构定稿，待实施**（S0 部分已完成） | 82/100 |
-| 4.X | 高密度文本渲染通道 | 8192 字符 per-char 颜色等宽文本网格（终端/代码编辑器基础）。 | 规划中 | 待评分 |
+| **4.2.3** | **分级文本 Shaping + CJK** | 分级查表架构（Tier 1 cmap+metrics 已完成）；零运行时 HarfBuzz 依赖。Tier 2 连字→Phase 5+，UAX#14 换行→Phase 4.X。详见 `PLAN_PHASE4_2_3_CJK.md` v3。 | **✅ 已完成**（S0+S1+S2，47/47 回归全绿） | 82/100 |
+| 4.X | 高密度文本渲染通道 | 8192 字符 per-char 颜色等宽文本网格 + UAX#14 换行（终端/代码编辑器基础）。 | 规划中 | 待评分 |
 | 4.5 | 注册原语语法糖 | 基于 4.4 真实用例提炼重复模式，简化 DX | 规划中 | 待评分 |
 | 4.6 | Indirect Drawing | GPU 端实例剔除与间接绘制（当前不做，instanced draw 性能足够） | 规划中 | 78/100 |
 | 4.7 | 文本编辑器原型 | 验证 Era II 工业级能力（50 行愿景中间里程碑） | 规划中 | 待评分 |
@@ -114,7 +114,7 @@ Nebula 的目标不是做一个小众的研究项目，而是成为一个能与�
 | `a854546` | `src/derive/axiom_validator.lua` | `cartesian_booleans` 添加 `MAX_BOOLEAN_COMBOS = 256` 上限，超限退化为确定性随机采样（固定种子 42），防止编译期 2^n 指数爆炸 |
 | `5f034b7` | `src/derive/interaction_factory.lua` | 269 行 `nebula_gen_text_buffer` 拆分为 `_gen_cursor_helpers` / `_gen_process_text_input` / `_gen_selection_helpers` / `_gen_text_accessors` 四个职责单一的子生成器 |
 
-所有改进零行为变更，43/43 回归测试全绿。
+所有改进零行为变更，47/47 回归测试全绿。
 
 ---
 
