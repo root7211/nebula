@@ -1,6 +1,7 @@
 require "renderer"
 require "liberation_sans_ascii_48_metrics"
 require "liberation_sans_slug_metrics"  -- ★ BUG-7 修复：Slug 路径所需的 NebulaSlugGlyph 等符号
+require "cjk_shaping_tables"            -- ★ Phase 4.2.3-S2: CJK shaping 表（GB2312 一级 3755 字）
 
 ## cinclude "<stdio.h>"
 ## cinclude "<string.h>"
@@ -489,6 +490,279 @@ global function nebula_slug_text_build_vertices(
 
     ::slug_next::
     i = i + 1
+  end
+
+  $out_width  = max_x - origin_x
+  $out_height = line_height
+  return vertex_count
+end
+
+-- =============================================================================
+-- ★ Phase 4.2.3-S2: CJK 运行时排版支持
+--
+-- 设计哲学（公理 A — 阶段封闭性）：
+--   · S2 运行时零 HarfBuzz 依赖。所有排版操作通过查表完成。
+--   · NEBULA_CJK_GLYPHS 和 NEBULA_CJK_CODEPOINTS 是 S0/S1 产物，
+--     编译期常量，L0 永久层数据。
+--   · 排版输出（advances 数组、顶点数组）为 L2 帧级数据。
+--
+-- 三个核心函数：
+--   1. nebula_cjk_glyph_lookup — 码点→索引，O(log N) 二分查找
+--   2. nebula_cjk_text_compute_advances — 纯查表排版，O(N)
+--   3. nebula_cjk_slug_text_build_vertices — CJK Slug 顶点生成
+-- =============================================================================
+
+-- ★ Phase 4.2.3-S2 Task 2.3: 码点→CJK 字形索引二分查找
+-- NEBULA_CJK_CODEPOINTS 已按升序排列，支持 O(log N) 查找。
+-- 返回 -1 表示未找到（字体不覆盖该码点）。
+global function nebula_cjk_glyph_lookup(codepoint: uint32): int32
+  -- 使用独立的 NEBULA_CJK_CODEPOINTS 数组做二分查找（cache-friendly）
+  local lo: int32 = 0
+  local hi: int32 = NEBULA_CJK_GLYPH_COUNT - 1
+  while lo <= hi do
+    local mid = lo + ((hi - lo) >> 1)
+    local mid_cp = NEBULA_CJK_CODEPOINTS[mid]
+    if mid_cp == codepoint then
+      return mid
+    elseif mid_cp < codepoint then
+      lo = mid + 1
+    else
+      hi = mid - 1
+    end
+  end
+  return -1
+end
+
+-- ★ Phase 4.2.3-S2 Task 2.1: CJK 文本排版 — 纯查表 O(N)
+-- 计算 UTF-8 CJK 文本中每个字符的累计 X 偏移。
+-- 支持 ASCII + CJK 混排：ASCII 字符走已有的 ASCII 字形表，CJK 走 S1 表。
+--
+-- 参数：
+--   text         : cstring   — UTF-8 编码文本
+--   pixel_height : float32   — 目标像素高度
+--   out_advances : *float32  — 输出数组，长度 >= 字符数+1
+--   max_chars    : uint32    — out_advances 最大元素数（含末尾哨兵）
+--
+-- 返回：实际写入的有效字符数（不含哨兵）
+global function nebula_cjk_text_compute_advances(
+  text:         cstring,
+  pixel_height: float32,
+  out_advances: *[0]float32,
+  max_chars:    uint32
+): uint32
+  if text == nilptr or max_chars == 0 then
+    return 0
+  end
+  -- CJK: scale 基于 UPEM
+  local cjk_scale = pixel_height / (@float32)(NEBULA_CJK_UPEM)
+  -- ASCII: scale 基于 Slug font units
+  local ascii_scale = pixel_height / (@float32)(NEBULA_SLUG_ASCENT - NEBULA_SLUG_DESCENT)
+  local pen_x: float32 = 0.0
+  local text_len = strlen(text)
+  local text_bytes = (@*[0]uint8)(text)
+  local count: uint32 = 0
+  local i: csize = 0
+
+  while i < text_len and count + 1 < max_chars do
+    out_advances[count] = pen_x
+    local b0 = text_bytes[i]
+
+    -- UTF-8 解码
+    local codepoint: uint32 = 0
+    local byte_len: csize = 1
+    if b0 < 0x80 then
+      codepoint = (@uint32)(b0)
+    elseif b0 < 0xE0 and i + 1 < text_len then
+      codepoint = ((@uint32)(b0 & 0x1F) << 6) | (@uint32)(text_bytes[i+1] & 0x3F)
+      byte_len = 2
+    elseif b0 < 0xF0 and i + 2 < text_len then
+      codepoint = ((@uint32)(b0 & 0x0F) << 12) | ((@uint32)(text_bytes[i+1] & 0x3F) << 6) | (@uint32)(text_bytes[i+2] & 0x3F)
+      byte_len = 3
+    elseif i + 3 < text_len then
+      codepoint = ((@uint32)(b0 & 0x07) << 18) | ((@uint32)(text_bytes[i+1] & 0x3F) << 12) | ((@uint32)(text_bytes[i+2] & 0x3F) << 6) | (@uint32)(text_bytes[i+3] & 0x3F)
+      byte_len = 4
+    end
+
+    -- 跳过换行
+    if codepoint ~= 10 and codepoint ~= 13 then
+      -- 尝试 CJK 查表
+      local cjk_idx = nebula_cjk_glyph_lookup(codepoint)
+      if cjk_idx >= 0 then
+        pen_x = pen_x + (@float32)(NEBULA_CJK_GLYPHS[cjk_idx].advance) * cjk_scale
+      else
+        -- Fallback 到 ASCII Slug 字形表
+        local cp = (@cint)(codepoint)
+        if cp >= NEBULA_SLUG_FIRST_CODEPOINT and cp <= NEBULA_SLUG_LAST_CODEPOINT then
+          local glyph_idx = cp - NEBULA_SLUG_FIRST_CODEPOINT
+          pen_x = pen_x + NEBULA_SLUG_GLYPHS[glyph_idx].advance * ascii_scale
+        end
+      end
+    end
+
+    count = count + 1
+    i = i + byte_len
+  end
+
+  -- 末尾哨兵
+  if count < max_chars then
+    out_advances[count] = pen_x
+  end
+  return count
+end
+
+-- ★ Phase 4.2.3-S2 Task 2.2: CJK Slug 文本顶点生成
+-- 支持 ASCII + CJK 混排，两种字符使用各自的 Slug 字形数据。
+-- CJK 字形暂使用 shaping 表的边界框信息生成 placeholder 四边形，
+-- 等待 CJK Slug 曲线数据（Phase 4.2.3 Step 1.4）生成后
+-- 可直接替换为真正的 Slug band 渲染。
+--
+-- 当前策略：
+--   · ASCII 字符：使用已有的 Slug 曲线数据（NebulaSlugGlyph），精确渲染
+--   · CJK 字符：使用 shaping 表的 advance/bearing 生成填充矩形
+--     （curve_count=0 的 placeholder，片段着色器会渲染为纯色块）
+global function nebula_cjk_slug_text_build_vertices(
+  text:         cstring,
+  origin_x:     float32,
+  origin_y:     float32,
+  pixel_height: float32,
+  color:        Color,
+  slug_glyphs:  *[0]NebulaSlugGlyph,
+  out_vertices: *[0]NebulaSlugVertex,
+  max_vertices: uint32,
+  out_width:    *float32,
+  out_height:   *float32
+): uint32
+  if text == nilptr then
+    $out_width  = 0.0
+    $out_height = 0.0
+    return 0
+  end
+
+  -- ASCII Slug 尺度
+  local ASCII_FONT_UNITS: float32 = (@float32)(NEBULA_SLUG_ASCENT - NEBULA_SLUG_DESCENT)
+  local ascii_scale = pixel_height / ASCII_FONT_UNITS
+  -- CJK 尺度
+  local cjk_scale = pixel_height / (@float32)(NEBULA_CJK_UPEM)
+
+  local pen_x:        float32 = origin_x
+  local vertex_count: uint32  = 0
+  local text_len  = strlen(text)
+  local text_bytes = (@*[0]uint8)(text)
+  local max_x: float32 = origin_x
+  local line_height = pixel_height
+
+  -- Jacobian inverse（正交投影 + 均匀缩放）
+  local ascii_inv_scale: float32 = 1.0 / ascii_scale
+  local cjk_inv_scale: float32 = 1.0 / cjk_scale
+
+  local i: csize = 0
+  while i < text_len do
+    local b0 = text_bytes[i]
+
+    -- UTF-8 解码
+    local codepoint: uint32 = 0
+    local byte_len: csize = 1
+    if b0 < 0x80 then
+      codepoint = (@uint32)(b0)
+    elseif b0 < 0xE0 and i + 1 < text_len then
+      codepoint = ((@uint32)(b0 & 0x1F) << 6) | (@uint32)(text_bytes[i+1] & 0x3F)
+      byte_len = 2
+    elseif b0 < 0xF0 and i + 2 < text_len then
+      codepoint = ((@uint32)(b0 & 0x0F) << 12) | ((@uint32)(text_bytes[i+1] & 0x3F) << 6) | (@uint32)(text_bytes[i+2] & 0x3F)
+      byte_len = 3
+    elseif i + 3 < text_len then
+      codepoint = ((@uint32)(b0 & 0x07) << 18) | ((@uint32)(text_bytes[i+1] & 0x3F) << 12) | ((@uint32)(text_bytes[i+2] & 0x3F) << 6) | (@uint32)(text_bytes[i+3] & 0x3F)
+      byte_len = 4
+    end
+
+    if codepoint == 10 or codepoint == 13 then
+      i = i + byte_len
+      goto cjk_slug_next
+    end
+
+    -- 尝试 CJK 路径
+    do
+      local cjk_idx = nebula_cjk_glyph_lookup(codepoint)
+      if cjk_idx >= 0 then
+        local cjk_g = &NEBULA_CJK_GLYPHS[cjk_idx]
+        -- CJK placeholder：使用 bearing/size 生成填充矩形
+        -- curve_count=0 告诉 Slug 着色器这是纯色块
+        if vertex_count + 6 <= max_vertices then
+          local gx0 = pen_x + (@float32)(cjk_g.x_bearing) * cjk_scale
+          local gy0 = origin_y - (@float32)(cjk_g.y_bearing) * cjk_scale
+          local gx1 = gx0 + (@float32)(cjk_g.width) * cjk_scale
+          local gy1 = gy0 - (@float32)(cjk_g.height) * cjk_scale
+
+          -- attr1.w = 0 (curve_count=0) signals solid fill to the fragment shader
+          local a0_tl = Vec4{ x=gx0, y=gy0, z=0.0, w=0.0 }
+          local a0_tr = Vec4{ x=gx1, y=gy0, z=0.0, w=0.0 }
+          local a0_bl = Vec4{ x=gx0, y=gy1, z=0.0, w=0.0 }
+          local a0_br = Vec4{ x=gx1, y=gy1, z=0.0, w=0.0 }
+          local a1 = Vec4{ x=0.0, y=0.0, z=0.0, w=0.0 }  -- curve_offset=0, curve_count=0
+          local a2 = Vec4{ x=0.0, y=0.0, z=0.0, w=cjk_scale }
+          local a3 = Vec4{ x=cjk_inv_scale, y=cjk_inv_scale, z=0.0, w=0.0 }
+          local a4 = Vec4{ x=color.r, y=color.g, z=color.b, w=color.a }
+
+          out_vertices[vertex_count + 0] = NebulaSlugVertex{ attr0=a0_tl, attr1=a1, attr2=a2, attr3=a3, attr4=a4 }
+          out_vertices[vertex_count + 1] = NebulaSlugVertex{ attr0=a0_tr, attr1=a1, attr2=a2, attr3=a3, attr4=a4 }
+          out_vertices[vertex_count + 2] = NebulaSlugVertex{ attr0=a0_br, attr1=a1, attr2=a2, attr3=a3, attr4=a4 }
+          out_vertices[vertex_count + 3] = NebulaSlugVertex{ attr0=a0_tl, attr1=a1, attr2=a2, attr3=a3, attr4=a4 }
+          out_vertices[vertex_count + 4] = NebulaSlugVertex{ attr0=a0_br, attr1=a1, attr2=a2, attr3=a3, attr4=a4 }
+          out_vertices[vertex_count + 5] = NebulaSlugVertex{ attr0=a0_bl, attr1=a1, attr2=a2, attr3=a3, attr4=a4 }
+          vertex_count = vertex_count + 6
+        end
+
+        pen_x = pen_x + (@float32)(cjk_g.advance) * cjk_scale
+        if pen_x > max_x then max_x = pen_x end
+        i = i + byte_len
+        goto cjk_slug_next
+      end
+    end
+
+    -- Fallback: ASCII Slug 路径（复用已有逻辑）
+    do
+      local cp = (@cint)(codepoint)
+      if cp >= NEBULA_SLUG_FIRST_CODEPOINT and cp <= NEBULA_SLUG_LAST_CODEPOINT then
+        local glyph_idx = cp - NEBULA_SLUG_FIRST_CODEPOINT
+        local glyph = slug_glyphs[glyph_idx]
+
+        if glyph.curve_count > 0 and vertex_count + 6 <= max_vertices then
+          local gx0 = pen_x + glyph.x_min * ascii_scale
+          local gx1 = pen_x + glyph.x_max * ascii_scale
+          local gy0 = origin_y - glyph.y_max * ascii_scale
+          local gy1 = origin_y - glyph.y_min * ascii_scale
+
+          local cf = (@float32)(glyph.curve_offset)
+          local cc = (@float32)(glyph.curve_count)
+          local bf = (@float32)(glyph.band_offset)
+          local hbc = (@float32)(glyph.h_band_count)
+          local vbc = (@float32)(glyph.v_band_count)
+
+          local a0_tl = Vec4{ x=gx0, y=gy0, z=glyph.x_min*ascii_scale, w=glyph.y_min*ascii_scale }
+          local a0_tr = Vec4{ x=gx1, y=gy0, z=glyph.x_min*ascii_scale, w=glyph.y_min*ascii_scale }
+          local a0_bl = Vec4{ x=gx0, y=gy1, z=glyph.x_min*ascii_scale, w=glyph.y_min*ascii_scale }
+          local a0_br = Vec4{ x=gx1, y=gy1, z=glyph.x_min*ascii_scale, w=glyph.y_min*ascii_scale }
+          local a1 = Vec4{ x=glyph.x_max*ascii_scale, y=glyph.y_max*ascii_scale, z=cf, w=cc }
+          local a2 = Vec4{ x=bf, y=hbc, z=vbc, w=ascii_scale }
+          local a3 = Vec4{ x=ascii_inv_scale, y=ascii_inv_scale, z=0.0, w=0.0 }
+          local a4 = Vec4{ x=color.r, y=color.g, z=color.b, w=color.a }
+
+          out_vertices[vertex_count + 0] = NebulaSlugVertex{ attr0=a0_tl, attr1=a1, attr2=a2, attr3=a3, attr4=a4 }
+          out_vertices[vertex_count + 1] = NebulaSlugVertex{ attr0=a0_tr, attr1=a1, attr2=a2, attr3=a3, attr4=a4 }
+          out_vertices[vertex_count + 2] = NebulaSlugVertex{ attr0=a0_br, attr1=a1, attr2=a2, attr3=a3, attr4=a4 }
+          out_vertices[vertex_count + 3] = NebulaSlugVertex{ attr0=a0_tl, attr1=a1, attr2=a2, attr3=a3, attr4=a4 }
+          out_vertices[vertex_count + 4] = NebulaSlugVertex{ attr0=a0_br, attr1=a1, attr2=a2, attr3=a3, attr4=a4 }
+          out_vertices[vertex_count + 5] = NebulaSlugVertex{ attr0=a0_bl, attr1=a1, attr2=a2, attr3=a3, attr4=a4 }
+          vertex_count = vertex_count + 6
+        end
+
+        pen_x = pen_x + glyph.advance * ascii_scale
+        if pen_x > max_x then max_x = pen_x end
+      end
+    end
+
+    ::cjk_slug_next::
+    i = i + byte_len
   end
 
   $out_width  = max_x - origin_x

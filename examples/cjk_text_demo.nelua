@@ -1,0 +1,392 @@
+-- =============================================================================
+-- cjk_text_demo.nelua
+-- Nebula GUI Compiler — Phase 4.2.3-S2
+--
+-- CJK + ASCII 混排文本渲染演示：
+--   · 验证 nebula_cjk_slug_text_build_vertices 端到端可用
+--   · 验证 CJK（GB2312 一级 3755 字）与 ASCII Slug 的混排
+--   · 验证 nebula_cjk_glyph_lookup 二分查找正确性
+--   · 验证 nebula_cjk_text_compute_advances 排版正确性
+--
+-- 渲染内容：
+--   1. 中文标题（纯 CJK）
+--   2. 中英混排副标题
+--   3. 多行中文正文
+--   4. ASCII Slug 对照组（验证 fallback 正确）
+--   5. 动态帧计数器（验证混排动态更新）
+-- =============================================================================
+
+## cinclude "<stdio.h>"
+## cinclude "<string.h>"
+
+require "nebula_core"
+require "glfw_bindings"
+require "wgpu_bindings"
+require "renderer"
+require "text_runtime"
+
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+global function snprintf(buf: cstring, size: csize, fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+
+local WIN_W <comptime> = 960
+local WIN_H <comptime> = 640
+
+-- =============================================================================
+-- CjkTextVisual: 用于 Slug 文本渲染的 Visual 类型
+-- =============================================================================
+global CjkTextVisual = @record{
+  pos: Vec2,
+  size: Vec2,
+  pixel_height: float32,
+  default_text_color: Color,
+}
+##[[
+nebula_annotate("CjkTextVisual", {
+  states = {"default"},
+  primitives = {},
+  transitions = {},
+  text_mode = "slug",
+  max_chars = 512,
+})
+]]
+## nebula_derive_slug_text_visual("CjkTextVisual")
+
+-- =============================================================================
+-- CJK 文本渲染上下文（手动管理，与 text_demo 相同模式）
+-- 使用 nebula_cjk_slug_text_build_vertices 替代 nebula_slug_text_build_vertices
+-- =============================================================================
+global CjkTextContext = @record{
+  visual: CjkTextVisual,
+  mesh:   NebulaTextMesh,
+  current_text_color: Color,
+}
+
+function CjkTextContext:init(vis: CjkTextVisual): void
+  self.visual = vis
+  self.mesh:init()
+  self.current_text_color = vis.default_text_color
+end
+
+function CjkTextContext:set_text(renderer: *NebulaRenderer, text: cstring): boolean
+  local MAX_VERTS <comptime> = 512 * 6
+  local verts: [MAX_VERTS]NebulaSlugVertex
+  local mesh_w: float32 = 0.0
+  local mesh_h: float32 = 0.0
+  local vertex_count = nebula_cjk_slug_text_build_vertices(
+    text,
+    self.visual.pos.x,
+    self.visual.pos.y,
+    self.visual.pixel_height,
+    self.current_text_color,
+    &NEBULA_SLUG_GLYPHS[0],
+    &verts[0],
+    (@uint32)(MAX_VERTS),
+    &mesh_w,
+    &mesh_h
+  )
+  self.visual.size = Vec2{ x = mesh_w, y = mesh_h }
+  self.mesh.width = mesh_w
+  self.mesh.height = mesh_h
+  local data_ptr: pointer = nilptr
+  local data_size: csize = 0
+  if vertex_count > 0 then
+    data_ptr = &verts[0]
+    data_size = (@csize)((@uint64)(vertex_count) * (@uint64)(#NebulaSlugVertex))
+  end
+  if not nebula_text_mesh_upload(renderer, &self.mesh, data_ptr, data_size, vertex_count, "nebula-cjk-slug-mesh") then return false end
+  return true
+end
+
+function CjkTextContext:to_uniforms(win_w: int32, win_h: int32): SlugTextUniforms
+  return SlugTextUniforms{
+    viewport = Vec2{ x = (@float32)(win_w), y = (@float32)(win_h) },
+    _pad0 = 0.0,
+    _pad1 = 0.0,
+  }
+end
+
+-- =============================================================================
+-- 主程序
+-- =============================================================================
+local function main(): int32
+  if glfwInit() == 0 then
+    printf("glfw: init failed\n")
+    return 1
+  end
+  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
+
+  local window = glfwCreateWindow(WIN_W, WIN_H,
+    "Nebula Phase 4.2.3-S2 — CJK + ASCII Mixed Text", nilptr, nilptr)
+  if window == nilptr then
+    printf("glfw: window creation failed\n")
+    return 1
+  end
+
+  local renderer: NebulaRenderer
+  if not renderer:init(window, WIN_W, WIN_H) then
+    return 1
+  end
+
+  -- Slug 管线（共享）
+  local pipe: SlugTextPipeline
+  if not pipe:init(&renderer) then
+    return 1
+  end
+  -- 上传 Slug GPU 缓冲区（曲线 + band_metas + band_refs）
+  local curves_sz = (@csize)(NEBULA_SLUG_TOTAL_CURVES * #NebulaSlugCurve)
+  local metas_sz  = (@csize)(NEBULA_SLUG_TOTAL_BAND_METAS * #NebulaSlugBandMeta)
+  local refs_sz   = (@csize)(NEBULA_SLUG_TOTAL_BAND_REFS * #@uint16)
+  if not pipe:upload_slug_buffers(&renderer,
+    &NEBULA_SLUG_CURVES[0], curves_sz,
+    &NEBULA_SLUG_BAND_METAS[0], metas_sz,
+    &NEBULA_SLUG_BAND_REFS[0], refs_sz) then
+    printf("slug: failed to upload GPU buffers\n")
+    return 1
+  end
+  if not pipe:update_slug_bind_group(&renderer) then
+    printf("slug: failed to create bind group\n")
+    return 1
+  end
+
+  -- =========================================================================
+  -- 1. 中文标题（36px，白色，纯 CJK）
+  -- =========================================================================
+  local title: CjkTextContext
+  title:init(CjkTextVisual{
+    pos = Vec2{ x = 48.0, y = 48.0 },
+    size = Vec2{ x = 0.0, y = 0.0 },
+    pixel_height = 36.0,
+    default_text_color = Color{ r = 0.96, g = 0.97, b = 1.00, a = 1.0 },
+  })
+  -- "你好世界" — 纯 CJK 文本
+  if not title:set_text(&renderer, "\xE4\xBD\xA0\xE5\xA5\xBD\xE4\xB8\x96\xE7\x95\x8C") then
+    printf("text: failed to set CJK title\n")
+    return 1
+  end
+
+  -- =========================================================================
+  -- 2. 中英混排副标题（24px，蓝色）
+  -- =========================================================================
+  local subtitle: CjkTextContext
+  subtitle:init(CjkTextVisual{
+    pos = Vec2{ x = 48.0, y = 104.0 },
+    size = Vec2{ x = 0.0, y = 0.0 },
+    pixel_height = 24.0,
+    default_text_color = Color{ r = 0.45, g = 0.68, b = 1.00, a = 1.0 },
+  })
+  -- "Phase 4.2.3-S2 中英混排测试" — 混排文本
+  if not subtitle:set_text(&renderer, "Phase 4.2.3-S2 \xE4\xB8\xAD\xE8\x8B\xB1\xE6\xB7\xB7\xE6\x8E\x92\xE6\xB5\x8B\xE8\xAF\x95") then
+    printf("text: failed to set subtitle\n")
+    return 1
+  end
+
+  -- =========================================================================
+  -- 3. 多行中文正文（20px，绿色）
+  -- =========================================================================
+  local body: CjkTextContext
+  body:init(CjkTextVisual{
+    pos = Vec2{ x = 48.0, y = 152.0 },
+    size = Vec2{ x = 0.0, y = 0.0 },
+    pixel_height = 20.0,
+    default_text_color = Color{ r = 0.55, g = 0.90, b = 0.55, a = 1.0 },
+  })
+  -- "编译期推导 运行时查表 零依赖"
+  if not body:set_text(&renderer, "\xE7\xBC\x96\xE8\xAF\x91\xE6\x9C\x9F\xE6\x8E\xA8\xE5\xAF\xBC  \xE8\xBF\x90\xE8\xA1\x8C\xE6\x97\xB6\xE6\x9F\xA5\xE8\xA1\xA8  \xE9\x9B\xB6\xE4\xBE\x9D\xE8\xB5\x96") then
+    printf("text: failed to set body\n")
+    return 1
+  end
+
+  -- =========================================================================
+  -- 4. ASCII 对照组（20px，橙色，纯 ASCII Slug 渲染）
+  -- =========================================================================
+  local ascii_ref: CjkTextContext
+  ascii_ref:init(CjkTextVisual{
+    pos = Vec2{ x = 48.0, y = 200.0 },
+    size = Vec2{ x = 0.0, y = 0.0 },
+    pixel_height = 20.0,
+    default_text_color = Color{ r = 1.00, g = 0.70, b = 0.30, a = 1.0 },
+  })
+  if not ascii_ref:set_text(&renderer, "ASCII Slug fallback: Hello, World! 0123456789") then
+    printf("text: failed to set ASCII reference\n")
+    return 1
+  end
+
+  -- =========================================================================
+  -- 5. 大字号 CJK 验证（48px，淡紫色）
+  -- =========================================================================
+  local large_cjk: CjkTextContext
+  large_cjk:init(CjkTextVisual{
+    pos = Vec2{ x = 48.0, y = 260.0 },
+    size = Vec2{ x = 0.0, y = 0.0 },
+    pixel_height = 48.0,
+    default_text_color = Color{ r = 0.78, g = 0.60, b = 1.00, a = 1.0 },
+  })
+  -- "大学中国" — 大字号
+  if not large_cjk:set_text(&renderer, "\xE5\xA4\xA7\xE5\xAD\xA6\xE4\xB8\xAD\xE5\x9B\xBD") then
+    printf("text: failed to set large CJK\n")
+    return 1
+  end
+
+  -- =========================================================================
+  -- 6. 动态帧计数器（18px，白色，验证混排动态更新）
+  -- =========================================================================
+  local counter: CjkTextContext
+  counter:init(CjkTextVisual{
+    pos = Vec2{ x = 48.0, y = 340.0 },
+    size = Vec2{ x = 0.0, y = 0.0 },
+    pixel_height = 18.0,
+    default_text_color = Color{ r = 0.96, g = 0.96, b = 0.98, a = 1.0 },
+  })
+  if not counter:set_text(&renderer, "Frame: 0") then
+    printf("text: failed to set counter\n")
+    return 1
+  end
+
+  -- =========================================================================
+  -- 验证 nebula_cjk_glyph_lookup 正确性
+  -- =========================================================================
+  printf("=== Phase 4.2.3-S2 CJK Text Demo ===\n")
+  printf("  CJK glyph table: %d entries\n", NEBULA_CJK_GLYPH_COUNT)
+
+  -- 验证几个核心汉字的查找
+  local test_chars: [5]uint32 = { 0x4F60, 0x597D, 0x4E16, 0x754C, 0x4E2D }  -- 你好世界中
+  local all_found = true
+  for ti = 0, 4 do
+    local idx = nebula_cjk_glyph_lookup(test_chars[ti])
+    if idx < 0 then
+      printf("  FAIL: U+%04X not found in CJK table\n", test_chars[ti])
+      all_found = false
+    else
+      printf("  OK: U+%04X -> index %d, advance=%d\n", test_chars[ti], idx, NEBULA_CJK_GLYPHS[idx].advance)
+    end
+  end
+  if all_found then
+    printf("  [PASS] All core CJK lookups succeeded\n")
+  end
+
+  -- 验证 advance 计算
+  local test_advances: [16]float32
+  -- "你好" = 2 chars
+  local nadv = nebula_cjk_text_compute_advances(
+    "\xE4\xBD\xA0\xE5\xA5\xBD",
+    36.0,
+    &test_advances[0],
+    16
+  )
+  printf("  advance test: '%s' -> %d chars, total_width=%.1f px\n",
+    "ni-hao", nadv, test_advances[nadv])
+
+  printf("  6 text contexts ready (CJK+ASCII mixed)\n")
+
+  -- 帧计数器状态
+  local frame_count: uint64 = 0
+  local last_update_time = glfwGetTime()
+  local counter_buf: [128]cchar
+
+  -- =========================================================================
+  -- 主循环
+  -- =========================================================================
+  while glfwWindowShouldClose(window) == 0 do
+    glfwPollEvents()
+    frame_count = frame_count + 1
+
+    -- 每秒更新动态文本
+    local now = glfwGetTime()
+    if now - last_update_time >= 1.0 then
+      last_update_time = now
+      snprintf(&counter_buf[0], 128, "Frame: %lu | Time: %.1fs", frame_count, now)
+      counter:set_text(&renderer, &counter_buf[0])
+    end
+
+    -- 获取 surface texture
+    local surface_tex: WGPUSurfaceTexture
+    wgpuSurfaceGetCurrentTexture(renderer.surface, &surface_tex)
+    local status = surface_tex.status
+    if status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal and
+       status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal then
+      continue
+    end
+
+    local view_desc = WGPUTextureViewDescriptor{
+      nextInChain     = nilptr,
+      label           = wgpu_str_null(),
+      format          = renderer.format,
+      dimension       = 2,
+      baseMipLevel    = 0,
+      mipLevelCount   = 1,
+      baseArrayLayer  = 0,
+      arrayLayerCount = 1,
+      aspect          = 1,
+      usage           = 0,
+    }
+    local view = wgpuTextureCreateView(surface_tex.texture, &view_desc)
+
+    local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, nilptr)
+    local clear_color = WGPURenderPassColorAttachment{
+      nextInChain = nilptr,
+      view = view,
+      depthSlice = 0xFFFFFFFF,
+      resolveTarget = nilptr,
+      loadOp = WGPULoadOp_Clear,
+      storeOp = WGPUStoreOp_Store,
+      clearValue = WGPUColor{ r = 0.06, g = 0.06, b = 0.08, a = 1.0 },
+    }
+    local rp_desc = WGPURenderPassDescriptor{
+      nextInChain = nilptr,
+      label = wgpu_str_null(),
+      colorAttachmentCount = 1,
+      colorAttachments = &clear_color,
+      depthStencilAttachment = nilptr,
+      occlusionQuerySet = nilptr,
+      timestampWrites = nilptr,
+    }
+    local pass = wgpuCommandEncoderBeginRenderPass(encoder, &rp_desc)
+
+    -- 渲染所有文本（共享 Slug 管线）
+    local u: SlugTextUniforms
+
+    u = title:to_uniforms(WIN_W, WIN_H)
+    pipe:update_uniforms(&renderer, &u)
+    pipe:draw_buffer(pass, title.mesh.vertex_buffer, title.mesh.vertex_buffer_size, title.mesh.vertex_count)
+
+    u = subtitle:to_uniforms(WIN_W, WIN_H)
+    pipe:update_uniforms(&renderer, &u)
+    pipe:draw_buffer(pass, subtitle.mesh.vertex_buffer, subtitle.mesh.vertex_buffer_size, subtitle.mesh.vertex_count)
+
+    u = body:to_uniforms(WIN_W, WIN_H)
+    pipe:update_uniforms(&renderer, &u)
+    pipe:draw_buffer(pass, body.mesh.vertex_buffer, body.mesh.vertex_buffer_size, body.mesh.vertex_count)
+
+    u = ascii_ref:to_uniforms(WIN_W, WIN_H)
+    pipe:update_uniforms(&renderer, &u)
+    pipe:draw_buffer(pass, ascii_ref.mesh.vertex_buffer, ascii_ref.mesh.vertex_buffer_size, ascii_ref.mesh.vertex_count)
+
+    u = large_cjk:to_uniforms(WIN_W, WIN_H)
+    pipe:update_uniforms(&renderer, &u)
+    pipe:draw_buffer(pass, large_cjk.mesh.vertex_buffer, large_cjk.mesh.vertex_buffer_size, large_cjk.mesh.vertex_count)
+
+    u = counter:to_uniforms(WIN_W, WIN_H)
+    pipe:update_uniforms(&renderer, &u)
+    pipe:draw_buffer(pass, counter.mesh.vertex_buffer, counter.mesh.vertex_buffer_size, counter.mesh.vertex_count)
+
+    wgpuRenderPassEncoderEnd(pass)
+    wgpuRenderPassEncoderRelease(pass)
+
+    local cmd = wgpuCommandEncoderFinish(encoder, nilptr)
+    wgpuQueueSubmit(renderer.queue, 1, &cmd)
+    wgpuCommandBufferRelease(cmd)
+    wgpuCommandEncoderRelease(encoder)
+    wgpuTextureViewRelease(view)
+    wgpuSurfacePresent(renderer.surface)
+  end
+
+  -- 清理
+  pipe:deinit()
+  glfwDestroyWindow(window)
+  glfwTerminate()
+  printf("nebula: clean exit (rendered %lu frames)\n", frame_count)
+  return 0
+end
+
+main()

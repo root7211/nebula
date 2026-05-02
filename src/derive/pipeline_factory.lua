@@ -801,6 +801,15 @@ local function gen_pipeline_slug_text(base, uniforms_record, wgsl_source)
   emit("  wgpuRenderPassEncoderDraw(pass, self.vertex_count, 1, 0, 0)")
   emit("end")
 
+  -- draw_buffer: 使用外部顶点缓冲区绘制（支持多文本上下文共享管线）
+  emit(("function %s:draw_buffer(pass: WGPURenderPassEncoder, vbuf: WGPUBuffer, vbuf_size: uint64, vert_count: uint32): void"):format(pipe))
+  emit("  if self.bind_group == nilptr or vbuf == nilptr or vert_count == 0 then return end")
+  emit("  wgpuRenderPassEncoderSetPipeline(pass, self.pipeline)")
+  emit("  wgpuRenderPassEncoderSetBindGroup(pass, 0, self.bind_group, 0, nilptr)")
+  emit("  wgpuRenderPassEncoderSetVertexBuffer(pass, 0, vbuf, 0, vbuf_size)")
+  emit("  wgpuRenderPassEncoderDraw(pass, vert_count, 1, 0, 0)")
+  emit("end")
+
   -- deinit（释放所有 GPU 资源，公理 B：L0 资源在 deinit 时销毁）
   emit(("function %s:deinit(): void"):format(pipe))
   emit("  wgpuRenderPipelineRelease(self.pipeline)")

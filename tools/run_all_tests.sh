@@ -154,6 +154,10 @@ run_test "smoke_phase4_2_2_bench (Phase 4.2.2 D-4.1-C — Storage Buffer scalabi
 run_test "smoke_phase4_2_3_s1 (Phase 4.2.3 S1 — GB2312 L1 3755 字 shaping 表完整性)" \
   nelua-lua tests/smoke_phase4_2_3_s1.lua
 
+# ★ Phase 4.2.3 S2: CJK 运行时排版函数验证
+run_test "smoke_phase4_2_3_s2 (Phase 4.2.3 S2 — CJK 运行时排版 + 混排 + 公理合规)" \
+  nelua-lua tests/smoke_phase4_2_3_s2.lua
+
 # ★ 交互原语运行时行为验证（BUG-4/5/6 回归守护）
 run_test "verify_interaction_behavior (Runtime — 交互原语行为验证 & 回归守护)" \
   nelua-lua tests/verify_interaction_behavior.lua
@@ -240,6 +244,13 @@ run_test "compile slug_bench (Phase 4.2.2 D-4.1-C — Storage Buffer scalability
   --cflags="-I./vendor/wgpu-native/include" \
   --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
   examples/slug_bench.nelua -o ~/.cache/nelua/slug_bench
+
+# ★ Phase 4.2.3 S2: cjk_text_demo 编译回归（CJK + ASCII 混排 Slug 渲染）
+run_test "compile cjk_text_demo (Phase 4.2.3 S2 — CJK + ASCII mixed text Slug rendering)" \
+  nelua -c -L src -L assets/generated --add-path . --add-path examples --add-path assets/generated \
+  --cflags="-I./vendor/wgpu-native/include" \
+  --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
+  examples/cjk_text_demo.nelua -o ~/.cache/nelua/cjk_text_demo
 
 # ★ Phase 4.2.2 D-4.1-C: Storage Buffer 基础设施静态分析测试
 run_test "smoke_phase4_2_2_bench (Phase 4.2.2 D-4.1-C — Storage Buffer infrastructure audit)" \

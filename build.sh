@@ -47,7 +47,7 @@ done
 
 # 验证 Demo 目标
 case "$DEMO_TARGET" in
-  button_demo|layout_demo|login_demo|form_demo|dynamic_list_demo|shadow_demo|text_demo|slider_demo|scrollable_demo|dropdown_demo|multiline_editable_demo|slug_bench)
+  button_demo|layout_demo|login_demo|form_demo|dynamic_list_demo|shadow_demo|text_demo|slider_demo|scrollable_demo|dropdown_demo|multiline_editable_demo|slug_bench|cjk_text_demo)
     ;;
   *)
     echo "[nebula] Error: unknown demo target '$DEMO_TARGET'"

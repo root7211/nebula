@@ -1066,6 +1066,130 @@ global function nebula_create_vertex_buffer(
 end
 
 -- =============================================================================
+-- ★ Phase 4.2.3-S2: Slug Pipeline Helper Functions
+--
+-- 由 pipeline_factory.lua 生成的 SlugTextPipeline:init 调用。
+-- 封装 BindGroupLayout / BindGroup / RenderPipeline 创建的公共逻辑。
+-- =============================================================================
+
+-- 填充一个 BindGroupLayoutEntry 为 Uniform Buffer 绑定
+global function nebula_bgl_entry_uniform(out: *WGPUBindGroupLayoutEntry, binding: uint32): void
+  $out = WGPUBindGroupLayoutEntry{
+    nextInChain = nilptr,
+    binding     = binding,
+    visibility  = (@uint64)(WGPUShaderStage_Vertex) | (@uint64)(WGPUShaderStage_Fragment),
+    buffer      = {
+      nextInChain      = nilptr,
+      type             = (@uint32)(WGPUBufferBindingType_Uniform),
+      hasDynamicOffset = 0,
+      minBindingSize   = 0,
+    },
+    sampler        = {nextInChain = nilptr, type = 0},
+    texture        = {nextInChain = nilptr, sampleType = 0, viewDimension = 0, multisampled = 0},
+    storageTexture = {nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0},
+  }
+end
+
+-- 填充一个 BindGroupLayoutEntry 为 Read-Only Storage Buffer 绑定
+global function nebula_bgl_entry_storage_ro(out: *WGPUBindGroupLayoutEntry, binding: uint32): void
+  $out = WGPUBindGroupLayoutEntry{
+    nextInChain = nilptr,
+    binding     = binding,
+    visibility  = (@uint64)(WGPUShaderStage_Vertex) | (@uint64)(WGPUShaderStage_Fragment),
+    buffer      = {
+      nextInChain      = nilptr,
+      type             = (@uint32)(WGPUBufferBindingType_ReadOnlyStorage),
+      hasDynamicOffset = 0,
+      minBindingSize   = 0,
+    },
+    sampler        = {nextInChain = nilptr, type = 0},
+    texture        = {nextInChain = nilptr, sampleType = 0, viewDimension = 0, multisampled = 0},
+    storageTexture = {nextInChain = nilptr, access = 0, format = WGPUTextureFormat_Undefined, viewDimension = 0},
+  }
+end
+
+-- 从 entries 数组创建 BindGroupLayout
+global function nebula_create_bind_group_layout(
+  renderer:    *NebulaRenderer,
+  entries:     *WGPUBindGroupLayoutEntry,
+  entry_count: csize,
+  label:       cstring
+): WGPUBindGroupLayout
+  local desc = WGPUBindGroupLayoutDescriptor{
+    nextInChain = nilptr,
+    label       = wgpu_str(label),
+    entryCount  = entry_count,
+    entries     = entries,
+  }
+  local bgl = wgpuDeviceCreateBindGroupLayout(renderer.device, &desc)
+  if bgl == nilptr then
+    printf("wgpu: failed to create bind group layout (%s)\n", label)
+  end
+  return bgl
+end
+
+-- 填充一个 BindGroupEntry 为 Buffer 绑定
+global function nebula_bge_buffer(
+  out:     *WGPUBindGroupEntry,
+  binding: uint32,
+  buffer:  WGPUBuffer,
+  offset:  uint64,
+  size:    uint64
+): void
+  $out = WGPUBindGroupEntry{
+    nextInChain = nilptr,
+    binding     = binding,
+    buffer      = buffer,
+    offset      = offset,
+    size        = size,
+    sampler     = nilptr,
+    textureView = nilptr,
+  }
+end
+
+-- 从 entries 数组创建 BindGroup
+global function nebula_create_bind_group(
+  renderer:    *NebulaRenderer,
+  layout:      WGPUBindGroupLayout,
+  entries:     *WGPUBindGroupEntry,
+  entry_count: csize,
+  label:       cstring
+): WGPUBindGroup
+  local desc = WGPUBindGroupDescriptor{
+    nextInChain = nilptr,
+    label       = wgpu_str(label),
+    layout      = layout,
+    entryCount  = entry_count,
+    entries     = entries,
+  }
+  local bg = wgpuDeviceCreateBindGroup(renderer.device, &desc)
+  if bg == nilptr then
+    printf("wgpu: failed to create bind group (%s)\n", label)
+  end
+  return bg
+end
+
+-- 从 BindGroupLayout + WGSL + VertexLayout 创建 RenderPipeline
+global function nebula_create_render_pipeline_with_layout(
+  renderer:      *NebulaRenderer,
+  bgl:           WGPUBindGroupLayout,
+  wgsl_source:   cstring,
+  wgsl_len:      csize,
+  target_format: WGPUTextureFormat,
+  vertex_layout: *WGPUVertexBufferLayout,
+  label:         cstring
+): WGPURenderPipeline
+  local out_pipeline: WGPURenderPipeline = nilptr
+  if not _nebula_build_render_pipeline(
+    &out_pipeline, renderer.device, &bgl,
+    wgsl_source, target_format, vertex_layout, label
+  ) then
+    return nilptr
+  end
+  return out_pipeline
+end
+
+-- =============================================================================
 -- ★ Phase 4.2.2: nebula_init_slug_vertex_layout
 --
 -- Slug 文本顶点布局初始化（5 x vec4<f32> = 80 bytes/vertex）。
