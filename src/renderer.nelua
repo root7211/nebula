@@ -173,11 +173,12 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
 
   -- 3. 请求 Adapter
   local adapter_opts = WGPURequestAdapterOptions{
-    nextInChain       = nilptr,
-    compatibleSurface = self.surface,
-    powerPreference   = 0,
-    backendType       = 0,
-    forceFallbackAdapter = false,
+    nextInChain          = nilptr,
+    featureLevel         = 0,
+    powerPreference      = 0,
+    forceFallbackAdapter = 0,
+    backendType          = 0,
+    compatibleSurface    = self.surface,
   }
   local adapter_cb = WGPURequestAdapterCallbackInfo{
     nextInChain = nilptr,
@@ -283,11 +284,11 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
     device          = self.device,
     format          = self.format,
     usage           = 0x00000010, -- WGPUTextureUsage_RenderAttachment
+    width           = self.width,
+    height          = self.height,
     viewFormatCount = 0,
     viewFormats     = nilptr,
     alphaMode       = 1, -- WGPUCompositeAlphaMode_Auto
-    width           = self.width,
-    height          = self.height,
     presentMode     = WGPUPresentMode_Fifo,
   }
   wgpuSurfaceConfigure(self.surface, &surf_cfg)
@@ -311,9 +312,9 @@ global function nebula_create_uniform_buffer(
   local buf_desc = WGPUBufferDescriptor{
     nextInChain      = nilptr,
     label            = wgpu_str(label),
-    usage            = (@uint32)(WGPUBufferUsage_Uniform) | (@uint32)(WGPUBufferUsage_CopyDst),
+    usage            = (@uint64)(WGPUBufferUsage_Uniform) | (@uint64)(WGPUBufferUsage_CopyDst),
     size             = (@uint64)(size),
-    mappedAtCreation = false,
+    mappedAtCreation = 0,
   }
   $out_buf = wgpuDeviceCreateBuffer(renderer.device, &buf_desc)
   if $out_buf == nilptr then
@@ -428,14 +429,14 @@ local function _nebula_build_render_pipeline(
       stripIndexFormat  = 0,
       frontFace         = 0,
       cullMode          = 0,
-      unclippedDepth    = false,
+      unclippedDepth    = 0,
     },
     depthStencil = nilptr,
     multisample  = {
       nextInChain             = nilptr,
       count                   = 1,
       mask                    = 0xFFFFFFFF,
-      alphaToCoverageEnabled  = false,
+      alphaToCoverageEnabled  = 0,
     },
     fragment = &frag_state,
   }
@@ -619,7 +620,7 @@ global function nebula_upload_texture(
   local tex_desc = WGPUTextureDescriptor{
     nextInChain     = nilptr,
     label           = wgpu_str(label),
-    usage           = (@uint32)(WGPUTextureUsage_CopyDst) | (@uint32)(WGPUTextureUsage_TextureBinding),
+    usage           = (@uint64)(WGPUTextureUsage_CopyDst) | (@uint64)(WGPUTextureUsage_TextureBinding),
     dimension       = WGPUTextureDimension_2D,
     size            = WGPUExtent3D{ width = width, height = height, depthOrArrayLayers = 1 },
     format          = format,
@@ -678,17 +679,17 @@ global function nebula_init_pos_uv_vertex_layout(
   attrs:      *WGPUVertexAttribute
 ): void
   local attrs_ptr = (@*[0]WGPUVertexAttribute)(attrs)
-  attrs_ptr[0] = WGPUVertexAttribute{
+  attrs_ptr[0] = WGPUVertexAttribute{ nextInChain = nilptr,
         format         = WGPUVertexFormat_Float32x2,
     offset         = 0,
     shaderLocation = 0,
   }
-  attrs_ptr[1] = WGPUVertexAttribute{
+  attrs_ptr[1] = WGPUVertexAttribute{ nextInChain = nilptr,
         format         = WGPUVertexFormat_Float32x2,
     offset         = (@uint64)(#Vec2),
     shaderLocation = 1,
   }
-  $out_layout = WGPUVertexBufferLayout{
+  $out_layout = WGPUVertexBufferLayout{ nextInChain = nilptr,
         stepMode       = WGPUVertexStepMode_Vertex,
     arrayStride    = (@uint64)(#NebulaPosUvVertex),
     attributeCount = 2,
@@ -736,7 +737,7 @@ global function nebula_create_render_target(
   local tex_desc = WGPUTextureDescriptor{
     nextInChain     = nilptr,
     label           = wgpu_str(label),
-    usage           = (@uint32)(WGPUTextureUsage_RenderAttachment) | (@uint32)(WGPUTextureUsage_TextureBinding),
+    usage           = (@uint64)(WGPUTextureUsage_RenderAttachment) | (@uint64)(WGPUTextureUsage_TextureBinding),
     dimension       = WGPUTextureDimension_2D,
     size            = WGPUExtent3D{ width = w, height = h, depthOrArrayLayers = 1 },
     format          = renderer.format,
@@ -1018,9 +1019,9 @@ global function nebula_create_storage_buffer(
   local buf_desc = WGPUBufferDescriptor{
     nextInChain      = nilptr,
     label            = wgpu_str(label),
-    usage            = (@uint32)(WGPUBufferUsage_Storage) | (@uint32)(WGPUBufferUsage_CopyDst),
+    usage            = (@uint64)(WGPUBufferUsage_Storage) | (@uint64)(WGPUBufferUsage_CopyDst),
     size             = (@uint64)(size),
-    mappedAtCreation = false,
+    mappedAtCreation = 0,
   }
   $out_buf = wgpuDeviceCreateBuffer(renderer.device, &buf_desc)
   if $out_buf == nilptr then
@@ -1051,9 +1052,9 @@ global function nebula_create_vertex_buffer(
   local buf_desc = WGPUBufferDescriptor{
     nextInChain      = nilptr,
     label            = wgpu_str(label),
-    usage            = (@uint32)(WGPUBufferUsage_Vertex) | (@uint32)(WGPUBufferUsage_CopyDst),
+    usage            = (@uint64)(WGPUBufferUsage_Vertex) | (@uint64)(WGPUBufferUsage_CopyDst),
     size             = (@uint64)(size),
-    mappedAtCreation = false,
+    mappedAtCreation = 0,
   }
   $out_buf = wgpuDeviceCreateBuffer(renderer.device, &buf_desc)
   if $out_buf == nilptr then
@@ -1236,36 +1237,36 @@ global function nebula_init_slug_vertex_layout(
 ): void
   local attrs_ptr = (@*[0]WGPUVertexAttribute)(attrs)
   -- attr0: pos (vec4<f32>)
-  attrs_ptr[0] = WGPUVertexAttribute{
+  attrs_ptr[0] = WGPUVertexAttribute{ nextInChain = nilptr,
         format         = WGPUVertexFormat_Float32x4,
     offset         = 0,
     shaderLocation = 0,
   }
   -- attr1: tex (vec4<f32>)
-  attrs_ptr[1] = WGPUVertexAttribute{
+  attrs_ptr[1] = WGPUVertexAttribute{ nextInChain = nilptr,
         format         = WGPUVertexFormat_Float32x4,
     offset         = 16,
     shaderLocation = 1,
   }
   -- attr2: bnd (vec4<f32>)
-  attrs_ptr[2] = WGPUVertexAttribute{
+  attrs_ptr[2] = WGPUVertexAttribute{ nextInChain = nilptr,
         format         = WGPUVertexFormat_Float32x4,
     offset         = 32,
     shaderLocation = 2,
   }
   -- attr3: jac (vec4<f32>) — Phase 4.2.2 D-4.1-B: Jacobian inverse
-  attrs_ptr[3] = WGPUVertexAttribute{
+  attrs_ptr[3] = WGPUVertexAttribute{ nextInChain = nilptr,
         format         = WGPUVertexFormat_Float32x4,
     offset         = 48,
     shaderLocation = 3,
   }
   -- attr4: col (vec4<f32>)
-  attrs_ptr[4] = WGPUVertexAttribute{
+  attrs_ptr[4] = WGPUVertexAttribute{ nextInChain = nilptr,
         format         = WGPUVertexFormat_Float32x4,
     offset         = 64,
     shaderLocation = 4,
   }
-  $out_layout = WGPUVertexBufferLayout{
+  $out_layout = WGPUVertexBufferLayout{ nextInChain = nilptr,
         stepMode       = WGPUVertexStepMode_Vertex,
     arrayStride    = 80,  -- 5 x vec4<f32> = 80 bytes
     attributeCount = 5,
