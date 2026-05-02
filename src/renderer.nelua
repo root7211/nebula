@@ -3,6 +3,7 @@
 -- Nebula GUI Compiler — WebGPU 渲染层
 --
 -- ★ Phase 4.2.1: 跨平台 Surface 创建与 Instance 初始化
+-- ★ Phase 4.X:   DenseCharInstance / DenseTextUniforms record 定义
 --   通过 NEBULA_TARGET + NEBULA_LINUX_DISPLAY 条件编译，在 S1 阶段消解平台分支：
 --   - Linux (X11):     XlibWindow Surface + wgpu-native InstanceExtras
 --   - Linux (Wayland): WaylandSurface + wgpu-native InstanceExtras
@@ -1063,6 +1064,40 @@ global function nebula_create_vertex_buffer(
     wgpuQueueWriteBuffer(renderer.queue, $out_buf, 0, data, size)
   end
   return true
+end
+
+-- =============================================================================
+-- ★ Phase 4.X: 高密度文本 Record 定义
+--
+-- DenseCharInstance (32 bytes): per-char 实例数据，通过 Storage Buffer 传递。
+-- DenseTextUniforms (16 bytes): viewport + cell_size uniform。
+--
+-- 这两个 record 的内存布局必须与 shader_compose.lua 中的 WGSL struct 精确对齐：
+--   WGSL DenseCharInstance: pos_x(f32) pos_y(f32) uv_x(f32) uv_y(f32) uv_w(f32) uv_h(f32) fg_color(u32) bg_color(u32)
+--   WGSL DenseTextUniforms: viewport(vec2<f32>) cell_w(f32) cell_h(f32)
+-- =============================================================================
+
+global DenseCharInstance = @record{
+  pos_x:    float32,   -- 字符左上角 X（像素坐标）
+  pos_y:    float32,   -- 字符左上角 Y（像素坐标）
+  uv_x:     float32,   -- atlas 纹理 U 起点
+  uv_y:     float32,   -- atlas 纹理 V 起点
+  uv_w:     float32,   -- atlas 纹理 U 宽度
+  uv_h:     float32,   -- atlas 纹理 V 高度
+  fg_color: uint32,    -- RGBA8 packed 前景色（unpack4x8unorm 解包）
+  bg_color: uint32,    -- RGBA8 packed 背景色
+}
+
+global DenseTextUniforms = @record{
+  viewport_w: float32,  -- 视口宽度（像素）
+  viewport_h: float32,  -- 视口高度（像素）
+  cell_w:     float32,  -- 等宽字符单元格宽度（像素）
+  cell_h:     float32,  -- 等宽字符单元格高度（像素）
+}
+
+-- 辅助函数：将 RGBA (0-255) 四通道打包为 uint32（与 WGSL unpack4x8unorm 一致）
+global function nebula_pack_rgba8(r: uint8, g: uint8, b: uint8, a: uint8): uint32
+  return (@uint32)(r) | ((@uint32)(g) << 8) | ((@uint32)(b) << 16) | ((@uint32)(a) << 24)
 end
 
 -- =============================================================================
