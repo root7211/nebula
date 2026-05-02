@@ -535,6 +535,55 @@ global function nebula_cjk_glyph_lookup(codepoint: uint32): int32
   return -1
 end
 
+-- ★ Phase 4.7-S1: CJK 字符显示宽度判断
+-- 返回一个 Unicode 码点的显示列宽度：CJK 字符 = 2，ASCII/其他 = 1
+-- 用于多行编辑器中光标列位置的正确计算。
+global function nebula_cjk_char_display_width(codepoint: uint32): uint32
+  -- CJK Unified Ideographs (U+4E00–U+9FFF)
+  if codepoint >= 0x4E00 and codepoint <= 0x9FFF then return 2 end
+  -- CJK Extension A (U+3400–U+4DBF)
+  if codepoint >= 0x3400 and codepoint <= 0x4DBF then return 2 end
+  -- CJK Compatibility Ideographs (U+F900–U+FAFF)
+  if codepoint >= 0xF900 and codepoint <= 0xFAFF then return 2 end
+  -- Fullwidth Latin / Halfwidth Katakana etc. (U+FF00–U+FFEF)
+  if codepoint >= 0xFF01 and codepoint <= 0xFF60 then return 2 end
+  if codepoint >= 0xFFE0 and codepoint <= 0xFFE6 then return 2 end
+  -- CJK Symbols and Punctuation (U+3000–U+303F)
+  if codepoint >= 0x3000 and codepoint <= 0x303F then return 2 end
+  -- Hiragana (U+3040–U+309F) + Katakana (U+30A0–U+30FF)
+  if codepoint >= 0x3040 and codepoint <= 0x30FF then return 2 end
+  -- Hangul Syllables (U+AC00–U+D7AF)
+  if codepoint >= 0xAC00 and codepoint <= 0xD7AF then return 2 end
+  return 1
+end
+
+-- ★ Phase 4.7-S1: UTF-8 文本显示宽度计算
+-- 计算 UTF-8 文本的总显示列宽度（CJK=2, ASCII=1）
+global function nebula_utf8_display_width(text: *[0]uint8, byte_len: uint16): uint32
+  local width: uint32 = 0
+  local i: uint16 = 0
+  while i < byte_len do
+    local b0 = text[i]
+    local codepoint: uint32 = 0
+    local blen: uint16 = 1
+    if b0 < 0x80 then
+      codepoint = (@uint32)(b0)
+    elseif b0 < 0xE0 and i + 1 < byte_len then
+      codepoint = ((@uint32)(b0 & 0x1F) << 6) | (@uint32)(text[i+1] & 0x3F)
+      blen = 2
+    elseif b0 < 0xF0 and i + 2 < byte_len then
+      codepoint = ((@uint32)(b0 & 0x0F) << 12) | ((@uint32)(text[i+1] & 0x3F) << 6) | (@uint32)(text[i+2] & 0x3F)
+      blen = 3
+    elseif i + 3 < byte_len then
+      codepoint = ((@uint32)(b0 & 0x07) << 18) | ((@uint32)(text[i+1] & 0x3F) << 12) | ((@uint32)(text[i+2] & 0x3F) << 6) | (@uint32)(text[i+3] & 0x3F)
+      blen = 4
+    end
+    width = width + nebula_cjk_char_display_width(codepoint)
+    i = i + blen
+  end
+  return width
+end
+
 -- ★ Phase 4.2.3-S2 Task 2.1: CJK 文本排版 — 纯查表 O(N)
 -- 计算 UTF-8 CJK 文本中每个字符的累计 X 偏移。
 -- 支持 ASCII + CJK 混排：ASCII 字符走已有的 ASCII 字形表，CJK 走 S1 表。

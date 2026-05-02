@@ -1,0 +1,255 @@
+-- =============================================================================
+-- cjk_editor_demo.nelua
+-- Nebula GUI Compiler — Phase 4.7-S1
+--
+-- CJK + ASCII 混排多行文本编辑器演示：
+--   · 验证 UTF-8 多字节字符的插入/删除（CJK 3 bytes per char）
+--   · 验证 Gap Buffer 的 UTF-8 aware 方法（move_cursor_left_char 等）
+--   · 验证 NebulaMultiBuf 的 insert_newline / merge_line_up 对 UTF-8 的兼容性
+--   · 复用 Phase 4.4 S3 的 multiline_editable 原语架构
+--   · 使用 nebula_cjk_char_display_width / nebula_utf8_display_width 辅助函数
+--
+-- 新 API 覆盖：
+--   · NebulaBuf:move_cursor_left_char / move_cursor_right_char
+--   · NebulaBuf:delete_char_before / delete_char_after
+--   · NebulaBuf:char_count
+--   · nebula_cjk_char_display_width / nebula_utf8_display_width
+--
+-- 对 Phase 4.5 的输入：
+--   暴露 nebula_annotate 中是否需要声明 text_encoding="utf8" 等元数据
+-- =============================================================================
+## cinclude "<stdio.h>"
+
+require "nebula_core"
+require "glfw_bindings"
+require "wgpu_bindings"
+require "renderer"
+require "app"
+require "text_runtime"
+require "nebula_cursor"
+require "nebula_arena"
+
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+
+local WIN_W <comptime> = 960
+local WIN_H <comptime> = 700
+
+-- ★ Phase 4.7-S1: 注入 NebulaMultiBuf/NebulaBuf 编译期类型
+##[[ local _mb_type, _mb_src = nebula_gen_multiline_buffer_type(128, 32) ]]
+##[[ for _, _s in ipairs(aster.parse(_mb_src, "<multiline_buffer:128_32>")) do inject_statement(_s) end ]]
+##[[ local _gb_type, _gb_src = nebula_gen_gap_buffer_type(128) ]]
+##[[ for _, _s in ipairs(aster.parse(_gb_src, "<gap_buffer:128>")) do inject_statement(_s) end ]]
+
+-- =============================================================================
+-- CjkEditorVisual — 支持 CJK + ASCII 混排的多行编辑器 Visual
+-- 结构与 multiline_editable_demo.nelua 相同
+-- =============================================================================
+global CjkEditorVisual = @record{
+  pos:    Vec2,
+  size:   Vec2,
+  radius: float32,
+
+  default_bg_color:     Color,
+  default_border_color: Color,
+  default_border_width: float32,
+
+  hovered_bg_color:     Color,
+  hovered_border_color: Color,
+  hovered_border_width: float32,
+
+  pressed_bg_color:     Color,
+  pressed_border_color: Color,
+  pressed_border_width: float32,
+
+  -- Text properties
+  pixel_height: float32,
+  text_origin_x: float32,
+
+  -- Scrollable container
+  content_height: float32,
+
+  -- ★ Phase 4.7-S1: 多行 buffer（CJK UTF-8 兼容）
+  multi_buf: NebulaMultiBuf128_32,
+
+  -- editable 原语标准 gap buffer
+  gap_buf: NebulaBuf128,
+}
+
+##[[
+nebula_annotate("CjkEditorVisual", {
+  states     = {"default", "hovered", "focused", "dragging", "draggingbar"},
+  primitives = {"hoverable", "clickable", "focusable", "editable", "scrollable", "multiline_editable"},
+  transitions = {
+    {from="default",      to="hovered",      on="hover_enter"},
+    {from="hovered",      to="default",      on="hover_leave"},
+    {from="hovered",      to="focused",      on="focus"},
+    {from="focused",      to="hovered",      on="blur"},
+    {from="focused",      to="dragging",     on="drag_start"},
+    {from="dragging",     to="focused",      on="drag_end"},
+    {from="default",      to="draggingbar",  on="scrollbar_drag"},
+    {from="hovered",      to="draggingbar",  on="scrollbar_drag"},
+    {from="focused",      to="draggingbar",  on="scrollbar_drag"},
+    {from="draggingbar",  to="focused",      on="scrollbar_release"},
+    {from="draggingbar",  to="hovered",      on="scrollbar_release"},
+    {from="draggingbar",  to="default",      on="scrollbar_release"},
+  },
+  max_text_len = 128,
+  max_lines = 32,
+  component_id = 1,
+})
+]]
+## nebula_derive("CjkEditorVisual")
+
+-- =============================================================================
+-- Derive CjkEditorApp
+-- =============================================================================
+##[[
+  nebula_app_begin("CjkEditorApp")
+    nebula_app_register_component("editor", "CjkEditorVisual")
+  nebula_app_end()
+]]
+## nebula_derive_app("CjkEditorApp")
+
+-- =============================================================================
+-- Main program
+-- =============================================================================
+local function main(): int32
+  if glfwInit() == 0 then printf("glfw: init failed\n") return 1 end
+  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
+
+  local window = glfwCreateWindow(WIN_W, WIN_H,
+    "Nebula Phase 4.7-S1 — CJK Multiline Editor", nilptr, nilptr)
+  if window == nilptr then printf("glfw: window creation failed\n") return 1 end
+
+  nebula_input_install_callbacks(window)
+
+  local renderer: NebulaRenderer
+  if not renderer:init(window, WIN_W, WIN_H) then return 1 end
+
+  local app: CjkEditorApp
+  if not app:init(&renderer, WIN_W, WIN_H) then return 1 end
+
+  -- Initialize editor
+  app.editor:init(CjkEditorVisual{
+    pos  = Vec2{ x = 80.0, y = 60.0 },
+    size = Vec2{ x = 800.0, y = 560.0 },
+    radius = 6.0,
+
+    default_bg_color     = Color{ r=0.10, g=0.10, b=0.14, a=1.0 },
+    default_border_color = Color{ r=0.25, g=0.25, b=0.35, a=1.0 },
+    default_border_width = 1.0,
+
+    hovered_bg_color     = Color{ r=0.12, g=0.12, b=0.18, a=1.0 },
+    hovered_border_color = Color{ r=0.35, g=0.50, b=0.90, a=1.0 },
+    hovered_border_width = 2.0,
+
+    pressed_bg_color     = Color{ r=0.14, g=0.14, b=0.22, a=1.0 },
+    pressed_border_color = Color{ r=0.45, g=0.70, b=1.00, a=1.0 },
+    pressed_border_width = 2.0,
+
+    pixel_height = 20.0,
+    text_origin_x = 88.0,
+    content_height = 700.0,
+  })
+
+  -- Initialize multiline state
+  app.editor.cursor_row = 0
+  app.editor.cursor_col = 0
+  app.editor.line_count = 1
+  app.editor.visual.multi_buf:init()
+
+  -- ★ Pre-fill demo text: CJK + ASCII mixed content
+  -- Line 0: "你好世界 Hello" (UTF-8 bytes)
+  local demo_line0: []uint8 = {
+    0xE4, 0xBD, 0xA0,  -- 你
+    0xE5, 0xA5, 0xBD,  -- 好
+    0xE4, 0xB8, 0x96,  -- 世
+    0xE7, 0x95, 0x8C,  -- 界
+    0x20,               -- space
+    0x48, 0x65, 0x6C, 0x6C, 0x6F  -- Hello
+  }
+  local line0 = app.editor.visual.multi_buf:get_line(0)
+  local di: uint16 = 0
+  while di < 17 do
+    line0:insert_char(demo_line0[di])
+    di = di + 1
+  end
+
+  -- Insert newline and add line 1: "编译期推导 Phase 4.7"
+  app.editor.visual.multi_buf:insert_newline()
+  local demo_line1: []uint8 = {
+    0xE7, 0xBC, 0x96,  -- 编
+    0xE8, 0xAF, 0x91,  -- 译
+    0xE6, 0x9C, 0x9F,  -- 期
+    0xE6, 0x8E, 0xA8,  -- 推
+    0xE5, 0xAF, 0xBC,  -- 导
+    0x20,               -- space
+    0x50, 0x68, 0x61, 0x73, 0x65, 0x20,  -- Phase
+    0x34, 0x2E, 0x37  -- 4.7
+  }
+  local line1 = app.editor.visual.multi_buf:get_line(1)
+  local di2: uint16 = 0
+  while di2 < 24 do
+    line1:insert_char(demo_line1[di2])
+    di2 = di2 + 1
+  end
+
+  -- Update state
+  app.editor.line_count = app.editor.visual.multi_buf.line_count
+  app.editor.cursor_row = 1
+  app.editor.cursor_col = 24
+  app.editor.visual.multi_buf.cursor_row = 1
+  app.editor.visual.multi_buf.cursor_col = 24
+
+  -- ★ Validate UTF-8 methods at startup
+  printf("nebula: CJK editor demo started (Phase 4.7-S1)\n")
+
+  -- Test char_count: line 0 has 5 CJK + 1 space + 5 ASCII = 11 logical chars, 17 bytes
+  local line0_bytes = line0:len()
+  local line0_chars = line0:char_count()
+  printf("  Line 0: %d bytes, %d chars (expected: 17 bytes, 11 chars)\n",
+    (@int32)(line0_bytes), (@int32)(line0_chars))
+
+  -- Test display width: "你好世界 Hello" = 4*2 + 1 + 5 = 14 display cols
+  local tmp0: [256]uint8
+  local n0 = line0:flatten(&tmp0[0], 255)
+  local dw0 = nebula_utf8_display_width(&tmp0[0], n0)
+  printf("  Line 0: display width = %d (expected: 14)\n", (@int32)(dw0))
+
+  printf("  - Type Chinese/English mixed text\n")
+  printf("  - Arrow keys navigate (UTF-8 char-aware)\n")
+  printf("  - Enter = new line, Backspace = delete UTF-8 char\n")
+
+  local input: NebulaInputState
+  local prev_time = glfwGetTime()
+
+  -- =============================================================================
+  -- Main loop
+  -- =============================================================================
+  while glfwWindowShouldClose(window) == 0 do
+    glfwPollEvents()
+    local now = glfwGetTime()
+    local dt  = (@float32)(now - prev_time)
+    prev_time = now
+    nebula_collect_input(window, &input, dt)
+
+    -- Update content_height based on line count
+    app.editor.visual.content_height = (@float32)(app.editor.line_count) * (app.editor.visual.pixel_height + 4.0)
+
+    -- Render
+    nebula_frame_render(&renderer, &app, &input, dt, 0.06, 0.06, 0.10)
+  end
+
+  -- Cleanup
+  wgpuSurfaceRelease(renderer.surface)
+  wgpuDeviceRelease(renderer.device)
+  wgpuAdapterRelease(renderer.adapter)
+  wgpuInstanceRelease(renderer.instance)
+  glfwDestroyWindow(window)
+  glfwTerminate()
+  printf("nebula: clean exit\n")
+  return 0
+end
+
+main()

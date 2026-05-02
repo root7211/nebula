@@ -59,9 +59,9 @@ check("Home key handled",
   src:find("NebulaKey%.Home") ~= nil)
 check("End key handled",
   src:find("NebulaKey%.End") ~= nil)
--- Phase 3.6.1: Backspace 调用 gap_buf:delete_before()
-check("Backspace calls gap_buf:delete_before (Phase 3.6.1)",
-  src:find("gap_buf:delete_before%(%)") ~= nil)
+-- Phase 3.6.1: Backspace 调用 gap_buf:delete_char_before()（Phase 4.7-S1: UTF-8 aware）
+check("Backspace calls gap_buf:delete_char_before (Phase 4.7-S1)",
+  src:find("gap_buf:delete_char_before%(%)") ~= nil)
 check("changed flag returned",
   src:find("return changed") ~= nil)
 

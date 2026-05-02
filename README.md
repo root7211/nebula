@@ -14,12 +14,13 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 进行中 | 49/49 回归测试全绿 | Phase 4.X-J 规划中（2026-05-02）**
+**Era II 进行中 | 51/51 回归测试全绿 | Phase 4.7-S2 次序（2026-05-02）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
+| **Phase 4.7-S1 CJK multiline 升级** | UTF-8 aware gap buffer（move_cursor_left_char 等 5 个新方法）+ CJK 显示宽度函数 + cjk_editor_demo + 43 条冒烟测试，editable 原语全面升级为 char-aware | — |
 | **wgpu-native v29.0.0.0 绑定对齐** | 12 个结构体布局修复（新增字段、类型宽度、字段顺序），14/14 demo 编译通过，42/42 结构体尺寸验证 OK | `f051974` |
 | **Phase 4.X-J JSON Viewer 规划** | JSON 树形浏览器设计——DenseText 语法着色 + 折叠/展开 + 滚动 + 行号，为 4.5 语法糖积累样本 | — |
 | **Phase 4.7→4.5 调序方案** | 先做 4.7-S1~S4（编辑器前置）积累 4 个新 demo 样本，再设计 4.5 语法糖，避免过早固化 API | — |
@@ -124,9 +125,11 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 | 4.X | 高密度文本渲染通道 | **Step 1-5 已完成**（着色器 + 管线 + Record + 派生 + 辅助函数 + demo + 测试） | 85 |
 | 4.X-T | 终端模拟器原型 | **已完成**（PTY + ANSI 解析器 + Dense Text 渲染 + term_demo） | 78 |
 | 4.X-J | JSON Viewer | **规划中**（DenseText 语法着色 + 折叠/展开 + 滚动 + 行号） | — |
+| 4.7-S1 | CJK multiline editable | **已完成**（UTF-8 gap buffer + CJK 显示宽度 + cjk_editor_demo） | 85 |
+| 4.7-S2 | DenseText 接入 App 编排 | 规划中 | — |
 | 4.5 | 注册原语语法糖 | 规划中（**调序：4.7-S1~S4 之后**，待样本充分后设计） | — |
 | 4.6 | Indirect Drawing | 规划中 | 78 |
-| 4.7 | 文本编辑器原型 | 规划中 | — |
+| 4.7 | 文本编辑器原型 | **S1 已完成**（CJK multiline），S2~S7 规划中 | — |
 | 5.0 | 生态与 CI/CD | 规划中 | — |
 
 > 重要度评分基于五个维度加权综合评分（满分 100），详见 [`docs/PHASE_IMPORTANCE_SCORECARD.md`](docs/PHASE_IMPORTANCE_SCORECARD.md)。
@@ -237,12 +240,13 @@ nebula/
 │   ├── slug_bench.nelua          # Storage Buffer 可扩展性基准
 │   ├── cjk_text_demo.nelua      # CJK + ASCII 混排 Slug 渲染
 │   ├── dense_text_demo.nelua    # 高密度文本网格（120×50 = 6000 chars）
+│   ├── cjk_editor_demo.nelua   # CJK + ASCII 混排多行编辑器（Phase 4.7-S1）
 │   ├── term_demo.nelua          # 终端模拟器原型（PTY + ANSI + Dense Text）
 │   └── term/                    # 终端模拟器子模块
 │       ├── pty_bindings.nelua   # POSIX PTY C FFI 绑定
 │       ├── ansi_parser.nelua    # ANSI/VT100 转义序列状态机
 │       └── term_buffer.nelua    # 终端单元格缓冲区
-├── tests/                        # 测试套件 (49 项)
+├── tests/                        # 测试套件 (51 项)
 ├── tools/                        # 构建与测试工具（含 font_preprocessor_cjk）
 ├── assets/                       # 字体/纹理预处理产物（含 CJK shaping 表）
 ├── vendor/                       # 第三方依赖 (wgpu-native, GLFW)

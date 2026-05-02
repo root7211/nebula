@@ -204,14 +204,14 @@ check("interaction_factory: 版本号包含 phase3 前缀",
 local tb_src = nebula_gen_text_buffer({ base = "Input", max_text_len = 255 })
 check("interaction_factory: nebula_gen_text_buffer 生成 Gap Buffer 驱动代码",
   has_pattern(tb_src, "gap_buf:insert_char"), tb_src:sub(1, 80), "contains gap_buf:insert_char")
-check("interaction_factory: nebula_gen_text_buffer 使用 delete_before",
-  has_pattern(tb_src, "gap_buf:delete_before"), nil, "found")
-check("interaction_factory: nebula_gen_text_buffer 使用 delete_after",
-  has_pattern(tb_src, "gap_buf:delete_after"), nil, "found")
-check("interaction_factory: nebula_gen_text_buffer 使用 move_cursor_left",
-  has_pattern(tb_src, "gap_buf:move_cursor_left"), nil, "found")
-check("interaction_factory: nebula_gen_text_buffer 使用 move_cursor_right",
-  has_pattern(tb_src, "gap_buf:move_cursor_right"), nil, "found")
+check("interaction_factory: nebula_gen_text_buffer 使用 delete_char_before (Phase 4.7-S1)",
+  has_pattern(tb_src, "gap_buf:delete_char_before"), nil, "found")
+check("interaction_factory: nebula_gen_text_buffer 使用 delete_char_after (Phase 4.7-S1)",
+  has_pattern(tb_src, "gap_buf:delete_char_after"), nil, "found")
+check("interaction_factory: nebula_gen_text_buffer 使用 move_cursor_left_char (Phase 4.7-S1)",
+  has_pattern(tb_src, "gap_buf:move_cursor_left_char"), nil, "found")
+check("interaction_factory: nebula_gen_text_buffer 使用 move_cursor_right_char (Phase 4.7-S1)",
+  has_pattern(tb_src, "gap_buf:move_cursor_right_char"), nil, "found")
 check("interaction_factory: nebula_gen_text_buffer 使用 move_cursor_home",
   has_pattern(tb_src, "gap_buf:move_cursor_home"), nil, "found")
 check("interaction_factory: nebula_gen_text_buffer 使用 move_cursor_end",
