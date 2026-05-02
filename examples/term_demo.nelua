@@ -1,0 +1,489 @@
+-- =============================================================================
+-- term_demo.nelua
+-- Nebula GUI Compiler — Terminal Emulator Prototype
+--
+-- 最小可用终端模拟器：
+--   · PTY 子进程 (/bin/bash)
+--   · 非阻塞读取 PTY 输出
+--   · ANSI 转义序列解析 (SGR 颜色 + CSI 光标/清屏)
+--   · 键盘输入转发到 PTY
+--   · GPU 加速等宽字符网格渲染 (Dense Text Pipeline)
+--   · 闪烁块光标
+--
+-- 基于 Phase 4.X Dense Text 通道：
+--   · DenseCharInstance (32B/cell) Storage Buffer instanced 渲染
+--   · Per-cell fg + bg 颜色
+--   · 单次 draw call 渲染 80×24 = 1920 个字符
+--
+-- 公理合规：
+--   A: Visual 类型编译期推导 (nebula_derive)
+--   B: L0 管线/缓冲区 + L2 帧级实例数组
+--   C: 形即渲染 — TermVisual → DenseTextPipeline 确定性映射
+-- =============================================================================
+
+## cinclude "<stdio.h>"
+## cinclude "<string.h>"
+## cinclude "<stdlib.h>"
+
+require "nebula_core"
+require "glfw_bindings"
+require "wgpu_bindings"
+require "renderer"
+require "text_runtime"
+require "pty_bindings"
+require "ansi_parser"
+require "term_buffer"
+
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+global function snprintf(buf: cstring, size: csize, fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+global function strlen(s: cstring): csize <cimport, nodecl> end
+global function memcpy(dest: pointer, src: pointer, n: csize): pointer <cimport, nodecl> end
+
+-- =============================================================================
+-- 终端配置
+-- =============================================================================
+local WIN_W <comptime> = 1220
+local WIN_H <comptime> = 440
+local GRID_COLS <comptime> = 80
+local GRID_ROWS <comptime> = 24
+local MAX_CHARS <comptime> = (GRID_COLS + 1) * (GRID_ROWS + 1)  -- 额外空间给光标
+local CELL_W: float32 = 12.0
+local CELL_H: float32 = 18.0
+local ORIGIN_X: float32 = 4.0
+local ORIGIN_Y: float32 = 4.0
+
+-- =============================================================================
+-- Dense Text Visual — 编译期推导
+-- =============================================================================
+global TermVisual = @record{
+  pos: Vec2,
+  size: Vec2,
+}
+##[[
+nebula_annotate("TermVisual", {
+  states = {"default"},
+  primitives = {},
+  transitions = {},
+  text_mode = "dense",
+  max_chars = 4096,
+})
+]]
+## nebula_derive("TermVisual")
+
+-- =============================================================================
+-- PTY 管理
+-- =============================================================================
+local pty_master_fd: cint = -1
+local pty_child_pid: pid_t = 0
+
+local function start_shell(): boolean
+  local ws: winsize
+  ws.ws_row = GRID_ROWS
+  ws.ws_col = GRID_COLS
+  ws.ws_xpixel = 0
+  ws.ws_ypixel = 0
+
+  local master_fd: cint = -1
+  local pid = forkpty(&master_fd, nilptr, nilptr, &ws)
+
+  if pid < 0 then
+    printf("term: forkpty failed\n")
+    return false
+  end
+
+  if pid == 0 then
+    -- 子进程：执行 shell
+    setenv("TERM", "xterm-256color", 1)
+    setenv("COLORTERM", "truecolor", 1)
+    setenv("LANG", "en_US.UTF-8", 1)
+
+    -- 启动 bash
+    local shell: cstring = getenv("SHELL")
+    if shell == nilptr then shell = "/bin/bash" end
+
+    local argv: [3]cstring = { shell, "--norc", nilptr }
+    execvp(shell, &argv[0])
+    _exit(1)
+  end
+
+  -- 父进程
+  pty_master_fd = master_fd
+  pty_child_pid = pid
+
+  -- 设置非阻塞读取
+  if not nebula_set_nonblock(pty_master_fd) then
+    printf("term: failed to set nonblock\n")
+    return false
+  end
+
+  printf("term: shell started (pid=%d, fd=%d, %dx%d)\n",
+    (@int32)(pid), master_fd, GRID_COLS, GRID_ROWS)
+  return true
+end
+
+local function stop_shell(): void
+  if pty_master_fd >= 0 then
+    close(pty_master_fd)
+    pty_master_fd = -1
+  end
+  if pty_child_pid > 0 then
+    kill(pty_child_pid, SIGTERM)
+    local status: cint = 0
+    waitpid(pty_child_pid, &status, 0)
+    pty_child_pid = 0
+  end
+end
+
+-- =============================================================================
+-- 键盘输入 → PTY 转发
+-- =============================================================================
+
+-- GLFW 全局回调状态
+local _term_master_fd: *cint = nilptr
+
+-- 低级键回调：捕获特殊键并发送对应的 ANSI 序列
+local _term_key_buf: [16]uint8
+local _term_key_len: cint = 0
+
+-- 自定义 key callback（发送 ANSI 转义序列给 PTY）
+local function term_key_callback(window: GLFWwindow, key: int32, scancode: int32,
+                                  action: int32, mods: int32): void
+  if action ~= GLFW_PRESS and action ~= 2 then return end  -- 2 = GLFW_REPEAT
+
+  local buf: [8]uint8
+  local len: csize = 0
+
+  -- 检查 Ctrl 修饰符
+  if mods & 2 ~= 0 then  -- GLFW_MOD_CONTROL = 2
+    if key >= 65 and key <= 90 then  -- A-Z
+      -- Ctrl+A = 0x01, Ctrl+C = 0x03, etc.
+      buf[0] = (@uint8)(key - 64)
+      len = 1
+    end
+  else
+    -- 特殊键 → ANSI 序列
+    if key == 257 then      -- ENTER
+      buf[0] = 13  -- CR
+      len = 1
+    elseif key == 259 then  -- BACKSPACE
+      buf[0] = 127 -- DEL (大多数终端发送 DEL)
+      len = 1
+    elseif key == 258 then  -- TAB
+      buf[0] = 9
+      len = 1
+    elseif key == 256 then  -- ESCAPE
+      buf[0] = 27
+      len = 1
+    elseif key == 265 then  -- UP
+      buf[0] = 27; buf[1] = 91; buf[2] = 65  -- ESC[A
+      len = 3
+    elseif key == 264 then  -- DOWN
+      buf[0] = 27; buf[1] = 91; buf[2] = 66  -- ESC[B
+      len = 3
+    elseif key == 262 then  -- RIGHT
+      buf[0] = 27; buf[1] = 91; buf[2] = 67  -- ESC[C
+      len = 3
+    elseif key == 263 then  -- LEFT
+      buf[0] = 27; buf[1] = 91; buf[2] = 68  -- ESC[D
+      len = 3
+    elseif key == 268 then  -- HOME
+      buf[0] = 27; buf[1] = 91; buf[2] = 72  -- ESC[H
+      len = 3
+    elseif key == 269 then  -- END
+      buf[0] = 27; buf[1] = 91; buf[2] = 70  -- ESC[F
+      len = 3
+    elseif key == 261 then  -- DELETE
+      buf[0] = 27; buf[1] = 91; buf[2] = 51; buf[3] = 126  -- ESC[3~
+      len = 4
+    end
+  end
+
+  if len > 0 and pty_master_fd >= 0 then
+    nebula_pty_write(pty_master_fd, &buf[0], len)
+  end
+end
+
+-- 字符输入回调：ASCII 可打印字符直接转发
+local function term_char_callback(window: GLFWwindow, codepoint: uint32): void
+  if pty_master_fd < 0 then return end
+
+  -- UTF-8 编码
+  local buf: [4]uint8
+  local len: csize = 0
+
+  if codepoint < 0x80 then
+    buf[0] = (@uint8)(codepoint)
+    len = 1
+  elseif codepoint < 0x800 then
+    buf[0] = (@uint8)(0xC0 | (codepoint >> 6))
+    buf[1] = (@uint8)(0x80 | (codepoint & 0x3F))
+    len = 2
+  elseif codepoint < 0x10000 then
+    buf[0] = (@uint8)(0xE0 | (codepoint >> 12))
+    buf[1] = (@uint8)(0x80 | ((codepoint >> 6) & 0x3F))
+    buf[2] = (@uint8)(0x80 | (codepoint & 0x3F))
+    len = 3
+  else
+    buf[0] = (@uint8)(0xF0 | (codepoint >> 18))
+    buf[1] = (@uint8)(0x80 | ((codepoint >> 12) & 0x3F))
+    buf[2] = (@uint8)(0x80 | ((codepoint >> 6) & 0x3F))
+    buf[3] = (@uint8)(0x80 | (codepoint & 0x3F))
+    len = 4
+  end
+
+  nebula_pty_write(pty_master_fd, &buf[0], len)
+end
+
+-- =============================================================================
+-- 主程序
+-- =============================================================================
+local function main(): int32
+  if glfwInit() == 0 then
+    printf("glfw: init failed\n")
+    return 1
+  end
+  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
+
+  local window = glfwCreateWindow(WIN_W, WIN_H,
+    "Nebula Terminal — 80x24", nilptr, nilptr)
+  if window == nilptr then
+    printf("glfw: window creation failed\n")
+    return 1
+  end
+
+  -- 注册自定义键盘回调（绕过 Nebula 默认的 input 系统，直接转发到 PTY）
+  glfwSetKeyCallback(window, term_key_callback)
+  glfwSetCharCallback(window, term_char_callback)
+
+  local renderer: NebulaRenderer
+  if not renderer:init(window, WIN_W, WIN_H) then
+    return 1
+  end
+
+  -- 加载 SDF font atlas
+  local font: NebulaAsciiFontAtlas
+  if not nebula_text_load_ascii_font(&font, &renderer) then
+    printf("term: failed to load SDF font atlas\n")
+    return 1
+  end
+
+  -- Dense Text 管线
+  local pipe: TermDenseTextPipeline
+  if not pipe:init(&renderer, MAX_CHARS) then
+    printf("term: failed to init pipeline\n")
+    return 1
+  end
+
+  if not pipe:update_atlas(&renderer, font.view, font.sampler) then
+    printf("term: failed to bind atlas\n")
+    return 1
+  end
+
+  pipe:update_viewport(&renderer,
+    (@float32)(WIN_W), (@float32)(WIN_H), CELL_W, CELL_H)
+
+  -- 初始化终端缓冲区
+  local term_buf: TermBuffer
+  term_buf:init(GRID_ROWS, GRID_COLS)
+
+  -- 初始化 ANSI 解析器
+  local parser: AnsiParser
+  parser:init()
+
+  -- 启动 shell
+  if not start_shell() then
+    printf("term: failed to start shell\n")
+    return 1
+  end
+
+  -- DenseCharInstance 实例数组
+  local instances: [MAX_CHARS]DenseCharInstance
+
+  -- PTY 读取缓冲区
+  local pty_read_buf: [8192]uint8
+
+  -- 光标闪烁
+  local cursor_blink_time: float64 = 0.0
+  local cursor_visible: boolean = true
+
+  printf("=== Nebula Terminal Emulator ===\n")
+  printf("  Grid: %dx%d\n", GRID_COLS, GRID_ROWS)
+  printf("  Cell: %.0fx%.0f pixels\n", CELL_W, CELL_H)
+  printf("  Pipeline: Dense Text (Instanced + SDF Atlas)\n")
+  printf("  Shell: /bin/bash via PTY\n")
+  printf("================================\n")
+
+  local frame_count: uint64 = 0
+  local last_time = glfwGetTime()
+
+  -- =========================================================================
+  -- 主循环
+  -- =========================================================================
+  while glfwWindowShouldClose(window) == 0 do
+    glfwPollEvents()
+    frame_count = frame_count + 1
+
+    local now = glfwGetTime()
+    local dt = now - last_time
+    last_time = now
+
+    -- 光标闪烁（0.5 秒周期）
+    cursor_blink_time = cursor_blink_time + dt
+    if cursor_blink_time >= 0.5 then
+      cursor_blink_time = cursor_blink_time - 0.5
+      cursor_visible = not cursor_visible
+    end
+
+    -- -----------------------------------------------------------------------
+    -- 读取 PTY 输出并解析
+    -- -----------------------------------------------------------------------
+    -- 每帧最多读取多次以消耗积压数据
+    local total_read: csize = 0
+    while total_read < 65536 do
+      local n = nebula_pty_read(pty_master_fd, &pty_read_buf[0], 8192)
+      if n <= 0 then
+        if n < 0 then
+          -- EOF 或错误 — shell 退出
+          if not nebula_pty_child_alive(pty_child_pid) then
+            printf("term: shell exited\n")
+            goto cleanup
+          end
+        end
+        break
+      end
+
+      -- 逐字节 feed 到 ANSI 解析器
+      for i = 0, < (@csize)(n) do
+        local ev: AnsiEvent
+        if parser:feed(pty_read_buf[i], &ev) then
+          term_buf:handle_event(&ev, &parser)
+        end
+      end
+
+      total_read = total_read + (@csize)(n)
+    end
+
+    -- -----------------------------------------------------------------------
+    -- 构建 DenseCharInstance 数组
+    -- -----------------------------------------------------------------------
+    local char_idx: uint32 = 0
+    for row = 0, < GRID_ROWS do
+      for col = 0, < GRID_COLS do
+        local cell = term_buf:get_cell(row, col)
+        nebula_dense_grid_fill_instance(
+          &instances[char_idx],
+          (@uint32)(row), (@uint32)(col),
+          cell.codepoint,
+          ORIGIN_X, ORIGIN_Y,
+          CELL_W, CELL_H,
+          cell.fg, cell.bg
+        )
+        char_idx = char_idx + 1
+      end
+    end
+
+    -- 光标渲染（反色块）
+    if cursor_visible and
+       term_buf.cursor_row >= 0 and term_buf.cursor_row < GRID_ROWS and
+       term_buf.cursor_col >= 0 and term_buf.cursor_col < GRID_COLS then
+      -- 在光标位置叠加一个反色块字符
+      local cr = term_buf.cursor_row
+      local cc = term_buf.cursor_col
+      local cell = term_buf:get_cell(cr, cc)
+      -- 光标样式：反色（交换 fg/bg）
+      local cursor_fg = cell.bg
+      local cursor_bg = cell.fg
+      -- 如果前景=背景（例如空格），使用高对比色
+      if cursor_fg == cursor_bg then
+        cursor_fg = TERM_DEFAULT_BG
+        cursor_bg = TERM_DEFAULT_FG
+      end
+      -- 覆盖光标位置的实例
+      local cursor_idx = (@uint32)(cr) * (@uint32)(GRID_COLS) + (@uint32)(cc)
+      local cp = cell.codepoint
+      if cp == 32 then cp = 32 end  -- 空格保持空格，靠背景色显示块光标
+      nebula_dense_grid_fill_instance(
+        &instances[cursor_idx],
+        (@uint32)(cr), (@uint32)(cc),
+        cp,
+        ORIGIN_X, ORIGIN_Y,
+        CELL_W, CELL_H,
+        cursor_fg, cursor_bg
+      )
+    end
+
+    -- -----------------------------------------------------------------------
+    -- GPU Upload + Render
+    -- -----------------------------------------------------------------------
+    if not pipe:upload(&renderer, &instances[0], char_idx) then
+      continue
+    end
+
+    local surface_tex: WGPUSurfaceTexture
+    wgpuSurfaceGetCurrentTexture(renderer.surface, &surface_tex)
+    local status = surface_tex.status
+    if status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal and
+       status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal then
+      continue
+    end
+
+    local view_desc = WGPUTextureViewDescriptor{
+      nextInChain     = nilptr,
+      label           = wgpu_str_null(),
+      format          = renderer.format,
+      dimension       = 2,
+      baseMipLevel    = 0,
+      mipLevelCount   = 1,
+      baseArrayLayer  = 0,
+      arrayLayerCount = 1,
+      aspect          = 1,
+      usage           = 0,
+    }
+    local view = wgpuTextureCreateView(surface_tex.texture, &view_desc)
+
+    local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, nilptr)
+    local clear_color = WGPURenderPassColorAttachment{
+      nextInChain = nilptr,
+      view = view,
+      depthSlice = 0xFFFFFFFF,
+      resolveTarget = nilptr,
+      loadOp = WGPULoadOp_Clear,
+      storeOp = WGPUStoreOp_Store,
+      clearValue = WGPUColor{ r = 0.08, g = 0.08, b = 0.12, a = 1.0 },
+    }
+    local rp_desc = WGPURenderPassDescriptor{
+      nextInChain = nilptr,
+      label = wgpu_str_null(),
+      colorAttachmentCount = 1,
+      colorAttachments = &clear_color,
+      depthStencilAttachment = nilptr,
+      occlusionQuerySet = nilptr,
+      timestampWrites = nilptr,
+    }
+    local pass = wgpuCommandEncoderBeginRenderPass(encoder, &rp_desc)
+
+    -- Dense text instanced draw
+    pipe:draw(pass, char_idx)
+
+    wgpuRenderPassEncoderEnd(pass)
+    wgpuRenderPassEncoderRelease(pass)
+
+    local cmd = wgpuCommandEncoderFinish(encoder, nilptr)
+    wgpuQueueSubmit(renderer.queue, 1, &cmd)
+    wgpuCommandBufferRelease(cmd)
+    wgpuCommandEncoderRelease(encoder)
+    wgpuTextureViewRelease(view)
+    wgpuSurfacePresent(renderer.surface)
+  end
+
+  ::cleanup::
+  stop_shell()
+  pipe:deinit()
+  glfwDestroyWindow(window)
+  glfwTerminate()
+  printf("nebula: terminal clean exit (rendered %lu frames)\n", frame_count)
+  return 0
+end
+
+main()

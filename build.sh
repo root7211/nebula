@@ -47,7 +47,7 @@ done
 
 # 验证 Demo 目标
 case "$DEMO_TARGET" in
-  button_demo|layout_demo|login_demo|form_demo|dynamic_list_demo|shadow_demo|text_demo|slider_demo|scrollable_demo|dropdown_demo|multiline_editable_demo|slug_bench|cjk_text_demo|dense_text_demo)
+  button_demo|layout_demo|login_demo|form_demo|dynamic_list_demo|shadow_demo|text_demo|slider_demo|scrollable_demo|dropdown_demo|multiline_editable_demo|slug_bench|cjk_text_demo|dense_text_demo|term_demo)
     ;;
   *)
     echo "[nebula] Error: unknown demo target '$DEMO_TARGET'"
@@ -69,6 +69,11 @@ if [ "$NEBULA_TARGET" == "linux" ]; then
   NELUA_FLAGS="$NELUA_FLAGS -D NEBULA_LINUX_DISPLAY=$NEBULA_DISPLAY"
   CFLAGS="-I$VENDOR/include"
   LDFLAGS="-L$VENDOR/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,$VENDOR/lib"
+  # term_demo 需要 libutil (forkpty) + examples/term 搜索路径
+  if [ "$DEMO_TARGET" == "term_demo" ]; then
+    LDFLAGS="$LDFLAGS -lutil"
+    NELUA_FLAGS="$NELUA_FLAGS -L $SCRIPT_DIR/examples/term"
+  fi
   
 elif [ "$NEBULA_TARGET" == "windows" ]; then
   # Windows 编译配置 (假设在 Windows 环境或使用交叉编译)

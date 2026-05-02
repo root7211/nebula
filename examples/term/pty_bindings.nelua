@@ -1,0 +1,126 @@
+-- =============================================================================
+-- pty_bindings.nelua
+-- Nebula GUI Compiler — Terminal Emulator
+--
+-- POSIX PTY + 进程管理 C FFI 绑定
+-- 用于终端模拟器的伪终端创建、读写、子进程管理
+--
+-- 公理合规：
+--   A: 所有绑定声明在 S1 消解，运行时零开销
+--   B: L0 资源（fd, pid）由调用方显式管理生命周期
+-- =============================================================================
+
+## cinclude "<pty.h>"
+## cinclude "<unistd.h>"
+## cinclude "<fcntl.h>"
+## cinclude "<sys/ioctl.h>"
+## cinclude "<sys/wait.h>"
+## cinclude "<signal.h>"
+## cinclude "<errno.h>"
+## linklib "util"
+
+-- 基础类型
+global pid_t  <cimport, nodecl> = @cint
+global WNOHANG: cint <cimport, nodecl>
+
+-- termios winsize 结构
+global winsize <cimport, nodecl> = @record{
+  ws_row:    uint16,
+  ws_col:    uint16,
+  ws_xpixel: uint16,
+  ws_ypixel: uint16,
+}
+
+-- PTY 创建
+global function forkpty(
+  amaster: *cint,
+  name:    cstring,
+  termp:   pointer,
+  winp:    *winsize
+): pid_t <cimport, nodecl> end
+
+-- 文件描述符操作
+global function read(fd: cint, buf: pointer, count: csize): clong <cimport, nodecl> end
+global function write(fd: cint, buf: pointer, count: csize): clong <cimport, nodecl> end
+global function close(fd: cint): cint <cimport, nodecl> end
+
+-- 非阻塞 I/O
+global function fcntl(fd: cint, cmd: cint, ...: cvarargs): cint <cimport, nodecl> end
+## cdefine "F_GETFL"
+## cdefine "F_SETFL"
+## cdefine "O_NONBLOCK"
+global F_GETFL: cint <cimport, nodecl>
+global F_SETFL: cint <cimport, nodecl>
+global O_NONBLOCK: cint <cimport, nodecl>
+
+-- 终端大小控制
+## cdefine "TIOCSWINSZ"
+global TIOCSWINSZ: culong <cimport, nodecl>
+global function ioctl(fd: cint, request: culong, ...: cvarargs): cint <cimport, nodecl> end
+
+-- 进程管理
+global function waitpid(pid: pid_t, status: *cint, options: cint): pid_t <cimport, nodecl> end
+global function kill(pid: pid_t, sig: cint): cint <cimport, nodecl> end
+## cdefine "SIGTERM"
+global SIGTERM: cint <cimport, nodecl>
+
+-- exec 族
+global function execle(path: cstring, arg0: cstring, ...: cvarargs): cint <cimport, nodecl> end
+global function execvp(file: cstring, argv: *cstring): cint <cimport, nodecl> end
+global function _exit(status: cint): void <cimport, nodecl> end
+global function setsid(): pid_t <cimport, nodecl> end
+
+-- 环境变量
+global function setenv(name: cstring, value: cstring, overwrite: cint): cint <cimport, nodecl> end
+global function getenv(name: cstring): cstring <cimport, nodecl> end
+
+-- errno
+global errno: cint <cimport, nodecl>
+## cdefine "EAGAIN"
+## cdefine "EINTR"
+global EAGAIN: cint <cimport, nodecl>
+global EINTR: cint <cimport, nodecl>
+
+-- =============================================================================
+-- 辅助函数
+-- =============================================================================
+
+-- 将 fd 设置为非阻塞模式
+global function nebula_set_nonblock(fd: cint): boolean
+  local flags = fcntl(fd, F_GETFL)
+  if flags == -1 then return false end
+  return fcntl(fd, F_SETFL, flags | O_NONBLOCK) ~= -1
+end
+
+-- 非阻塞读取，返回读取字节数，0 表示无数据，-1 表示错误/EOF
+global function nebula_pty_read(fd: cint, buf: pointer, max_size: csize): clong
+  local n = read(fd, buf, max_size)
+  if n == -1 then
+    if errno == EAGAIN or errno == EINTR then
+      return 0  -- 无数据可读
+    end
+    return -1  -- 真正的错误或 EOF
+  end
+  return n
+end
+
+-- 写入数据到 PTY
+global function nebula_pty_write(fd: cint, buf: pointer, size: csize): boolean
+  local written: csize = 0
+  while written < size do
+    local n = write(fd, (@pointer)((@usize)(buf) + written), size - written)
+    if n <= 0 then
+      if errno == EAGAIN or errno == EINTR then continue end
+      return false
+    end
+    written = written + (@csize)(n)
+  end
+  return true
+end
+
+-- 检查子进程是否仍在运行
+global function nebula_pty_child_alive(pid: pid_t): boolean
+  local status: cint = 0
+  local ret = waitpid(pid, &status, WNOHANG)
+  return ret == 0  -- 0 = 子进程仍在运行
+end

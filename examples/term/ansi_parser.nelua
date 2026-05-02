@@ -1,0 +1,389 @@
+-- =============================================================================
+-- ansi_parser.nelua
+-- Nebula GUI Compiler — Terminal Emulator
+--
+-- 最小 VT100/ANSI 转义序列解析器
+-- 支持：
+--   · SGR（Select Graphic Rendition）— 16 色 + 256 色 + TrueColor
+--   · CSI 光标移动（CUU/CUD/CUF/CUB/CUP/ED/EL/SGR）
+--   · 基本控制字符（BS/TAB/LF/CR/BEL）
+--
+-- 公理合规：
+--   A: 解析器无编译期状态（纯运行时 S2）
+--   B: L1 持久状态（解析器自身），L2 帧级输出（解析事件）
+-- =============================================================================
+
+-- =============================================================================
+-- ANSI 16 色标准调色板（SGR 30-37 / 40-47 / 90-97 / 100-107）
+-- =============================================================================
+global ANSI_PALETTE: [16]uint32 = {
+  -- 标准 8 色（30-37 / 40-47）
+  0xFF000000,  -- 0: 黑
+  0xFF0000AA,  -- 1: 红
+  0xFF00AA00,  -- 2: 绿
+  0xFF00AAAA,  -- 3: 黄/棕
+  0xFFAA0000,  -- 4: 蓝
+  0xFFAA00AA,  -- 5: 品红
+  0xFFAAAA00,  -- 6: 青
+  0xFFAAAAAA,  -- 7: 白/浅灰
+  -- 亮色 8 色（90-97 / 100-107）
+  0xFF555555,  -- 8:  亮黑/深灰
+  0xFF5555FF,  -- 9:  亮红
+  0xFF55FF55,  -- 10: 亮绿
+  0xFF55FFFF,  -- 11: 亮黄
+  0xFFFF5555,  -- 12: 亮蓝
+  0xFFFF55FF,  -- 13: 亮品红
+  0xFFFFFF55,  -- 14: 亮青
+  0xFFFFFFFF,  -- 15: 亮白
+}
+
+-- 默认终端颜色
+global TERM_DEFAULT_FG: uint32 = 0xFFCCCCCC  -- 浅灰
+global TERM_DEFAULT_BG: uint32 = 0xFF1A1A2E  -- 深蓝黑
+
+-- =============================================================================
+-- 解析器状态枚举
+-- =============================================================================
+global AnsiState = @enum(uint8){
+  Normal  = 0,   -- 普通字符
+  Escape  = 1,   -- 收到 ESC (0x1B)
+  CSI     = 2,   -- 收到 ESC[  — CSI 序列
+  OSC     = 3,   -- 收到 ESC]  — 操作系统命令（忽略）
+}
+
+-- =============================================================================
+-- 解析器输出事件类型
+-- =============================================================================
+global AnsiEventKind = @enum(uint8){
+  Char       = 0,   -- 普通可打印字符
+  Newline    = 1,   -- LF (换行 + 回车)
+  Return     = 2,   -- CR (回车)
+  Backspace  = 3,   -- BS
+  Tab        = 4,   -- TAB
+  Bell       = 5,   -- BEL
+  CursorUp   = 10,  -- CSI A
+  CursorDown = 11,  -- CSI B
+  CursorFwd  = 12,  -- CSI C
+  CursorBack = 13,  -- CSI D
+  CursorPos  = 14,  -- CSI H (row, col)
+  EraseDisp  = 15,  -- CSI J
+  EraseLine  = 16,  -- CSI K
+  SGR        = 17,  -- CSI m (颜色/属性变更已内部处理)
+  SetTitle   = 18,  -- OSC 标题设置（忽略内容）
+}
+
+-- =============================================================================
+-- 解析事件结构
+-- =============================================================================
+global AnsiEvent = @record{
+  kind:   AnsiEventKind,
+  ch:     uint32,   -- Char 事件的 codepoint
+  param1: int32,    -- CSI 参数 1 (例如 CursorPos 的 row)
+  param2: int32,    -- CSI 参数 2 (例如 CursorPos 的 col)
+}
+
+-- =============================================================================
+-- CSI 参数缓冲区
+-- =============================================================================
+local MAX_CSI_PARAMS <comptime> = 16
+
+-- =============================================================================
+-- ANSI 解析器主体
+-- =============================================================================
+global AnsiParser = @record{
+  state:      AnsiState,
+  -- CSI 参数缓冲区
+  params:     [MAX_CSI_PARAMS]int32,
+  param_idx:  uint8,
+  cur_param:  int32,
+  has_param:  boolean,
+  -- 当前文本属性
+  fg_color:   uint32,
+  bg_color:   uint32,
+  bold:       boolean,
+  -- OSC 忽略
+  osc_skip:   boolean,
+}
+
+function AnsiParser:init(): void
+  self.state     = AnsiState.Normal
+  self.param_idx = 0
+  self.cur_param = 0
+  self.has_param = false
+  self.fg_color  = TERM_DEFAULT_FG
+  self.bg_color  = TERM_DEFAULT_BG
+  self.bold      = false
+  self.osc_skip  = false
+end
+
+-- =============================================================================
+-- SGR 处理（内部）
+-- =============================================================================
+local function parser_handle_sgr(self: *AnsiParser): void
+  -- 无参数 = SGR 0 (reset)
+  if self.param_idx == 0 and not self.has_param then
+    self.fg_color = TERM_DEFAULT_FG
+    self.bg_color = TERM_DEFAULT_BG
+    self.bold     = false
+    return
+  end
+
+  -- 收集最后一个参数
+  if self.has_param then
+    if self.param_idx < MAX_CSI_PARAMS then
+      self.params[self.param_idx] = self.cur_param
+      self.param_idx = self.param_idx + 1
+    end
+  end
+
+  local i: uint8 = 0
+  while i < self.param_idx do
+    local p = self.params[i]
+    if p == 0 then
+      -- Reset
+      self.fg_color = TERM_DEFAULT_FG
+      self.bg_color = TERM_DEFAULT_BG
+      self.bold     = false
+    elseif p == 1 then
+      self.bold = true
+    elseif p == 22 then
+      self.bold = false
+    elseif p >= 30 and p <= 37 then
+      -- 标准前景色
+      local idx = p - 30
+      if self.bold then idx = idx + 8 end
+      self.fg_color = ANSI_PALETTE[idx]
+    elseif p == 39 then
+      -- 默认前景
+      self.fg_color = TERM_DEFAULT_FG
+    elseif p >= 40 and p <= 47 then
+      -- 标准背景色
+      self.bg_color = ANSI_PALETTE[p - 40]
+    elseif p == 49 then
+      -- 默认背景
+      self.bg_color = TERM_DEFAULT_BG
+    elseif p >= 90 and p <= 97 then
+      -- 亮前景色
+      self.fg_color = ANSI_PALETTE[p - 90 + 8]
+    elseif p >= 100 and p <= 107 then
+      -- 亮背景色
+      self.bg_color = ANSI_PALETTE[p - 100 + 8]
+    elseif p == 38 then
+      -- 扩展前景色
+      if i + 1 < self.param_idx and self.params[i + 1] == 5 then
+        -- 256 色模式: 38;5;n
+        if i + 2 < self.param_idx then
+          local n = self.params[i + 2]
+          if n >= 0 and n < 16 then
+            self.fg_color = ANSI_PALETTE[n]
+          else
+            -- 简化处理：216 色 + 24 灰度映射到近似 RGB
+            -- TODO: 完整 256 色表
+            self.fg_color = TERM_DEFAULT_FG
+          end
+          i = i + 2
+        end
+      elseif i + 1 < self.param_idx and self.params[i + 1] == 2 then
+        -- TrueColor 模式: 38;2;r;g;b
+        if i + 4 < self.param_idx then
+          local r = (@uint8)(self.params[i + 2])
+          local g = (@uint8)(self.params[i + 3])
+          local b = (@uint8)(self.params[i + 4])
+          self.fg_color = (@uint32)(r) | ((@uint32)(g) << 8) | ((@uint32)(b) << 16) | 0xFF000000
+          i = i + 4
+        end
+      end
+    elseif p == 48 then
+      -- 扩展背景色
+      if i + 1 < self.param_idx and self.params[i + 1] == 5 then
+        if i + 2 < self.param_idx then
+          local n = self.params[i + 2]
+          if n >= 0 and n < 16 then
+            self.bg_color = ANSI_PALETTE[n]
+          else
+            self.bg_color = TERM_DEFAULT_BG
+          end
+          i = i + 2
+        end
+      elseif i + 1 < self.param_idx and self.params[i + 1] == 2 then
+        if i + 4 < self.param_idx then
+          local r = (@uint8)(self.params[i + 2])
+          local g = (@uint8)(self.params[i + 3])
+          local b = (@uint8)(self.params[i + 4])
+          self.bg_color = (@uint32)(r) | ((@uint32)(g) << 8) | ((@uint32)(b) << 16) | 0xFF000000
+          i = i + 4
+        end
+      end
+    end
+    i = i + 1
+  end
+end
+
+-- =============================================================================
+-- CSI 最终字符分发（内部）
+-- =============================================================================
+local function parser_finish_csi(self: *AnsiParser, final_ch: uint8, out: *AnsiEvent): boolean
+  -- 收集最后一个参数
+  if self.has_param then
+    if self.param_idx < MAX_CSI_PARAMS then
+      self.params[self.param_idx] = self.cur_param
+      self.param_idx = self.param_idx + 1
+    end
+  end
+
+  local p1: int32 = 1  -- 默认参数值
+  if self.param_idx > 0 then p1 = self.params[0] end
+  if p1 <= 0 then p1 = 1 end
+
+  self.state = AnsiState.Normal
+
+  if final_ch == 65 then       -- 'A' CUU
+    out.kind   = AnsiEventKind.CursorUp
+    out.param1 = p1
+    return true
+  elseif final_ch == 66 then   -- 'B' CUD
+    out.kind   = AnsiEventKind.CursorDown
+    out.param1 = p1
+    return true
+  elseif final_ch == 67 then   -- 'C' CUF
+    out.kind   = AnsiEventKind.CursorFwd
+    out.param1 = p1
+    return true
+  elseif final_ch == 68 then   -- 'D' CUB
+    out.kind   = AnsiEventKind.CursorBack
+    out.param1 = p1
+    return true
+  elseif final_ch == 72 or final_ch == 102 then  -- 'H' or 'f' CUP
+    out.kind   = AnsiEventKind.CursorPos
+    out.param1 = p1  -- row (1-based)
+    out.param2 = 1
+    if self.param_idx > 1 then
+      out.param2 = self.params[1]
+      if out.param2 <= 0 then out.param2 = 1 end
+    end
+    return true
+  elseif final_ch == 74 then   -- 'J' ED
+    out.kind   = AnsiEventKind.EraseDisp
+    out.param1 = 0
+    if self.param_idx > 0 then out.param1 = self.params[0] end
+    return true
+  elseif final_ch == 75 then   -- 'K' EL
+    out.kind   = AnsiEventKind.EraseLine
+    out.param1 = 0
+    if self.param_idx > 0 then out.param1 = self.params[0] end
+    return true
+  elseif final_ch == 109 then  -- 'm' SGR
+    parser_handle_sgr(self)
+    -- SGR 内部处理，不产出事件
+    return false
+  end
+
+  -- 未知 CSI 序列 — 忽略
+  return false
+end
+
+-- =============================================================================
+-- 解析器主入口：逐字节 feed
+-- =============================================================================
+function AnsiParser:feed(byte: uint8, out: *AnsiEvent): boolean
+  -- OSC 跳过模式
+  if self.osc_skip then
+    -- OSC 以 BEL (0x07) 或 ST (ESC \) 结束
+    if byte == 0x07 then
+      self.osc_skip = false
+      self.state    = AnsiState.Normal
+    elseif byte == 0x1B then
+      -- 可能是 ST 的开头，但简化处理：直接退出 OSC
+      self.osc_skip = false
+      self.state    = AnsiState.Escape
+    end
+    return false
+  end
+
+  switch self.state do
+  case AnsiState.Normal then
+    if byte == 0x1B then
+      -- ESC
+      self.state = AnsiState.Escape
+      return false
+    elseif byte == 0x0A then
+      -- LF
+      out.kind = AnsiEventKind.Newline
+      return true
+    elseif byte == 0x0D then
+      -- CR
+      out.kind = AnsiEventKind.Return
+      return true
+    elseif byte == 0x08 then
+      -- BS
+      out.kind = AnsiEventKind.Backspace
+      return true
+    elseif byte == 0x09 then
+      -- TAB
+      out.kind = AnsiEventKind.Tab
+      return true
+    elseif byte == 0x07 then
+      -- BEL
+      out.kind = AnsiEventKind.Bell
+      return true
+    elseif byte >= 0x20 then
+      -- 可打印 ASCII
+      out.kind = AnsiEventKind.Char
+      out.ch   = (@uint32)(byte)
+      return true
+    end
+    -- 其他控制字符忽略
+    return false
+
+  case AnsiState.Escape then
+    if byte == 91 then  -- '['
+      -- 进入 CSI
+      self.state     = AnsiState.CSI
+      self.param_idx = 0
+      self.cur_param = 0
+      self.has_param = false
+      return false
+    elseif byte == 93 then  -- ']'
+      -- 进入 OSC（忽略内容）
+      self.osc_skip = true
+      self.state    = AnsiState.OSC
+      return false
+    else
+      -- 未知 ESC 序列，回到 Normal
+      self.state = AnsiState.Normal
+      return false
+    end
+
+  case AnsiState.CSI then
+    if byte >= 48 and byte <= 57 then  -- '0'-'9'
+      self.cur_param = self.cur_param * 10 + (@int32)(byte - 48)
+      self.has_param = true
+      return false
+    elseif byte == 59 then  -- ';'
+      -- 参数分隔符
+      if self.param_idx < MAX_CSI_PARAMS then
+        if self.has_param then
+          self.params[self.param_idx] = self.cur_param
+        else
+          self.params[self.param_idx] = 0
+        end
+        self.param_idx = self.param_idx + 1
+      end
+      self.cur_param = 0
+      self.has_param = false
+      return false
+    elseif byte >= 64 and byte <= 126 then  -- '@'-'~' final char
+      return parser_finish_csi(self, byte, out)
+    else
+      -- CSI 中间字符或未知，继续收集
+      return false
+    end
+
+  case AnsiState.OSC then
+    -- 不应到达这里（osc_skip 在上面处理）
+    self.state = AnsiState.Normal
+    return false
+  end
+
+  return false
+end

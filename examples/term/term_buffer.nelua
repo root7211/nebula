@@ -1,0 +1,295 @@
+-- =============================================================================
+-- term_buffer.nelua
+-- Nebula GUI Compiler — Terminal Emulator
+--
+-- 终端单元格缓冲区
+-- 管理 rows × cols 的字符网格，每个单元格包含：
+--   · codepoint (uint32)  — 显示字符
+--   · fg_color  (uint32)  — 前景色 (packed RGBA8)
+--   · bg_color  (uint32)  — 背景色 (packed RGBA8)
+--
+-- 同时管理光标位置和滚动区域。
+--
+-- 公理合规：
+--   A: 缓冲区尺寸编译期确定（comptime ROWS/COLS）
+--   B: L0 持久缓冲区（整个终端会话生存期）
+-- =============================================================================
+
+require "ansi_parser"
+
+-- =============================================================================
+-- 编译期配置
+-- =============================================================================
+global TERM_MAX_ROWS <comptime> = 50
+global TERM_MAX_COLS <comptime> = 120
+global TERM_MAX_CELLS <comptime> = TERM_MAX_ROWS * TERM_MAX_COLS
+
+-- 滚动回看行数
+global TERM_SCROLLBACK <comptime> = 200
+global TERM_TOTAL_ROWS <comptime> = TERM_MAX_ROWS + TERM_SCROLLBACK
+
+-- =============================================================================
+-- 终端单元格
+-- =============================================================================
+global TermCell = @record{
+  codepoint: uint32,
+  fg:        uint32,
+  bg:        uint32,
+}
+
+-- =============================================================================
+-- 终端缓冲区
+-- =============================================================================
+global TermBuffer = @record{
+  -- 可见区域尺寸
+  rows: int32,
+  cols: int32,
+
+  -- 单元格存储（可见区域 + 滚动回看）
+  cells: [TERM_TOTAL_ROWS][TERM_MAX_COLS]TermCell,
+
+  -- 光标位置 (0-based)
+  cursor_row: int32,
+  cursor_col: int32,
+
+  -- 滚动偏移（0 = 底部，正值 = 向上滚动查看历史）
+  scroll_offset: int32,
+
+  -- 历史行数（已滚出可见区域的行数）
+  history_count: int32,
+
+  -- 当前写入行在 cells 中的偏移
+  -- 可见区域第 0 行 = cells[(top_line) % TERM_TOTAL_ROWS]
+  top_line: int32,
+
+  -- 当前颜色属性（来自 ANSI parser）
+  cur_fg: uint32,
+  cur_bg: uint32,
+
+  -- 内容是否有变化（脏标记，优化 upload）
+  dirty: boolean,
+}
+
+-- =============================================================================
+-- 清空整个缓冲区
+-- =============================================================================
+function TermBuffer:clear_all(): void
+  for r = 0, < TERM_TOTAL_ROWS do
+    for c = 0, < TERM_MAX_COLS do
+      self.cells[r][c].codepoint = 32  -- space
+      self.cells[r][c].fg = TERM_DEFAULT_FG
+      self.cells[r][c].bg = TERM_DEFAULT_BG
+    end
+  end
+  self.dirty = true
+end
+
+-- =============================================================================
+-- 初始化
+-- =============================================================================
+function TermBuffer:init(rows: int32, cols: int32): void
+  self.rows = rows
+  self.cols = cols
+  self.cursor_row = 0
+  self.cursor_col = 0
+  self.scroll_offset = 0
+  self.history_count = 0
+  self.top_line = 0
+  self.cur_fg = TERM_DEFAULT_FG
+  self.cur_bg = TERM_DEFAULT_BG
+  self.dirty = true
+  self:clear_all()
+end
+
+-- =============================================================================
+-- 获取可见区域中 (row, col) 对应的实际 cells 行索引
+-- =============================================================================
+local function visible_row_index(self: *TermBuffer, vrow: int32): int32
+  return (self.top_line + vrow) % TERM_TOTAL_ROWS
+end
+
+-- =============================================================================
+-- 获取可见区域单元格（只读）
+-- =============================================================================
+function TermBuffer:get_cell(vrow: int32, vcol: int32): TermCell
+  if vrow < 0 or vrow >= self.rows or vcol < 0 or vcol >= self.cols then
+    return TermCell{ codepoint = 32, fg = TERM_DEFAULT_FG, bg = TERM_DEFAULT_BG }
+  end
+  local ridx = visible_row_index(self, vrow)
+  return self.cells[ridx][vcol]
+end
+
+-- =============================================================================
+-- 设置可见区域单元格
+-- =============================================================================
+local function set_cell(self: *TermBuffer, vrow: int32, vcol: int32, cell: TermCell): void
+  if vrow < 0 or vrow >= self.rows or vcol < 0 or vcol >= self.cols then return end
+  local ridx = visible_row_index(self, vrow)
+  self.cells[ridx][vcol] = cell
+  self.dirty = true
+end
+
+-- =============================================================================
+-- 清空一行（可见区域行号）
+-- =============================================================================
+local function clear_line(self: *TermBuffer, vrow: int32): void
+  if vrow < 0 or vrow >= self.rows then return end
+  local ridx = visible_row_index(self, vrow)
+  for c = 0, < self.cols do
+    self.cells[ridx][c].codepoint = 32
+    self.cells[ridx][c].fg = TERM_DEFAULT_FG
+    self.cells[ridx][c].bg = TERM_DEFAULT_BG
+  end
+  self.dirty = true
+end
+
+-- =============================================================================
+-- 滚动：将所有内容上移一行，底部出新空行
+-- =============================================================================
+local function scroll_up(self: *TermBuffer): void
+  -- top_line 前进一行，相当于丢弃第 0 行进入历史
+  self.top_line = (self.top_line + 1) % TERM_TOTAL_ROWS
+  if self.history_count < TERM_SCROLLBACK then
+    self.history_count = self.history_count + 1
+  end
+  -- 清空新的底部行
+  clear_line(self, self.rows - 1)
+  self.dirty = true
+end
+
+-- =============================================================================
+-- 写入一个字符到光标位置
+-- =============================================================================
+function TermBuffer:put_char(codepoint: uint32): void
+  if self.cursor_col >= self.cols then
+    -- 自动换行
+    self.cursor_col = 0
+    self.cursor_row = self.cursor_row + 1
+    if self.cursor_row >= self.rows then
+      scroll_up(self)
+      self.cursor_row = self.rows - 1
+    end
+  end
+
+  local cell = TermCell{
+    codepoint = codepoint,
+    fg = self.cur_fg,
+    bg = self.cur_bg,
+  }
+  set_cell(self, self.cursor_row, self.cursor_col, cell)
+  self.cursor_col = self.cursor_col + 1
+end
+
+-- =============================================================================
+-- 处理 ANSI 解析事件
+-- =============================================================================
+function TermBuffer:handle_event(ev: *AnsiEvent, parser: *AnsiParser): void
+  switch ev.kind do
+  case AnsiEventKind.Char then
+    -- 同步颜色
+    self.cur_fg = parser.fg_color
+    self.cur_bg = parser.bg_color
+    self:put_char(ev.ch)
+
+  case AnsiEventKind.Newline then
+    self.cursor_row = self.cursor_row + 1
+    if self.cursor_row >= self.rows then
+      scroll_up(self)
+      self.cursor_row = self.rows - 1
+    end
+
+  case AnsiEventKind.Return then
+    self.cursor_col = 0
+
+  case AnsiEventKind.Backspace then
+    if self.cursor_col > 0 then
+      self.cursor_col = self.cursor_col - 1
+    end
+
+  case AnsiEventKind.Tab then
+    -- 跳到下一个 8 的倍数
+    self.cursor_col = ((self.cursor_col // 8) + 1) * 8
+    if self.cursor_col >= self.cols then
+      self.cursor_col = self.cols - 1
+    end
+
+  case AnsiEventKind.CursorUp then
+    self.cursor_row = self.cursor_row - ev.param1
+    if self.cursor_row < 0 then self.cursor_row = 0 end
+
+  case AnsiEventKind.CursorDown then
+    self.cursor_row = self.cursor_row + ev.param1
+    if self.cursor_row >= self.rows then self.cursor_row = self.rows - 1 end
+
+  case AnsiEventKind.CursorFwd then
+    self.cursor_col = self.cursor_col + ev.param1
+    if self.cursor_col >= self.cols then self.cursor_col = self.cols - 1 end
+
+  case AnsiEventKind.CursorBack then
+    self.cursor_col = self.cursor_col - ev.param1
+    if self.cursor_col < 0 then self.cursor_col = 0 end
+
+  case AnsiEventKind.CursorPos then
+    -- CSI row;col H (1-based → 0-based)
+    self.cursor_row = ev.param1 - 1
+    self.cursor_col = ev.param2 - 1
+    if self.cursor_row < 0 then self.cursor_row = 0 end
+    if self.cursor_row >= self.rows then self.cursor_row = self.rows - 1 end
+    if self.cursor_col < 0 then self.cursor_col = 0 end
+    if self.cursor_col >= self.cols then self.cursor_col = self.cols - 1 end
+
+  case AnsiEventKind.EraseDisp then
+    if ev.param1 == 0 then
+      -- 清除光标到屏幕末尾
+      -- 清除光标行右侧
+      local ridx = visible_row_index(self, self.cursor_row)
+      for c = self.cursor_col, < self.cols do
+        self.cells[ridx][c] = TermCell{ codepoint = 32, fg = TERM_DEFAULT_FG, bg = TERM_DEFAULT_BG }
+      end
+      -- 清除光标下方所有行
+      for r = self.cursor_row + 1, < self.rows do
+        clear_line(self, r)
+      end
+    elseif ev.param1 == 1 then
+      -- 清除屏幕开头到光标
+      for r = 0, < self.cursor_row do
+        clear_line(self, r)
+      end
+      local ridx = visible_row_index(self, self.cursor_row)
+      for c = 0, <= self.cursor_col do
+        self.cells[ridx][c] = TermCell{ codepoint = 32, fg = TERM_DEFAULT_FG, bg = TERM_DEFAULT_BG }
+      end
+    elseif ev.param1 == 2 or ev.param1 == 3 then
+      -- 清除整个屏幕
+      for r = 0, < self.rows do
+        clear_line(self, r)
+      end
+      self.cursor_row = 0
+      self.cursor_col = 0
+    end
+
+  case AnsiEventKind.EraseLine then
+    local ridx = visible_row_index(self, self.cursor_row)
+    if ev.param1 == 0 then
+      -- 清除光标到行尾
+      for c = self.cursor_col, < self.cols do
+        self.cells[ridx][c] = TermCell{ codepoint = 32, fg = TERM_DEFAULT_FG, bg = TERM_DEFAULT_BG }
+      end
+    elseif ev.param1 == 1 then
+      -- 清除行首到光标
+      for c = 0, <= self.cursor_col do
+        self.cells[ridx][c] = TermCell{ codepoint = 32, fg = TERM_DEFAULT_FG, bg = TERM_DEFAULT_BG }
+      end
+    elseif ev.param1 == 2 then
+      -- 清除整行
+      clear_line(self, self.cursor_row)
+    end
+
+  case AnsiEventKind.Bell then
+    -- 忽略
+  case AnsiEventKind.SetTitle then
+    -- 忽略
+  end
+
+  self.dirty = true
+end
