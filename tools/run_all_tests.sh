@@ -150,6 +150,10 @@ run_test "smoke_phase4_2_3 (Phase 4.2.3 S0 — HarfBuzz 绑定 + CJK shaping tab
 run_test "smoke_phase4_2_2_bench (Phase 4.2.2 D-4.1-C — Storage Buffer scalability audit)" \
   nelua-lua tests/smoke_phase4_2_2_bench.lua
 
+# ★ Phase 4.2.3 S1: GB2312 一级 3755 字 shaping 表验证
+run_test "smoke_phase4_2_3_s1 (Phase 4.2.3 S1 — GB2312 L1 3755 字 shaping 表完整性)" \
+  nelua-lua tests/smoke_phase4_2_3_s1.lua
+
 # ★ 交互原语运行时行为验证（BUG-4/5/6 回归守护）
 run_test "verify_interaction_behavior (Runtime — 交互原语行为验证 & 回归守护)" \
   nelua-lua tests/verify_interaction_behavior.lua

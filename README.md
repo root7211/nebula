@@ -14,15 +14,18 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 进行中 | 43/43 回归测试全绿 | 全代码库审计 10 项修复已合并（2026-05-02）**
+**Era II 进行中 | 45/45 回归测试全绿 | Phase 4.2.3-S1 完成（2026-05-02）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
+| **Phase 4.2.3-S1** | GB2312 一级 3755 字 shaping 表生成（102.7 KB，3755/3755 映射成功，0 .notdef） | `pending` |
+| **交互原语行为验证** | 40 条运行时行为断言 + BUG-4/5/6 回归守护（Direction A） | `c424005` |
 | **全代码库审计修复** | 修复 10 项问题（2 高危 BUG + 4 中危 BUG + 2 低危 BUG + 2 内存安全），43/43 回归 + 6 demo 编译验证通过 | `8647048` |
 | **Phase 4.2.2 D-4.1-C** | Storage Buffer scalability benchmark PASSED — 1K=1.41ms, 5K=1.45ms, 10K=1.45ms, 退化+2.5%<20%阈值 | `ebd7333` |
 | **Phase 4.2.3-S0** | HarfBuzz 绑定 + CJK shaping 预处理（zh-CN-common 20 字验证） | `afab95e` |
+| **Phase 4.2.3-S1** | GB2312 一级 3755 字完整 shaping 表（v3 直接 API，无需逐字 hb_shape） | `pending` |
 | **Phase 4.2.2-fix** | GPU 资源 deinit — 修复 ~40+ GPU 对象泄漏，公理 B 合规 | `2b2d9cb` |
 | **Phase 4.3 S1-S3 + Task D** | 可编程原语注册表 + axiom_validator v2.0 三层防御 | `1fdc182` |
 | **Phase 4.4 S1-S3** | 高级组件库 | `b9fee31` |

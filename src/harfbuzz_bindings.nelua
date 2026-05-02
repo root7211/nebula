@@ -230,6 +230,29 @@ global function hb_tag_from_string(
 ): hb_tag_t <cimport, nodecl> end
 
 -- =============================================================================
+-- Font glyph query API (S1: direct cmap/metrics access without shaping)
+-- =============================================================================
+global function hb_font_get_nominal_glyph(
+  font: *hb_font_t,
+  unicode: hb_codepoint_t,
+  glyph: *hb_codepoint_t
+): hb_bool_t <cimport, nodecl> end
+
+global function hb_font_get_glyph_h_advance(
+  font: *hb_font_t,
+  glyph: hb_codepoint_t
+): hb_position_t <cimport, nodecl> end
+
+global function hb_font_get_glyph_v_advance(
+  font: *hb_font_t,
+  glyph: hb_codepoint_t
+): hb_position_t <cimport, nodecl> end
+
+global function hb_face_get_glyph_count(
+  face: *hb_face_t
+): cuint <cimport, nodecl> end
+
+-- =============================================================================
 -- Glyph extents (used by hb_font_get_glyph_extents)
 -- =============================================================================
 global hb_glyph_extents_t: type <cimport, nodecl> = @record{
