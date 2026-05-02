@@ -1,5 +1,5 @@
--- shader_compose.lua — Phase 3.7
--- 三个公开函数：nebula_compose_shader_instanced / nebula_compose_text_shader / nebula_compose_shadow_shaders
+-- shader_compose.lua — Phase 3.7 / Phase 4.X
+-- 五个公开函数：nebula_compose_shader_instanced / nebula_compose_text_shader / nebula_compose_shadow_shaders / nebula_compose_slug_shader / nebula_compose_dense_text_shader
 -- 已删除：nebula_compose_shader（红色占位符）、nebula_compose_instanced_shader（Phase 3.3 遗留）
 
 local WGSL_FRAGMENTS = {
@@ -628,4 +628,122 @@ fn fs_main(in: SlugVertexOutput) -> @location(0) vec4<f32> {
   }
 end
 
-return "nebula_shader_compose_v0.8_phase4.2.2"
+-- =============================================================================
+-- ★ Phase 4.X: 高密度文本着色器组合 (Dense Text — Instanced + SDF Atlas)
+--
+-- 每字符一个 instance，per-instance 数据通过 Storage Buffer 传递。
+-- Vertex shader 程序化生成 unit quad（6 顶点/字符）。
+-- Fragment shader 从 SDF atlas 采样，bg+fg 按 alpha 混合。
+--
+-- Bind Group Layout:
+--   binding 0: uniform  DenseTextUniforms (16B: viewport + cell_size)
+--   binding 1: storage<read>  array<DenseCharInstance> (32B/char)
+--   binding 2: texture_2d<f32>  glyph_atlas (SDF)
+--   binding 3: sampler  glyph_sampler
+--
+-- DenseCharInstance (32 bytes):
+--   pos_x, pos_y:     f32  — 字符左上角像素坐标
+--   uv_x, uv_y:       f32  — atlas 纹理 U/V 起点
+--   uv_w, uv_h:       f32  — atlas 纹理 U/V 尺寸
+--   fg_color:          u32  — RGBA8 packed 前景色
+--   bg_color:          u32  — RGBA8 packed 背景色
+-- =============================================================================
+function nebula_compose_dense_text_shader(opts)
+  opts = opts or {}
+
+  local source = [[
+struct DenseTextUniforms {
+  viewport: vec2<f32>,
+  cell_w:   f32,
+  cell_h:   f32,
+}
+
+struct DenseCharInstance {
+  pos_x:    f32,
+  pos_y:    f32,
+  uv_x:     f32,
+  uv_y:     f32,
+  uv_w:     f32,
+  uv_h:     f32,
+  fg_color: u32,
+  bg_color: u32,
+}
+
+@group(0) @binding(0) var<uniform>       u:     DenseTextUniforms;
+@group(0) @binding(1) var<storage, read> chars: array<DenseCharInstance>;
+@group(0) @binding(2) var glyph_atlas:   texture_2d<f32>;
+@group(0) @binding(3) var glyph_sampler: sampler;
+
+struct VertexOutput {
+  @builtin(position)              clip_pos: vec4<f32>,
+  @location(0)                    uv:       vec2<f32>,
+  @location(1)                    fg_color: vec4<f32>,
+  @location(2)                    bg_color: vec4<f32>,
+}
+
+@vertex
+fn vs_main(
+  @builtin(vertex_index)   vi:   u32,
+  @builtin(instance_index) inst: u32,
+) -> VertexOutput {
+  let ch = chars[inst];
+
+  // 6 顶点 → unit quad（与 standard_instanced 一致的三角形模式）
+  var corners = array<vec2<f32>, 6>(
+    vec2<f32>(0.0, 0.0),
+    vec2<f32>(1.0, 0.0),
+    vec2<f32>(0.0, 1.0),
+    vec2<f32>(0.0, 1.0),
+    vec2<f32>(1.0, 0.0),
+    vec2<f32>(1.0, 1.0)
+  );
+  let c = corners[vi];
+
+  // 像素坐标
+  let pixel_x = ch.pos_x + c.x * u.cell_w;
+  let pixel_y = ch.pos_y + c.y * u.cell_h;
+
+  // NDC 变换（与框架约定一致：y-flip）
+  let ndc_x = (pixel_x / u.viewport.x) * 2.0 - 1.0;
+  let ndc_y = -((pixel_y / u.viewport.y) * 2.0 - 1.0);
+
+  // UV 插值
+  let tex_u = ch.uv_x + c.x * ch.uv_w;
+  let tex_v = ch.uv_y + c.y * ch.uv_h;
+
+  // Unpack RGBA8 → vec4<f32>
+  let fg = unpack4x8unorm(ch.fg_color);
+  let bg = unpack4x8unorm(ch.bg_color);
+
+  var out: VertexOutput;
+  out.clip_pos = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
+  out.uv       = vec2<f32>(tex_u, tex_v);
+  out.fg_color = fg;
+  out.bg_color = bg;
+  return out;
+}
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+  let sdf = textureSample(glyph_atlas, glyph_sampler, in.uv).r;
+  let width = fwidth(sdf);
+  let alpha = smoothstep(0.5 - width, 0.5 + width, sdf);
+
+  // 背景色 + 前景色按 SDF alpha 叠加
+  let color = mix(in.bg_color, vec4<f32>(in.fg_color.rgb, 1.0), in.fg_color.a * alpha);
+
+  // 丢弃完全透明像素（bg_color.a == 0 且字形外部）
+  if (color.a < 0.001) { discard; }
+  return color;
+}
+]]
+
+  return {
+    source          = source,
+    features        = {"dense_text", "instanced", "textured", "storage_buffer"},
+    required_passes = {"main"},
+    atlas_dense     = true,
+  }
+end
+
+return "nebula_shader_compose_v0.9_phase4.X"
