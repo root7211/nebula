@@ -577,8 +577,8 @@ global ClickableState = @record{
 ## 
 ## -- 加载着色器组合器模块
 ## local shader_compose_mod = require "derive.shader_compose"
-## assert(shader_compose_mod == "nebula_shader_compose_v0.8_phase4.2.2",
-##   "nebula: failed to load derive/shader_compose.lua")  -- ★ Phase 4.2.2 升级
+## assert(shader_compose_mod == "nebula_shader_compose_v0.9_phase4.X",
+##   "nebula: failed to load derive/shader_compose.lua")  -- ★ Phase 4.X 升级
 ## 
 ## -- ★ Phase 2.3.2: 加载管线工厂模块
 ## local pipeline_factory_mod = require "derive.pipeline_factory"
@@ -1240,6 +1240,63 @@ global ClickableState = @record{
 ##   end
 ## end
 ## 
+## -- =============================================================================
+## -- ---- ★ Phase 4.X: 高密度文本派生器 ----
+## --
+## -- 为 dense text grid 场景生成：
+## --   (1) DenseTextUniforms     —— 视口 + 单元格尺寸 (16B)
+## --   (2) <Base>DenseTextPipeline —— atlas_dense 管线（Storage Buffer + SDF atlas）
+## --
+## -- 与 SlugText 不同，DenseText 是一个独立的管线工具，不需要 per-Visual 的
+## -- State/StateMachine/Context。应用层直接操作 DenseCharInstance 数组并调用
+## -- pipeline:upload() + pipeline:draw()。
+## -- =============================================================================
+## function nebula_derive_dense_text_visual(base_name, opts)
+##   opts = opts or {}
+##   local max_chars = opts.max_chars or 8192
+##   local base = base_name or "DenseText"
+##
+##   -- (1) 生成 WGSL 着色器
+##   local shader_result = nebula_compose_dense_text_shader({
+##     max_chars = max_chars,
+##   })
+##
+##   -- (2) 生成 DenseTextUniforms record
+##   local uniforms_src = ([[global %sUniforms = @record{
+##   viewport_w: float32,
+##   viewport_h: float32,
+##   cell_w:     float32,
+##   cell_h:     float32,
+## }]]):format(base)
+##
+##   -- (3) 生成管线
+##   local pipeline_spec = {
+##     base         = base,
+##     visual_type  = base,
+##     wgsl_source  = shader_result.source,
+##     atlas_dense  = true,
+##     max_chars    = max_chars,
+##   }
+##
+##   print(("[derive-dense] %s: emit %sUniforms + %sDenseTextPipeline (max_chars=%d)"):format(
+##     base, base, base, max_chars))
+##
+##   -- 注入 Uniforms record
+##   local uni_ast = aster.parse(uniforms_src,
+##     "<nebula_derive_dense:" .. base .. "Uniforms>")
+##   for _, stat in ipairs(uni_ast) do
+##     inject_statement(stat)
+##   end
+##
+##   -- 注入 DenseTextPipeline
+##   local pipe_src = nebula_gen_pipeline_source(pipeline_spec)
+##   local pipe_ast = aster.parse(pipe_src,
+##     "<nebula_derive_dense:" .. base .. "DenseTextPipeline>")
+##   for _, stat in ipairs(pipe_ast) do
+##     inject_statement(stat)
+##   end
+## end
+##
 ## -- ---- 主入口：派生并 inject 到调用点 ----
 ## --
 ## -- Phase 2.3.3: 扩展 nebula_derive 在调用点额外发出：
@@ -1261,6 +1318,14 @@ global ClickableState = @record{
 ##   -- ★ Phase 4.1: Slug 文本渲染路径
 ##   if reg.text_mode == "slug" then
 ##     return nebula_derive_slug_text_visual(type_name)
+##   end
+##
+##   -- ★ Phase 4.X: 高密度文本渲染路径
+##   if reg.text_mode == "dense" then
+##     local base = derive_base_name(type_name)
+##     return nebula_derive_dense_text_visual(base, {
+##       max_chars = reg.max_chars or 8192,
+##     })
 ##   end
 ## 
 ##   -- ★ Phase 3.10: 通过 NEBULA_PRIMITIVES 注册表的 pre_derive_hook 执行原语前置钉子
