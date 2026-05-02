@@ -62,6 +62,12 @@ local function on_device(status: uint32, device: WGPUDevice, msg: WGPUStringView
 end
 
 function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
+  -- ★ MEM-1 fix: 防止重复初始化导致 GPU 资源泄漏
+  if self.device ~= nilptr then
+    printf("wgpu: warning — NebulaRenderer:init() called on already-initialized renderer, aborting to prevent GPU leak\n")
+    return false
+  end
+
   self.width  = w
   self.height = h
 

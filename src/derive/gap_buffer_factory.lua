@@ -8,6 +8,9 @@
 -- 这样所有 require "nebula_core" 的文件都能在编译期使用此函数，
 -- 无需手动 require "gap_buffer"。
 --
+-- ★ BUG-6 注意：此文件中的 nebula_gen_gap_buffer_type() 必须与
+--   gap_buffer.nelua 中的实现保持同步。修改任一文件时，请同步更新另一个。
+--
 -- 用法（在 .nelua 文件的编译期块中）：
 --   ##[[ local _buf_type, _buf_src = nebula_gen_gap_buffer_type(255) ]]
 --   ##[[ for _, _s in ipairs(aster.parse(_buf_src, "<gap_buffer:255>")) do inject_statement(_s) end ]]

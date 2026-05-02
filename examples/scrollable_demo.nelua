@@ -230,12 +230,8 @@ local function main(): int32
     prev_time = now
     nebula_collect_input(window, &input, dt)
 
-    -- 1. Update all registered components (app:update handles scroll_area + child0-7)
-    app:update(&input, dt)
-
-    -- 2. Update child button positions based on scroll offset (adjust Y before draw)
-    -- Note: app:update already called childN:update for hit testing;
-    -- we just need to adjust Y positions for visual rendering
+    -- ★ BUG-4 fix: 先应用滚动偏移到子组件坐标，再执行 update（hit-test）
+    -- 这样 hit-test 使用的是渲染后的真实位置，而非偏移前的位置
     local _sy = app.scroll_area.scroll_offset_y
     local _base_y = app.scroll_area.visual.pos.y + 8.0
     app.child0.visual.pos.y = _base_y + 0.0 * (CHILD_H + CHILD_GAP) - _sy
@@ -246,6 +242,9 @@ local function main(): int32
     app.child5.visual.pos.y = _base_y + 5.0 * (CHILD_H + CHILD_GAP) - _sy
     app.child6.visual.pos.y = _base_y + 6.0 * (CHILD_H + CHILD_GAP) - _sy
     app.child7.visual.pos.y = _base_y + 7.0 * (CHILD_H + CHILD_GAP) - _sy
+
+    -- 1. Update all registered components (app:update handles scroll_area + child0-7)
+    app:update(&input, dt)
 
     -- 3. Begin render pass
     local surface_tex: WGPUSurfaceTexture

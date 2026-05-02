@@ -16,6 +16,11 @@ global function malloc(size: csize): pointer <cimport, nodecl> end
 global function free(ptr: pointer): void <cimport, nodecl> end
 global function strlen(s: cstring): csize <cimport, nodecl> end
 
+-- ★ MEM-2 fix: 模块级静态缓冲区替代 malloc/free，保持零堆设计一致性
+-- 已知 atlas 最大尺寸为 1024x1024 = 1MB
+local NEBULA_MAX_ATLAS_BYTES <comptime> = 1024 * 1024
+local _atlas_pixel_buf: [NEBULA_MAX_ATLAS_BYTES]cuchar
+
 global NebulaAsciiFontAtlas = @record{
   texture: WGPUTexture,
   view:    WGPUTextureView,
@@ -86,20 +91,21 @@ local function nebula_text_read_pgm_gray8(path: cstring, out_pixels: **cuchar, o
   end
 
   local bytes = (@csize)(w * h)
-  local pixels = (@*cuchar)(malloc(bytes))
-  if pixels == nilptr then
+  -- ★ MEM-2 fix: 使用模块级静态缓冲区替代 malloc，避免运行时堆分配
+  if bytes > NEBULA_MAX_ATLAS_BYTES then
+    printf("text: atlas too large (%d bytes, max %d) %s\n", bytes, NEBULA_MAX_ATLAS_BYTES, path)
     fclose(fp)
     return false
   end
+  local pixels = &_atlas_pixel_buf[0]
   local nread = fread(pixels, 1, bytes, fp)
   fclose(fp)
   if nread ~= bytes then
-    free(pixels)
     printf("text: atlas payload truncated %s\n", path)
     return false
   end
 
-  $out_pixels = pixels
+  $out_pixels = (@*cuchar)(pixels)
   $out_w = (@uint32)(w)
   $out_h = (@uint32)(h)
   return true
@@ -144,7 +150,7 @@ global function nebula_text_load_ascii_font(out_font: *NebulaAsciiFontAtlas, ren
     w,
     "nebula-ascii-atlas"
   )
-  free(pixels)
+  -- ★ MEM-2 fix: 静态缓冲区无需 free，上传完成后缓冲区可被下次加载复用
   if not ok then
     return false
   end

@@ -114,6 +114,9 @@ function nebula_app_register_component(name, visual_type, opts)
     text_context = opts.text_context or nil,
     -- ★ Phase 3.11: 布局约束
     layout       = opts.layout or nil,
+    -- ★ BUG-3 fix: 从 nebula_registry 查询该 visual_type 声明的 primitives，
+    -- 使 Phase 4.3 process_body 公理校验能正确触发
+    prims        = (nebula_registry and nebula_registry[visual_type] and nebula_registry[visual_type].primitives) or {},
   })
 
   -- 更新 type_groups
@@ -827,10 +830,20 @@ local function gen_app_draw(app_name, reg)
     local uniforms_record = group.base .. "Uniforms"
     local pipe_var = "self.pipe_" .. group.base:lower()
 
+    -- ★ MEM-3 fix: 限制栈分配 batch 大小，超限时分批处理
+    -- 典型 Uniforms 约 64-96 字节，128 实例 ≈ 12KB，安全阈值
+    local STACK_BATCH_LIMIT = 128
+
     emit(("  -- 批量绘制 %s（%d 静态 + %d 动态插槽）"):format(
       vt, #static_members, #slot_members))
     emit(("  do"):format())
-    emit(("    local _batch: [%d]%s"):format(max_inst, uniforms_record))
+    if max_inst > STACK_BATCH_LIMIT then
+      -- 超限时仍分配 STACK_BATCH_LIMIT 大小的 batch，分批上传和绘制
+      emit(("    -- MEM-3: max_inst=%d 超过栈安全阈值 %d，使用分批模式"):format(max_inst, STACK_BATCH_LIMIT))
+      emit(("    local _batch: [%d]%s"):format(STACK_BATCH_LIMIT, uniforms_record))
+    else
+      emit(("    local _batch: [%d]%s"):format(max_inst, uniforms_record))
+    end
     emit(("    local _count: uint32 = 0"):format())
 
     -- 收集静态组件的 Uniforms

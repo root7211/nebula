@@ -279,6 +279,24 @@ local function main(): int32
     prev_time = now
     nebula_collect_input(window, &input, dt)
 
+    -- ★ BUG-5 fix: 先更新位置可见性，再进入 nebula_frame_render（其内部执行 hit-test）
+    -- 这样 hit-test 时隐藏项已在 y=-1000，不会被误命中
+    -- Move items off-screen when dropdown is closed (hide them)
+    -- When open, restore to original positions
+    if not app.dropdown.is_open then
+      app.item0.visual.pos.y = -1000.0
+      app.item1.visual.pos.y = -1000.0
+      app.item2.visual.pos.y = -1000.0
+      app.item3.visual.pos.y = -1000.0
+      app.item4.visual.pos.y = -1000.0
+    else
+      app.item0.visual.pos.y = item_orig_y[0]
+      app.item1.visual.pos.y = item_orig_y[1]
+      app.item2.visual.pos.y = item_orig_y[2]
+      app.item3.visual.pos.y = item_orig_y[3]
+      app.item4.visual.pos.y = item_orig_y[4]
+    end
+
     -- Business logic: detect item clicks and update selected_index
     if app.dropdown.is_open then
       if app.item0.click.just_clicked then
@@ -302,22 +320,6 @@ local function main(): int32
         app.dropdown.is_open = false
         printf("dropdown: selected Option E\n")
       end
-    end
-
-    -- Move items off-screen when dropdown is closed (hide them)
-    -- When open, restore to original positions
-    if not app.dropdown.is_open then
-      app.item0.visual.pos.y = -1000.0
-      app.item1.visual.pos.y = -1000.0
-      app.item2.visual.pos.y = -1000.0
-      app.item3.visual.pos.y = -1000.0
-      app.item4.visual.pos.y = -1000.0
-    else
-      app.item0.visual.pos.y = item_orig_y[0]
-      app.item1.visual.pos.y = item_orig_y[1]
-      app.item2.visual.pos.y = item_orig_y[2]
-      app.item3.visual.pos.y = item_orig_y[3]
-      app.item4.visual.pos.y = item_orig_y[4]
     end
 
     -- Render

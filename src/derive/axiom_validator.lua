@@ -370,13 +370,15 @@ end
 
 -- ★ Layer 0 辅助：笛卡尔展开 — 生成 2^n 个 boolean 组合
 -- Phase 3.7+: 当 n > MAX_BOOLEAN_BITS 时退化为随机采样，避免编译时指数爆炸
-local MAX_BOOLEAN_COMBOS = 256  -- 2^8，超过此数量使用采样
+-- ★ MEM-4 fix: 完全展开阈值从 8 降到 6（2^6=64），采样时增加 single-flip 覆盖
+local MAX_BOOLEAN_COMBOS = 256  -- 采样上限
+local MAX_FULL_EXPANSION = 6   -- 2^6 = 64，完全展开安全阈值
 
 local function cartesian_booleans(booleans)
   local n = #booleans
 
-  -- 完全展开路径：2^n <= MAX_BOOLEAN_COMBOS
-  if n <= 8 then
+  -- 完全展开路径：2^n <= 64
+  if n <= MAX_FULL_EXPANSION then
     local combos = { {} }
     for _, bool_field in ipairs(booleans) do
       local new_combos = {}
@@ -397,7 +399,7 @@ local function cartesian_booleans(booleans)
     return combos
   end
 
-  -- 采样路径：n > 8，随机采样 MAX_BOOLEAN_COMBOS 个组合
+  -- 采样路径：n > MAX_FULL_EXPANSION，随机采样 MAX_BOOLEAN_COMBOS 个组合
   -- 始终包含全 true 和全 false 作为边界用例
   io.stderr:write(("[axiom_validator] WARNING: %d boolean fields → 2^%d combos; "
     .. "sampling %d instead of full expansion\n"):format(n, n, MAX_BOOLEAN_COMBOS))
@@ -424,6 +426,23 @@ local function cartesian_booleans(booleans)
   seen[combo_key(all_false)] = true
   table.insert(combos, combo_from_bits(all_true))
   seen[combo_key(all_true)] = true
+
+  -- ★ MEM-4 fix: 逐位翻转覆盖（single-flip），确保每个 boolean 的边界行为被测试
+  -- 从全 false 基础上逐位翻转为 true，再从全 true 基础上逐位翻转为 false
+  for i = 1, n do
+    local flip_one_true = 2 ^ (i - 1)  -- 仅第 i 位为 true
+    local key = combo_key(flip_one_true)
+    if not seen[key] then
+      seen[key] = true
+      table.insert(combos, combo_from_bits(flip_one_true))
+    end
+    local flip_one_false = all_true - 2 ^ (i - 1)  -- 仅第 i 位为 false
+    key = combo_key(flip_one_false)
+    if not seen[key] then
+      seen[key] = true
+      table.insert(combos, combo_from_bits(flip_one_false))
+    end
+  end
 
   -- 随机填充剩余
   math.randomseed(42)  -- 固定种子保证确定性
