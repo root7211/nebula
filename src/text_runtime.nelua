@@ -66,12 +66,14 @@ local function nebula_text_read_pgm_gray8(path: cstring, out_pixels: **cuchar, o
     return false
   end
 
-  local magic: [3]cchar
   local w: cint = 0
   local h: cint = 0
   local maxv: cint = 0
-  if fscanf(fp, "%2s", &magic[0]) ~= 1 then fclose(fp) return false end
-  if magic[0] ~= 'P' or magic[1] ~= '5' then
+  -- 用 fgetc 逐字节读取避免 nelua 常量折叠
+  local m0: cint = fgetc(fp)
+  local m1: cint = fgetc(fp)
+  if m0 < 0 or m1 < 0 then fclose(fp) return false end
+  if m0 ~= (@cint)(80) or m1 ~= (@cint)(53) then  -- 'P'=80, '5'=53
     printf("text: unsupported atlas header in %s\n", path)
     fclose(fp)
     return false
