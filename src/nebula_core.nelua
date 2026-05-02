@@ -1271,11 +1271,12 @@ global ClickableState = @record{
 ##
 ##   -- (3) 生成管线
 ##   local pipeline_spec = {
-##     base         = base,
-##     visual_type  = base,
-##     wgsl_source  = shader_result.source,
-##     atlas_dense  = true,
-##     max_chars    = max_chars,
+##     base            = base,
+##     visual_type     = base,
+##     uniforms_record = base .. "Uniforms",
+##     wgsl_source     = shader_result.source,
+##     atlas_dense     = true,
+##     max_chars       = max_chars,
 ##   }
 ##
 ##   print(("[derive-dense] %s: emit %sUniforms + %sDenseTextPipeline (max_chars=%d)"):format(

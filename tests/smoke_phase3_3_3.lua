@@ -33,7 +33,7 @@ end
 
 -- ===== 模块版本检查（Phase 3.7）=====
 check("module_version_phase4_2_2",
-  compose_ver == "nebula_shader_compose_v0.8_phase4.2.2",
+  compose_ver == "nebula_shader_compose_v0.9_phase4.X",
   "模块版本号断言失败，当前: " .. tostring(compose_ver))
 
 -- ===== Phase 3.7: 已删除函数不应存在 =====

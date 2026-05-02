@@ -1,0 +1,350 @@
+-- =============================================================================
+-- dense_text_demo.nelua
+-- Nebula GUI Compiler — Phase 4.X
+--
+-- 高密度文本渲染演示（120×50 等宽字符网格）：
+--   · 验证 nebula_derive_dense_text_visual 端到端可用
+--   · 验证 DenseTextPipeline (Storage Buffer + SDF atlas) instanced 渲染
+--   · 验证 nebula_dense_grid_fill_instance 辅助函数
+--   · 验证 per-char fg/bg 颜色（6000 字符 × 独立颜色）
+--   · 验证帧时间作为 D-4.1-C 性能基线数据点
+--
+-- 渲染内容：
+--   1. 120×50 = 6000 字符等宽网格
+--   2. 每行不同的前景/背景色（per-char color 验证）
+--   3. 动态帧计数器行（验证每帧 upload 路径）
+--   4. 帧时间统计（性能基线记录）
+-- =============================================================================
+
+## cinclude "<stdio.h>"
+## cinclude "<string.h>"
+
+require "nebula_core"
+require "glfw_bindings"
+require "wgpu_bindings"
+require "renderer"
+require "text_runtime"
+
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+global function snprintf(buf: cstring, size: csize, fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+
+local WIN_W <comptime> = 1280
+local WIN_H <comptime> = 800
+
+-- 网格参数
+local GRID_COLS <comptime> = 120
+local GRID_ROWS <comptime> = 50
+local MAX_CHARS <comptime> = GRID_COLS * GRID_ROWS  -- 6000
+local CELL_W <comptime> = 10.0   -- 像素
+local CELL_H <comptime> = 16.0   -- 像素
+local ORIGIN_X <comptime> = 8.0
+local ORIGIN_Y <comptime> = 4.0
+
+-- =============================================================================
+-- Dense Text Visual — 通过 nebula_derive 自动生成
+-- =============================================================================
+global DenseTextVisual = @record{
+  pos: Vec2,
+  size: Vec2,
+}
+##[[
+nebula_annotate("DenseTextVisual", {
+  states = {"default"},
+  primitives = {},
+  transitions = {},
+  text_mode = "dense",
+  max_chars = 8192,
+})
+]]
+## nebula_derive("DenseTextVisual")
+
+-- =============================================================================
+-- 颜色调色板（行级渐变）
+-- =============================================================================
+local function row_fg_color(row: uint32): uint32
+  -- 从白色到青色渐变
+  local t = (@float32)(row) / (@float32)(GRID_ROWS)
+  local r: uint8 = (@uint8)(255.0 * (1.0 - t * 0.6))
+  local g: uint8 = (@uint8)(255.0 * (0.8 + t * 0.2))
+  local b: uint8 = (@uint8)(255.0 * (0.7 + t * 0.3))
+  return nebula_pack_rgba8(r, g, b, 255)
+end
+
+local function row_bg_color(row: uint32): uint32
+  -- 从深灰到深蓝渐变
+  local t = (@float32)(row) / (@float32)(GRID_ROWS)
+  local r: uint8 = (@uint8)(15.0 + t * 10.0)
+  local g: uint8 = (@uint8)(15.0 + t * 15.0)
+  local b: uint8 = (@uint8)(20.0 + t * 35.0)
+  return nebula_pack_rgba8(r, g, b, 255)
+end
+
+-- =============================================================================
+-- 生成一行 ASCII 文本内容（终端风格）
+-- =============================================================================
+local grid_text: [GRID_ROWS][GRID_COLS]uint32
+
+-- =============================================================================
+-- 辅助：将 cstring 的内容复制到 grid_text 的指定行
+-- =============================================================================
+local function grid_copy_str(row: int32, text: cstring): void
+  local bytes = (@*[0]uint8)(text)
+  local len = strlen(text)
+  local col: csize = 0
+  while col < len and (@int32)(col) < GRID_COLS do
+    grid_text[row][col] = (@uint32)(bytes[col])
+    col = col + 1
+  end
+end
+
+local function fill_grid_content(): void
+  -- 默认用空格填充
+  for row = 0, < GRID_ROWS do
+    for col = 0, < GRID_COLS do
+      grid_text[row][col] = 32  -- space
+    end
+  end
+
+  -- 第 0 行：标题
+  grid_copy_str(0, "Nebula Phase 4.X -- Dense Text Demo | 120x50 Grid = 6000 chars | Instanced + SDF Atlas + Storage Buffer")
+
+  -- 第 1 行：分隔线
+  for col = 0, < GRID_COLS do
+    grid_text[1][col] = 61  -- '='
+  end
+
+  -- 第 2-9 行：ASCII 可打印字符循环展示
+  for row = 2, < 10 do
+    for col = 0, < GRID_COLS do
+      local ch = 33 + ((row - 2) * GRID_COLS + col) % 94  -- '!' to '~'
+      grid_text[row][col] = (@uint32)(ch)
+    end
+  end
+
+  -- 第 10 行：分隔线
+  for col = 0, < GRID_COLS do
+    grid_text[10][col] = 45  -- '-'
+  end
+
+  -- 第 11-39 行：伪代码内容（交替行）
+  for row = 11, < 40 do
+    local line_type = (row - 11) % 4
+    if line_type == 0 then
+      grid_copy_str(row, "fn render_frame(ctx: *RenderCtx, dt: f32) -> Result<(), GpuError> {")
+    elseif line_type == 1 then
+      grid_copy_str(row, "    let instances = self.char_buffer.upload(&renderer, count);")
+    elseif line_type == 2 then
+      grid_copy_str(row, "    // Phase 4.X: per-char color via Storage Buffer (32B/instance)")
+    else
+      grid_text[row][0] = 125  -- '}'
+    end
+  end
+
+  -- 第 40 行：分隔线
+  for col = 0, < GRID_COLS do
+    grid_text[40][col] = 61  -- '='
+  end
+
+  -- 第 41-48 行：数字表（性能数据占位）
+  for row = 41, < 49 do
+    grid_copy_str(row, "| Row ")
+    -- 行号
+    local tens = (row / 10) + 48  -- '0'
+    local ones = (row % 10) + 48
+    grid_text[row][6] = (@uint32)(tens)
+    grid_text[row][7] = (@uint32)(ones)
+    -- 填充管道分隔符
+    for col = 8, < GRID_COLS, 20 do
+      grid_text[row][col] = 124  -- '|'
+    end
+  end
+
+  -- 第 49 行：帧计数器（动态更新行 — 在主循环中覆盖）
+  grid_copy_str(49, "Frame: 0 | FPS: -- | Chars: 6000 | Upload: 192000 bytes/frame")
+end
+
+-- =============================================================================
+-- 主程序
+-- =============================================================================
+local function main(): int32
+  if glfwInit() == 0 then
+    printf("glfw: init failed\n")
+    return 1
+  end
+  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
+
+  local window = glfwCreateWindow(WIN_W, WIN_H,
+    "Nebula Phase 4.X — Dense Text Demo (120x50 = 6000 chars)", nilptr, nilptr)
+  if window == nilptr then
+    printf("glfw: window creation failed\n")
+    return 1
+  end
+
+  local renderer: NebulaRenderer
+  if not renderer:init(window, WIN_W, WIN_H) then
+    return 1
+  end
+
+  -- 加载 SDF font atlas
+  local font: NebulaAsciiFontAtlas
+  if not nebula_text_load_ascii_font(&font, &renderer) then
+    printf("dense: failed to load SDF font atlas\n")
+    return 1
+  end
+
+  -- Dense Text 管线
+  local pipe: DenseTextDenseTextPipeline
+  if not pipe:init(&renderer, MAX_CHARS) then
+    printf("dense: failed to init pipeline\n")
+    return 1
+  end
+
+  -- 绑定 atlas 纹理
+  if not pipe:update_atlas(&renderer, font.view, font.sampler) then
+    printf("dense: failed to bind atlas\n")
+    return 1
+  end
+
+  -- 更新 viewport + cell size uniform
+  pipe:update_viewport(&renderer,
+    (@float32)(WIN_W), (@float32)(WIN_H), CELL_W, CELL_H)
+
+  -- 填充网格内容
+  fill_grid_content()
+
+  -- DenseCharInstance 数组（帧级，每帧重建）
+  local instances: [MAX_CHARS]DenseCharInstance
+
+  printf("=== Phase 4.X Dense Text Demo ===\n")
+  printf("  Grid: %dx%d = %d chars\n", GRID_COLS, GRID_ROWS, MAX_CHARS)
+  printf("  Cell: %.0fx%.0f pixels\n", CELL_W, CELL_H)
+  printf("  Storage Buffer: %d bytes (max %d instances x 32B)\n",
+    MAX_CHARS * 32, MAX_CHARS)
+  printf("  Atlas: %dx%d SDF\n", font.width, font.height)
+
+  -- 帧统计
+  local frame_count: uint64 = 0
+  local last_fps_time = glfwGetTime()
+  local fps_counter: uint32 = 0
+  local current_fps: float32 = 0.0
+  local counter_buf: [128]cchar
+
+  -- =========================================================================
+  -- 主循环
+  -- =========================================================================
+  while glfwWindowShouldClose(window) == 0 do
+    glfwPollEvents()
+    frame_count = frame_count + 1
+    fps_counter = fps_counter + 1
+
+    -- 每秒更新 FPS + 动态文本行
+    local now = glfwGetTime()
+    if now - last_fps_time >= 1.0 then
+      current_fps = (@float32)(fps_counter) / (@float32)(now - last_fps_time)
+      fps_counter = 0
+      last_fps_time = now
+
+      -- 更新第 49 行（帧计数器）
+      snprintf(&counter_buf[0], 128,
+        "Frame: %lu | FPS: %.1f | Chars: %d | Upload: %d bytes/frame",
+        frame_count, current_fps, MAX_CHARS, MAX_CHARS * 32)
+      -- 清空第 49 行
+      for col = 0, < GRID_COLS do
+        grid_text[49][col] = 32
+      end
+      grid_copy_str(49, &counter_buf[0])
+    end
+
+    -- 填充 DenseCharInstance 数组
+    local char_idx: uint32 = 0
+    for row = 0, < GRID_ROWS do
+      local fg = row_fg_color(row)
+      local bg = row_bg_color(row)
+      for col = 0, < GRID_COLS do
+        nebula_dense_grid_fill_instance(
+          &instances[char_idx],
+          row, col,
+          grid_text[row][col],
+          ORIGIN_X, ORIGIN_Y,
+          CELL_W, CELL_H,
+          fg, bg
+        )
+        char_idx = char_idx + 1
+      end
+    end
+
+    -- Upload to GPU
+    if not pipe:upload(&renderer, &instances[0], char_idx) then
+      printf("dense: upload failed at frame %lu\n", frame_count)
+      continue
+    end
+
+    -- 获取 surface texture
+    local surface_tex: WGPUSurfaceTexture
+    wgpuSurfaceGetCurrentTexture(renderer.surface, &surface_tex)
+    local status = surface_tex.status
+    if status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal and
+       status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal then
+      continue
+    end
+
+    local view_desc = WGPUTextureViewDescriptor{
+      nextInChain     = nilptr,
+      label           = wgpu_str_null(),
+      format          = renderer.format,
+      dimension       = 2,
+      baseMipLevel    = 0,
+      mipLevelCount   = 1,
+      baseArrayLayer  = 0,
+      arrayLayerCount = 1,
+      aspect          = 1,
+      usage           = 0,
+    }
+    local view = wgpuTextureCreateView(surface_tex.texture, &view_desc)
+
+    local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, nilptr)
+    local clear_color = WGPURenderPassColorAttachment{
+      nextInChain = nilptr,
+      view = view,
+      depthSlice = 0xFFFFFFFF,
+      resolveTarget = nilptr,
+      loadOp = WGPULoadOp_Clear,
+      storeOp = WGPUStoreOp_Store,
+      clearValue = WGPUColor{ r = 0.04, g = 0.04, b = 0.06, a = 1.0 },
+    }
+    local rp_desc = WGPURenderPassDescriptor{
+      nextInChain = nilptr,
+      label = wgpu_str_null(),
+      colorAttachmentCount = 1,
+      colorAttachments = &clear_color,
+      depthStencilAttachment = nilptr,
+      occlusionQuerySet = nilptr,
+      timestampWrites = nilptr,
+    }
+    local pass = wgpuCommandEncoderBeginRenderPass(encoder, &rp_desc)
+
+    -- Dense text instanced draw（6000 字符一次 draw call）
+    pipe:draw(pass, char_idx)
+
+    wgpuRenderPassEncoderEnd(pass)
+    wgpuRenderPassEncoderRelease(pass)
+
+    local cmd = wgpuCommandEncoderFinish(encoder, nilptr)
+    wgpuQueueSubmit(renderer.queue, 1, &cmd)
+    wgpuCommandBufferRelease(cmd)
+    wgpuCommandEncoderRelease(encoder)
+    wgpuTextureViewRelease(view)
+    wgpuSurfacePresent(renderer.surface)
+  end
+
+  -- 清理
+  pipe:deinit()
+  glfwDestroyWindow(window)
+  glfwTerminate()
+  printf("nebula: dense text demo clean exit (rendered %lu frames, last FPS: %.1f)\n",
+    frame_count, current_fps)
+  return 0
+end
+
+main()

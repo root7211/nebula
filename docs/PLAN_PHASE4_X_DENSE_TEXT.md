@@ -2,7 +2,9 @@
 
 **创建日期**：2026-04-29
 **v2 修订日期**：2026-04-30
+**v2 实施完成**：2026-05-02
 **前置依赖**：Phase 4.4 S3（multiline_editable 已完成）
+**状态**：✅ 全部实施完成（Step 1-5 + demo + 65 条冒烟测试 + 编译回归 | 49/49 回归全绿）
 
 **v2 修订摘要**：
 - 删除 S2（输入系统补全）— 剪贴板 API、Unicode 字符输入、Ctrl+C/V/X/A 已在缺口 #5/#6 清算中实现
@@ -354,26 +356,26 @@ global function nebula_dense_grid_fill_instance(
 
 ## 6. 验收标准
 
-1. **容量**：`dense_text_demo` 渲染 120×50 = 6000 字符网格，每字符独立 fg/bg color。
-2. **公理合规**：axiom_validator 对 DenseTextVisual 的管线签名审查通过。
-3. **回归**：47/47 回归测试全绿 + 新增专项测试。
-4. **性能基线**：记录 6000 字符帧时间，作为 D-4.1-C 数据点。
-5. **API 简洁性**：应用层调用不超过 3 步：① 填充 DenseCharInstance 数组 ② upload ③ draw。
+1. ~~**容量**：`dense_text_demo` 渲染 120×50 = 6000 字符网格，每字符独立 fg/bg color。~~ ✅ 已实现
+2. ~~**公理合规**：axiom_validator 对 DenseTextVisual 的管线签名审查通过。~~ ✅ smoke_phase4_x_dense.lua 65/65 通过
+3. ~~**回归**：47/47 回归测试全绿 + 新增专项测试。~~ ✅ 49/49 全绿（含 2 项新增）
+4. **性能基线**：记录 6000 字符帧时间，作为 D-4.1-C 数据点。（待 GPU 环境运行时验证）
+5. ~~**API 简洁性**：应用层调用不超过 3 步：① 填充 DenseCharInstance 数组 ② upload ③ draw。~~ ✅ dense_text_demo 验证
 
 ---
 
 ## 7. 文件清单
 
-| 文件 | 操作 | 内容 |
-|:-----|:-----|:-----|
-| `src/derive/shader_compose.lua` | 修改 | 新增 `nebula_compose_dense_text_shader()` |
-| `src/derive/pipeline_factory.lua` | 修改 | 新增 `gen_pipeline_dense_text()`，扩展分发链 |
-| `src/renderer.nelua` | 修改 | 新增 `DenseCharInstance` record + `DenseTextUniforms` record |
-| `src/text_runtime.nelua` | 修改 | 新增 `nebula_dense_grid_fill_instance()` 辅助函数 |
-| `src/nebula_core.nelua` | 修改 | 新增 `nebula_derive_dense_text_visual()` 派生入口 |
-| `examples/dense_text_demo.nelua` | 新建 | 120×50 网格 + per-char color 演示 |
-| `tests/smoke_phase4_x_dense.lua` | 新建 | 管线生成 + 着色器组合 + 公理合规专项测试 |
-| `docs/PLAN_PHASE4_X_DENSE_TEXT.md` | 替换 | 本文档 |
+| 文件 | 操作 | 内容 | 状态 |
+|:-----|:-----|:-----|:-----|
+| `src/derive/shader_compose.lua` | 修改 | 新增 `nebula_compose_dense_text_shader()` | ✅ Step 1 |
+| `src/derive/pipeline_factory.lua` | 修改 | 新增 `gen_pipeline_dense_text()`，扩展分发链 | ✅ Step 2 |
+| `src/renderer.nelua` | 修改 | 新增 `DenseCharInstance` record + `DenseTextUniforms` record | ✅ Step 3 |
+| `src/nebula_core.nelua` | 修改 | 新增 `nebula_derive_dense_text_visual()` 派生入口 | ✅ Step 4 |
+| `src/text_runtime.nelua` | 修改 | 新增 `nebula_dense_grid_fill_instance()` 辅助函数 | ✅ Step 5 |
+| `examples/dense_text_demo.nelua` | 新建 | 120×50 网格 + per-char color 演示 | ✅ Step 5 |
+| `tests/smoke_phase4_x_dense.lua` | 新建 | 管线生成 + 着色器组合 + 公理合规专项测试（65 条） | ✅ Step 5 |
+| `docs/PLAN_PHASE4_X_DENSE_TEXT.md` | 更新 | 本文档（标记实施完成） | ✅ |
 
 ---
 

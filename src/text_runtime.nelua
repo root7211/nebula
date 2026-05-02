@@ -769,3 +769,56 @@ global function nebula_cjk_slug_text_build_vertices(
   $out_height = line_height
   return vertex_count
 end
+
+-- =============================================================================
+-- Phase 4.X: 等宽网格辅助函数
+--
+-- 根据 (row, col, codepoint) + 网格参数填充一个 DenseCharInstance。
+-- 从 NEBULA_ASCII_GLYPHS 查找 UV 坐标。纯辅助函数，不强制使用。
+-- =============================================================================
+
+--- 从 ASCII 码点查找字形在 atlas 中的 UV 坐标
+--- 如果字符不在 [32, 126] 范围内，回退到 '?' (63)
+global function nebula_dense_glyph_lookup(codepoint: uint32): NebulaGeneratedAsciiGlyph
+  if codepoint >= (@uint32)(NEBULA_ASCII_FIRST_CODEPOINT) and
+     codepoint <= (@uint32)(NEBULA_ASCII_LAST_CODEPOINT) then
+    return NEBULA_ASCII_GLYPHS[codepoint - (@uint32)(NEBULA_ASCII_FIRST_CODEPOINT)]
+  end
+  -- fallback: '?' = codepoint 63
+  return NEBULA_ASCII_GLYPHS[63 - (@uint32)(NEBULA_ASCII_FIRST_CODEPOINT)]
+end
+
+--- 填充一个 DenseCharInstance，用于等宽字符网格渲染
+---
+--- @param inst      输出指针
+--- @param row       行号（从 0 开始）
+--- @param col       列号（从 0 开始）
+--- @param codepoint ASCII 码点 (32-126)
+--- @param origin_x  网格左上角 X 像素偏移
+--- @param origin_y  网格左上角 Y 像素偏移
+--- @param cell_w    单元格宽度（像素）
+--- @param cell_h    单元格高度（像素）
+--- @param fg_packed RGBA8 packed 前景色
+--- @param bg_packed RGBA8 packed 背景色
+global function nebula_dense_grid_fill_instance(
+  inst:      *DenseCharInstance,
+  row:       uint32,
+  col:       uint32,
+  codepoint: uint32,
+  origin_x:  float32,
+  origin_y:  float32,
+  cell_w:    float32,
+  cell_h:    float32,
+  fg_packed: uint32,
+  bg_packed: uint32
+): void
+  local glyph = nebula_dense_glyph_lookup(codepoint)
+  inst.pos_x    = origin_x + (@float32)(col) * cell_w
+  inst.pos_y    = origin_y + (@float32)(row) * cell_h
+  inst.uv_x     = glyph.u0
+  inst.uv_y     = glyph.v0
+  inst.uv_w     = glyph.u1 - glyph.u0
+  inst.uv_h     = glyph.v1 - glyph.v0
+  inst.fg_color = fg_packed
+  inst.bg_color = bg_packed
+end

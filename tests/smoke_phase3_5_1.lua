@@ -70,7 +70,7 @@ local factory_ver = require "derive.pipeline_factory"
 -- =============================================================================
 -- 1. 版本号验证（Phase 3.7 更新）
 -- =============================================================================
-assert_eq("shader_compose 版本号", shader_ver, "nebula_shader_compose_v0.8_phase4.2.2")
+assert_eq("shader_compose 版本号", shader_ver, "nebula_shader_compose_v0.9_phase4.X")
 assert_eq("pipeline_factory 版本号", factory_ver, "nebula_pipeline_factory_v0.8_phase4.1")
 
 -- =============================================================================

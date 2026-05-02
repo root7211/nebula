@@ -162,6 +162,10 @@ run_test "smoke_phase4_2_3_s2 (Phase 4.2.3 S2 — CJK 运行时排版 + 混排 +
 run_test "verify_interaction_behavior (Runtime — 交互原语行为验证 & 回归守护)" \
   nelua-lua tests/verify_interaction_behavior.lua
 
+# ★ Phase 4.X: 高密度文本管线生成 + 着色器组合 + 公理合规专项测试
+run_test "smoke_phase4_x_dense (Phase 4.X — 高密度文本管线 & 着色器 & 公理合规)" \
+  nelua-lua tests/smoke_phase4_x_dense.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="
@@ -251,6 +255,13 @@ run_test "compile cjk_text_demo (Phase 4.2.3 S2 — CJK + ASCII mixed text Slug 
   --cflags="-I./vendor/wgpu-native/include" \
   --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
   examples/cjk_text_demo.nelua -o ~/.cache/nelua/cjk_text_demo
+
+# ★ Phase 4.X: dense_text_demo 编译回归（高密度文本 Instanced + SDF Atlas + Storage Buffer）
+run_test "compile dense_text_demo (Phase 4.X — 高密度文本 120x50 网格渲染)" \
+  nelua -c -L src -L assets/generated --add-path . --add-path examples --add-path assets/generated \
+  --cflags="-I./vendor/wgpu-native/include" \
+  --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
+  examples/dense_text_demo.nelua -o ~/.cache/nelua/dense_text_demo
 
 # ★ Phase 4.2.2 D-4.1-C: Storage Buffer 基础设施静态分析测试
 run_test "smoke_phase4_2_2_bench (Phase 4.2.2 D-4.1-C — Storage Buffer infrastructure audit)" \

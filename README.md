@@ -14,12 +14,13 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 进行中 | 47/47 回归测试全绿 | Phase 4.2.3-S2 完成（2026-05-02）**
+**Era II 进行中 | 49/49 回归测试全绿 | Phase 4.X 实施中（2026-05-02）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
+| **Phase 4.X Step 1-5** | 高密度文本渲染通道——着色器组合 + 管线生成 + Record 定义 + 派生入口 + 辅助函数 + dense_text_demo（120×50 = 6000 字符网格）+ 65 条冒烟测试 | — |
 | **Phase 4.2.3-S2** | CJK 运行时排版——零 HarfBuzz 依赖，O(log N) 表查找，CJK+ASCII 混排 Slug 渲染，cjk_text_demo | `a6336e5` |
 | **Phase 4.2.3-S1** | GB2312 一级 3755 字 shaping 表生成（v3 直接 API，102.7 KB，3755/3755 映射成功，0 .notdef） | `c1cd8ee` |
 | **交互原语行为验证** | 40 条运行时行为断言 + BUG-4/5/6 回归守护（Direction A） | `c424005` |
@@ -75,6 +76,16 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 - **S3**：`multiline_editable` 原语 + `NebulaMultiBuf{N,L}` 编译期泛型类型 + multiline_editable_demo
 - ✅ 三个高级原语已内置到框架注册表，用户声明即用（缺口 #3 已修复）
 
+### Phase 4.X — 高密度文本渲染通道（85/100）
+
+- **Step 1**：`nebula_compose_dense_text_shader` — Instanced + SDF Atlas WGSL 着色器（Storage Buffer per-char 数据，unpack4x8unorm 颜色解包）
+- **Step 2**：`gen_pipeline_dense_text` — 管线代码生成（init/update_atlas/update_viewport/upload/draw/deinit 六方法）
+- **Step 3**：`DenseCharInstance`（32B）+ `DenseTextUniforms`（16B）+ `nebula_pack_rgba8` 辅助
+- **Step 4**：`nebula_derive_dense_text_visual` 派生入口 + `text_mode="dense"` 分发
+- **Step 5**：`nebula_dense_grid_fill_instance` 等宽网格辅助函数 + `dense_text_demo`（120×50 = 6000 字符）+ 65 条冒烟测试
+- ✅ 方案 B（Instanced）：256 KB Storage Buffer（vs 方案 A 的 1.125 MB vertex buffer），内存效率高 4.4 倍
+- ✅ 公理合规：A（16B uniform，无运行时泄漏）+ B（L0 deinit 释放）+ C（atlas_dense 编译期签名）
+
 ---
 
 ## 架构路线图
@@ -106,7 +117,7 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 | **4.3** | 可编程原语注册表 | **S1+S2+S3+TaskD 已完成** | **90** |
 | **4.4** | 高级组件库 | **S1+S2+S3 已完成** | **81** |
 | 4.2.3 | HarfBuzz + CJK 集成 | **S0+S1+S2 已完成**（绑定 + 预处理 + shaping 表 + 运行时排版） | 82 |
-| 4.X | 高密度文本 + 输入补全 | 规划中 | — |
+| 4.X | 高密度文本渲染通道 | **Step 1-5 已完成**（着色器 + 管线 + Record + 派生 + 辅助函数 + demo + 测试） | 85 |
 | 4.5 | 注册原语语法糖 | 规划中 | — |
 | 4.6 | Indirect Drawing | 规划中 | 78 |
 | 4.7 | 文本编辑器原型 | 规划中 | — |
@@ -215,8 +226,9 @@ nebula/
 │   ├── dropdown_demo.nelua       # 下拉选择器
 │   ├── multiline_editable_demo.nelua  # 多行编辑器
 │   ├── slug_bench.nelua          # Storage Buffer 可扩展性基准
-│   └── cjk_text_demo.nelua      # CJK + ASCII 混排 Slug 渲染
-├── tests/                        # 测试套件 (47 项)
+│   ├── cjk_text_demo.nelua      # CJK + ASCII 混排 Slug 渲染
+│   └── dense_text_demo.nelua    # 高密度文本网格（120×50 = 6000 chars）
+├── tests/                        # 测试套件 (49 项)
 ├── tools/                        # 构建与测试工具（含 font_preprocessor_cjk）
 ├── assets/                       # 字体/纹理预处理产物（含 CJK shaping 表）
 ├── vendor/                       # 第三方依赖 (wgpu-native, GLFW)
