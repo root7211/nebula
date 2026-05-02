@@ -14,18 +14,18 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 进行中 | 45/45 回归测试全绿 | Phase 4.2.3-S1 完成（2026-05-02）**
+**Era II 进行中 | 47/47 回归测试全绿 | Phase 4.2.3-S2 完成（2026-05-02）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
-| **Phase 4.2.3-S1** | GB2312 一级 3755 字 shaping 表生成（102.7 KB，3755/3755 映射成功，0 .notdef） | `pending` |
+| **Phase 4.2.3-S2** | CJK 运行时排版——零 HarfBuzz 依赖，O(log N) 表查找，CJK+ASCII 混排 Slug 渲染，cjk_text_demo | `a6336e5` |
+| **Phase 4.2.3-S1** | GB2312 一级 3755 字 shaping 表生成（v3 直接 API，102.7 KB，3755/3755 映射成功，0 .notdef） | `c1cd8ee` |
 | **交互原语行为验证** | 40 条运行时行为断言 + BUG-4/5/6 回归守护（Direction A） | `c424005` |
 | **全代码库审计修复** | 修复 10 项问题（2 高危 BUG + 4 中危 BUG + 2 低危 BUG + 2 内存安全），43/43 回归 + 6 demo 编译验证通过 | `8647048` |
 | **Phase 4.2.2 D-4.1-C** | Storage Buffer scalability benchmark PASSED — 1K=1.41ms, 5K=1.45ms, 10K=1.45ms, 退化+2.5%<20%阈值 | `ebd7333` |
 | **Phase 4.2.3-S0** | HarfBuzz 绑定 + CJK shaping 预处理（zh-CN-common 20 字验证） | `afab95e` |
-| **Phase 4.2.3-S1** | GB2312 一级 3755 字完整 shaping 表（v3 直接 API，无需逐字 hb_shape） | `pending` |
 | **Phase 4.2.2-fix** | GPU 资源 deinit — 修复 ~40+ GPU 对象泄漏，公理 B 合规 | `2b2d9cb` |
 | **Phase 4.3 S1-S3 + Task D** | 可编程原语注册表 + axiom_validator v2.0 三层防御 | `1fdc182` |
 | **Phase 4.4 S1-S3** | 高级组件库 | `b9fee31` |
@@ -105,7 +105,7 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 | **4.2.2** | Slug 渲染内核生产级化 | **D-4.1-A/B/C 已完成**，benchmark 代码+静态分析就绪，**GPU deinit 已修复** | 79 |
 | **4.3** | 可编程原语注册表 | **S1+S2+S3+TaskD 已完成** | **90** |
 | **4.4** | 高级组件库 | **S1+S2+S3 已完成** | **81** |
-| 4.2.3 | HarfBuzz + CJK 集成 | **S0 已完成**（绑定 + 预处理 + shaping 表生成） | 82 |
+| 4.2.3 | HarfBuzz + CJK 集成 | **S0+S1+S2 已完成**（绑定 + 预处理 + shaping 表 + 运行时排版） | 82 |
 | 4.X | 高密度文本 + 输入补全 | 规划中 | — |
 | 4.5 | 注册原语语法糖 | 规划中 | — |
 | 4.6 | Indirect Drawing | 规划中 | 78 |
@@ -213,10 +213,12 @@ nebula/
 │   ├── slider_demo.nelua         # 可编程原语 (draggable_value)
 │   ├── scrollable_demo.nelua     # 滚动容器
 │   ├── dropdown_demo.nelua       # 下拉选择器
-│   └── multiline_editable_demo.nelua  # 多行编辑器
-├── tests/                        # 测试套件 (43 项)
-├── tools/                        # 构建与测试工具
-├── assets/                       # 字体/纹理预处理产物
+│   ├── multiline_editable_demo.nelua  # 多行编辑器
+│   ├── slug_bench.nelua          # Storage Buffer 可扩展性基准
+│   └── cjk_text_demo.nelua      # CJK + ASCII 混排 Slug 渲染
+├── tests/                        # 测试套件 (47 项)
+├── tools/                        # 构建与测试工具（含 font_preprocessor_cjk）
+├── assets/                       # 字体/纹理预处理产物（含 CJK shaping 表）
 ├── vendor/                       # 第三方依赖 (wgpu-native, GLFW)
 └── docs/                         # 架构文档与设计参考
 ```
@@ -234,10 +236,13 @@ nebula/
 | [`PLAN_PHASE3.md`](docs/PLAN_PHASE3.md) | Phase 3 总体设计：多组件系统 |
 | [`PLAN_PHASE3_6.md`](docs/PLAN_PHASE3_6.md) | Gap Buffer 生命周期设计（架构参考） |
 | [`PLAN_PHASE4_1.md`](docs/PLAN_PHASE4_1.md) | Slug 渲染引擎设计 |
+| [`PLAN_PHASE4_1_IMPL.md`](docs/PLAN_PHASE4_1_IMPL.md) | Slug 渲染引擎实现详情 |
 | [`PLAN_PHASE4_3.md`](docs/PLAN_PHASE4_3.md) | 可编程原语注册表设计 |
 | [`PLAN_PHASE4_3_TASK_D.md`](docs/PLAN_PHASE4_3_TASK_D.md) | process_body 公理校验补丁（从公理 A+B 推导） |
-| [`PLAN_PHASE4_2_3_CJK.md`](docs/PLAN_PHASE4_2_3_CJK.md) | HarfBuzz + CJK 集成规划（待实施） |
+| [`PLAN_PHASE4_2_3_CJK.md`](docs/PLAN_PHASE4_2_3_CJK.md) | HarfBuzz + CJK 集成规划 |
 | [`PLAN_PHASE4_X_DENSE_TEXT.md`](docs/PLAN_PHASE4_X_DENSE_TEXT.md) | 高密度文本 + 输入系统规划（待实施） |
+| [`PLAN_ERA2_MASTER.md`](docs/PLAN_ERA2_MASTER.md) | Era II 总体实施规划 |
+| [`REPORT_PHASE4_2_2_BENCH.md`](docs/REPORT_PHASE4_2_2_BENCH.md) | Phase 4.2.2 Storage Buffer 基准测试报告 |
 | [`TEXT_EDITOR_ROADMAP.md`](docs/TEXT_EDITOR_ROADMAP.md) | 文本编辑器长期愿景 |
 | [`ROADMAP_INDUSTRY_RESEARCH.md`](docs/ROADMAP_INDUSTRY_RESEARCH.md) | 行业对标研究 (Zed/GPUI, Vello/Piet) |
 | [`WASM_TARGET_ANALYSIS.md`](docs/WASM_TARGET_ANALYSIS.md) | WebAssembly 目标可行性分析 |
