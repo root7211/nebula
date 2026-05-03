@@ -27,7 +27,7 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 | **Phase 4.7-S2 DenseText 接入 App 编排** | `nebula_app_register_dense_text` API + Producer 模式 + App 自动管理 DenseText 管线生命周期（init/draw/deinit）+ dense_editor_demo（DenseText + multiline_editable + App 编排三者整合）+ 28 条冒烟测试 | — |
 | **Phase 4.7-S1 CJK multiline 升级** | UTF-8 aware gap buffer（move_cursor_left_char 等 5 个新方法）+ CJK 显示宽度函数 + cjk_editor_demo + 43 条冒烟测试，editable 原语全面升级为 char-aware | — |
 | **wgpu-native v29.0.0.0 绑定对齐** | 12 个结构体布局修复（新增字段、类型宽度、字段顺序），14/14 demo 编译通过，42/42 结构体尺寸验证 OK | `f051974` |
-| **Phase 4.X-J JSON Viewer 规划** | JSON 树形浏览器设计——DenseText 语法着色 + 折叠/展开 + 滚动 + 行号，为 4.5 语法糖积累样本 | — |
+| **Phase 4.X-J JSON Viewer** | 只读 JSON 树形浏览器——递归下降解析器（4096 节点/64KB）+ One Dark 语法着色（key/string/number/bool/null）+ 折叠/展开 + 垂直滚动 + 行号（双 DenseText 管线）+ json_viewer_demo + 28 条冒烟测试 + 60/60 回归测试全绿 | `f9d4c10` |
 | **Phase 4.7→4.5 调序方案** | 先做 4.7-S1~S4（编辑器前置）积累 4 个新 demo 样本，再设计 4.5 语法糖，避免过早固化 API | — |
 | **Phase 4.X Terminal Emulator** | 终端模拟器原型——PTY + ANSI 解析器 + Dense Text 渲染，term_demo 编译运行通过 | `21ee560` |
 | **Phase 4.X Step 1-5** | 高密度文本渲染通道——着色器组合 + 管线生成 + Record 定义 + 派生入口 + 辅助函数 + dense_text_demo（120×50 = 6000 字符网格）+ 65 条冒烟测试 | — |
@@ -129,7 +129,7 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 | 4.2.3 | HarfBuzz + CJK 集成 | **S0+S1+S2 已完成**（绑定 + 预处理 + shaping 表 + 运行时排版） | 82 |
 | 4.X | 高密度文本渲染通道 | **Step 1-5 已完成**（着色器 + 管线 + Record + 派生 + 辅助函数 + demo + 测试） | 85 |
 | 4.X-T | 终端模拟器原型 | **已完成**（PTY + ANSI 解析器 + Dense Text 渲染 + term_demo） | 78 |
-| 4.X-J | JSON Viewer | **规划中**（DenseText 语法着色 + 折叠/展开 + 滚动 + 行号） | — |
+| 4.X-J | JSON Viewer | **已完成**（递归下降解析器 + One Dark 着色 + 折叠/展开 + 滚动 + 行号 + json_viewer_demo） | 82 |
 | 4.7-S1 | CJK multiline editable | **已完成**（UTF-8 gap buffer + CJK 显示宽度 + cjk_editor_demo） | 85 |
 | 4.7-S2 | DenseText 接入 App 编排 | **已完成**（`nebula_app_register_dense_text` + Producer 模式 + dense_editor_demo） | 86 |
 | 4.7-S3 | 行号显示（独立 DenseText 列） | **已完成**（flex_grow/flex_basis + 多列 DenseText + editor_with_lines_demo） | 84 |
@@ -254,12 +254,18 @@ nebula/
 │   ├── highlight_editor_demo.nelua # ★ Phase 4.7-S4 语法高亮编辑器（关键字+注释+字符串+数字）
 │   ├── button_sugar_demo.nelua  # ★ Phase 4.5 语法糖重写（nebula_component + nebula_app）
 │   ├── multiline_sugar_demo.nelua # ★ Phase 4.5 全糖化（inject_buffers + component + app）
+│   ├── highlight_sugar_demo.nelua # ★ Phase 4.5-S2 全糖化语法高亮编辑器（混合管线自动编排）
+│   ├── json_viewer_demo.nelua   # ★ Phase 4.X-J JSON 树形浏览器（折叠/展开 + 语法着色）
+│   ├── json_viewer/             # JSON Viewer 子模块
+│   │   ├── json_parser.nelua    # 递归下降 JSON 解析器
+│   │   ├── json_tree.nelua      # 可见行计算 + 折叠 + 格式化 + 着色
+│   │   └── sample.json          # 测试数据
 │   ├── term_demo.nelua          # 终端模拟器原型（PTY + ANSI + Dense Text）
 │   └── term/                    # 终端模拟器子模块
 │       ├── pty_bindings.nelua   # POSIX PTY C FFI 绑定
 │       ├── ansi_parser.nelua    # ANSI/VT100 转义序列状态机
 │       └── term_buffer.nelua    # 终端单元格缓冲区
-├── tests/                        # 测试套件 (62 项)
+├── tests/                        # 测试套件 (64 项)
 ├── tools/                        # 构建与测试工具（含 font_preprocessor_cjk）
 ├── assets/                       # 字体/纹理预处理产物（含 CJK shaping 表）
 ├── vendor/                       # 第三方依赖 (wgpu-native, GLFW)
