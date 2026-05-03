@@ -202,6 +202,10 @@ run_test "smoke_phase4_7_s5 (Phase 4.7-S5 — Undo/Redo 架构 & UndoStack & 键
 run_test "smoke_phase4_7_s6 (Phase 4.7-S6 — File I/O & load_file/save_file & C stdio FFI)" \
   nelua-lua tests/smoke_phase4_7_s6.lua
 
+# ★ Phase 4.7-S7: 文本编辑器原型验收（S1-S6 集成 + Ctrl+S + argc/argv + 窗口标题）
+run_test "smoke_phase4_7_s7 (Phase 4.7-S7 — Text Editor prototype & S1-S6 integration)" \
+  nelua-lua tests/smoke_phase4_7_s7.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="
@@ -354,6 +358,13 @@ run_test "compile highlight_sugar_demo (Phase 4.5-S2 — sugar + auto pipeline +
   --cflags="-I./vendor/wgpu-native/include" \
   --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
   examples/highlight_sugar_demo.nelua -o ~/.cache/nelua/highlight_sugar_demo
+
+# ★ Phase 4.7-S7: text_editor_demo 编译回归（S1-S6 全集成文本编辑器原型）
+run_test "compile text_editor_demo (Phase 4.7-S7 — text editor prototype S1-S6 integration)" \
+  nelua -c -L src -L assets/generated --add-path . --add-path examples --add-path assets/generated \
+  --cflags="-I./vendor/wgpu-native/include" \
+  --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
+  examples/text_editor_demo.nelua -o ~/.cache/nelua/text_editor_demo
 
 # ★ Phase 4.2.2 D-4.1-C: Storage Buffer 基础设施静态分析测试
 run_test "smoke_phase4_2_2_bench (Phase 4.2.2 D-4.1-C — Storage Buffer infrastructure audit)" \

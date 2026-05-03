@@ -99,6 +99,8 @@ global function _nebula_key_callback(
         nk = NebulaKey.Undo                        -- Ctrl+Z = Undo
       end
     elseif key == 89 then nk = NebulaKey.Redo      -- Ctrl+Y (GLFW_KEY_Y = 89)
+    -- ★ Phase 4.7-S7: Save
+    elseif key == 83 then nk = NebulaKey.Save      -- Ctrl+S (GLFW_KEY_S = 83)
     end
   end
 

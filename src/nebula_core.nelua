@@ -139,6 +139,8 @@ global NebulaKey = @enum(uint8){
   -- ★ Phase 4.7-S5: Undo/Redo 操作键（Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z）
   Undo       = 22,
   Redo       = 23,
+  -- ★ Phase 4.7-S7: 文件操作键（Ctrl+S）
+  Save       = 24,
 }
 
 -- =============================================================================
@@ -219,6 +221,7 @@ global ClickableState = @record{
 ##     instanced     = spec.instanced     or false,
 ##     max_instances = spec.max_instances or 128,
 ##     max_text_len  = spec.max_text_len  or 255,
+##     max_lines     = spec.max_lines     or nil,
 ##   }
 ## end
 
@@ -1670,6 +1673,166 @@ global ClickableState = @record{
 ##   end
 ##   nebula_annotate(type_name, spec)
 ##   nebula_derive(type_name)
+## end
+##
+## -- ★ Phase 4.5 Sugar Optimization: nebula_editor_visual(type_name, spec)
+## --
+## -- 语法糖：自动生成编辑器 Visual record（含 3 状态 × 3 属性 + 布局字段 + buffer 字段）
+## -- 消除 ~25 行手动 record 声明 + nebula_component 调用。
+## --
+## -- Usage:
+## --   ## nebula_editor_visual("EditorVisual", {
+## --     max_text_len = 256, max_lines = 256,
+## --     component_id = 1,
+## --   })
+## --
+## -- 生成等价于:
+## --   global EditorVisual = @record{ pos, size, radius, 9 color fields, 3 layout fields, multi_buf, gap_buf }
+## --   ## nebula_component("EditorVisual", { primitives={"multiline_editable"}, ... })
+## --
+## function nebula_editor_visual(type_name, spec)
+##   spec = spec or {}
+##   local max_text_len = spec.max_text_len or 256
+##   local max_lines    = spec.max_lines    or 32
+##   local component_id = spec.component_id or 1
+##
+##   -- 推导 buffer 类型名
+##   local mb_type = ("NebulaMultiBuf%d_%d"):format(max_text_len, max_lines)
+##   local gb_type = ("NebulaBuf%d"):format(max_text_len)
+##
+##   -- 生成 record 定义
+##   local record_src = ([[
+## global %s = @record{
+##   pos:    Vec2,
+##   size:   Vec2,
+##   radius: float32,
+##   default_bg_color:     Color,
+##   default_border_color: Color,
+##   default_border_width: float32,
+##   hovered_bg_color:     Color,
+##   hovered_border_color: Color,
+##   hovered_border_width: float32,
+##   pressed_bg_color:     Color,
+##   pressed_border_color: Color,
+##   pressed_border_width: float32,
+##   pixel_height:  float32,
+##   text_origin_x: float32,
+##   content_height: float32,
+##   multi_buf: %s,
+##   gap_buf:   %s,
+## }
+## ]]):format(type_name, mb_type, gb_type)
+##
+##   local ast = aster.parse(record_src, "<nebula_editor_visual:" .. type_name .. ">")
+##   for _, stat in ipairs(ast) do
+##     inject_statement(stat)
+##   end
+##
+##   -- 调用 nebula_component
+##   nebula_component(type_name, {
+##     primitives   = {"multiline_editable"},
+##     max_text_len = max_text_len,
+##     max_lines    = max_lines,
+##     component_id = component_id,
+##   })
+##
+##   print(("[sugar] nebula_editor_visual: %s (%s + %s, id=%d)"):format(
+##     type_name, mb_type, gb_type, component_id))
+## end
+##
+## -- ★ Phase 4.5 Sugar Optimization: nebula_editor_init_visual(opts)
+## --
+## -- 编译期函数：生成 EditorBgVisual 初始化代码字符串，使用主题默认配色。
+## -- 运行时由 demo 调用，减少 ~18 行初始化样板。
+## --
+## function nebula_editor_init_helper(type_name)
+##   -- 此函数仅用于标记，实际初始化通过 nebula_theme 的 nebula_theme_editor_colors() 简化
+##   print(("[sugar] nebula_editor_init_helper registered for %s"):format(type_name))
+## end
+##
+## -- ★ Phase 4.5 Sugar Optimization: nebula_builtin_line_nums(editor_name, opts)
+## --
+## -- 生成内置行号 Producer 函数，消除每个编辑器 demo 中 ~53 行重复代码。
+## --
+## -- Usage:
+## --   ## nebula_builtin_line_nums("editor", { cell_w = 10.0, cell_h = 16.0, cols = 5, rows = 50 })
+## --   -- 生成: global function nebula_fill_line_nums_editor(app, instances, count, max)
+## --
+## function nebula_builtin_line_nums(editor_name, opts)
+##   opts = opts or {}
+##   local cell_w = opts.cell_w or 10.0
+##   local cell_h = opts.cell_h or 16.0
+##   local rows   = opts.rows   or 50
+##   local fname  = "nebula_fill_line_nums_" .. editor_name
+##   local layout_x = "app.dense_layout_line_nums_x"
+##   local layout_y = "app.dense_layout_line_nums_y"
+##
+##   local src = ([[
+## global function %s(
+##   app: auto, instances: *[0]DenseCharInstance, count: *uint32, max: uint32
+## ): void
+##   local editor = &app.%s
+##   local mb = &editor.visual.multi_buf
+##   local origin_x: float32 = %s
+##   local origin_y: float32 = %s + 4.0
+##   local idx: uint32 = 0
+##   local scroll_row: uint32 = (@uint32)(editor.scroll_offset_y / (%s + 2.0))
+##   local visible_rows: uint32 = %d
+##   local row: uint32 = 0
+##   while row < visible_rows and idx < max do
+##     local buf_row = row + scroll_row
+##     local is_cursor_line = (buf_row == editor.cursor_row)
+##     local bg = is_cursor_line and nebula_theme_bg_cursor_line() or nebula_theme_bg_linenum()
+##     if buf_row < mb.line_count then
+##       local num = buf_row + 1
+##       local d3 = num / 1000
+##       local d2 = (num %% 1000) / 100
+##       local d1 = (num %% 100) / 10
+##       local d0 = num %% 10
+##       local num_chars: [4]uint32 = {
+##         d3 > 0 and (48 + d3) or 32,
+##         (d3 > 0 or d2 > 0) and (48 + d2) or 32,
+##         (d3 > 0 or d2 > 0 or d1 > 0) and (48 + d1) or 32,
+##         48 + d0
+##       }
+##       local nc: uint32 = 0
+##       while nc < 4 and idx < max do
+##         nebula_dense_grid_fill_instance(&instances[idx], row, nc, num_chars[nc], origin_x, origin_y, %s, %s, nebula_theme_fg_linenum(), bg)
+##         idx = idx + 1; nc = nc + 1
+##       end
+##       if idx < max then
+##         nebula_dense_grid_fill_instance(&instances[idx], row, 4, 124, origin_x, origin_y, %s, %s, nebula_theme_fg_separator(), bg)
+##         idx = idx + 1
+##       end
+##     else
+##       local nc: uint32 = 0
+##       while nc < 4 and idx < max do
+##         nebula_dense_grid_fill_instance(&instances[idx], row, nc, nc == 0 and 126 or 32, origin_x, origin_y, %s, %s, nebula_theme_fg_linenum(), nebula_theme_bg_linenum())
+##         idx = idx + 1; nc = nc + 1
+##       end
+##       if idx < max then
+##         nebula_dense_grid_fill_instance(&instances[idx], row, 4, 124, origin_x, origin_y, %s, %s, nebula_theme_fg_separator(), nebula_theme_bg_linenum())
+##         idx = idx + 1
+##       end
+##     end
+##     row = row + 1
+##   end
+##   $count = idx
+## end
+## ]]):format(fname, editor_name, layout_x, layout_y,
+##            tostring(cell_h),
+##            rows,
+##            tostring(cell_w), tostring(cell_h),
+##            tostring(cell_w), tostring(cell_h),
+##            tostring(cell_w), tostring(cell_h),
+##            tostring(cell_w), tostring(cell_h))
+##
+##   local ast = aster.parse(src, "<nebula_builtin_line_nums:" .. editor_name .. ">")
+##   for _, stat in ipairs(ast) do
+##     inject_statement(stat)
+##   end
+##   print(("[sugar] nebula_builtin_line_nums: %s (cell=%.0fx%.0f, rows=%d)"):format(
+##     fname, cell_w, cell_h, rows))
 ## end
 ##
 ## -- ★ Phase 4.5 S2: nebula_app(app_name, spec)

@@ -1,0 +1,338 @@
+-- =============================================================================
+-- text_editor_demo.nelua
+-- Nebula GUI Compiler — Phase 4.7-S7
+--
+-- 文本编辑器原型——Phase 4.7 收官 demo：
+--   · S1: CJK multiline editable（UTF-8 aware gap buffer）
+--   · S2: DenseText App 编排（Producer 模式）
+--   · S3: 行号显示（内置 Producer）
+--   · S4: 语法高亮（编译期规则注入 + 运行时 per-char 着色）
+--   · S5: Undo/Redo（Ctrl+Z / Ctrl+Y）
+--   · S6: File I/O（load_file / save_file）
+--   · S7: 集成验收（本文件）— 能打开 .txt/.nelua 文件，编辑、保存、中英文输入
+--
+-- ★ Sugar Optimization:
+--   · nebula_theme — 内置暗色主题（消除 8 行颜色函数）
+--   · nebula_editor_visual — 自动生成 Visual record（消除 ~25 行 record + component）
+--   · nebula_builtin_line_nums — 内置行号 Producer（消除 ~53 行 fill_line_nums）
+--
+-- Usage:
+--   ./text_editor_demo                     # 空缓冲区
+--   ./text_editor_demo path/to/file.nelua  # 打开文件
+--
+-- 快捷键:
+--   Ctrl+S          保存文件
+--   Ctrl+Z          撤销
+--   Ctrl+Y/Shift+Z  重做
+--   Ctrl+C/V/X/A    复制/粘贴/剪切/全选
+-- =============================================================================
+## cinclude "<stdio.h>"
+## cinclude "<string.h>"
+
+require "nebula_core"
+require "glfw_bindings"
+require "wgpu_bindings"
+require "renderer"
+require "app"
+require "text_runtime"
+require "nebula_cursor"
+require "nebula_arena"
+require "nebula_theme"
+
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+global function snprintf(buf: cstring, size: csize, fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+
+-- =============================================================================
+-- 常量
+-- =============================================================================
+local WIN_W <comptime> = 1280
+local WIN_H <comptime> = 800
+local EDIT_COLS <comptime> = 120
+local EDIT_ROWS <comptime> = 50
+local CELL_W <comptime> = 10.0
+local CELL_H <comptime> = 16.0
+
+-- =============================================================================
+-- 全局状态
+-- =============================================================================
+global _editor_file_path: [512]uint8
+global _editor_has_file: boolean = false
+global _editor_modified: boolean = false
+
+-- =============================================================================
+-- 语法高亮规则
+-- =============================================================================
+##[[
+  nebula_highlight_rules("nelua", {
+    keywords = {
+      { words = {"if", "else", "elseif", "then", "end", "for", "while",
+                 "do", "repeat", "until", "return", "break", "goto", "in",
+                 "switch", "case", "continue", "defer"},
+        color = 0xC586C0FF },
+      { words = {"local", "global", "function", "require", "record", "enum",
+                 "union", "type"},
+        color = 0x569CD6FF },
+      { words = {"true", "false", "nil", "nilptr"},
+        color = 0x4EC9B0FF },
+      { words = {"int8", "int16", "int32", "int64",
+                 "uint8", "uint16", "uint32", "uint64",
+                 "float32", "float64", "boolean", "cstring",
+                 "cint", "csize", "pointer", "void", "auto",
+                 "byte", "isize", "usize"},
+        color = 0x4DC9A0FF },
+    },
+    line_comment = "--",
+    line_comment_color = 0x6A9955FF,
+    string_color       = 0xCE9178FF,
+    number_color       = 0xB5CEA8FF,
+  })
+]]
+## nebula_derive_highlighter("nelua")
+
+-- =============================================================================
+-- ★ Sugar: 自动注入 buffer + 生成 Visual record + component（替代 ~30 行手写）
+-- =============================================================================
+## nebula_inject_buffers({ primitives = {"multiline_editable"}, max_text_len = 256, max_lines = 256 })
+## nebula_editor_visual("EditorBgVisual", { max_text_len = 256, max_lines = 256, component_id = 1 })
+
+global LineNumDenseVisual = @record{ pos: Vec2, size: Vec2 }
+## nebula_component("LineNumDenseVisual", { text_mode = "dense", max_chars = 1024 })
+
+global EditAreaDenseVisual = @record{ pos: Vec2, size: Vec2 }
+## nebula_component("EditAreaDenseVisual", { text_mode = "dense", max_chars = 8192 })
+
+-- =============================================================================
+-- ★ Sugar: 内置行号 Producer（替代 ~53 行手写 fill_line_nums）
+-- =============================================================================
+## nebula_builtin_line_nums("editor", { cell_w = 10.0, cell_h = 16.0, rows = 50 })
+
+-- =============================================================================
+-- 编辑区 Producer（语法高亮 — 领域特定，无法通用化）
+-- =============================================================================
+global function fill_edit_area(
+  app: auto, instances: *[0]DenseCharInstance, count: *uint32, max: uint32
+): void
+  local editor = &app.editor
+  local mb = &editor.visual.multi_buf
+  local origin_x: float32 = app.dense_layout_edit_area_x
+  local origin_y: float32 = app.dense_layout_edit_area_y + 4.0
+  local idx: uint32 = 0
+  local scroll_row: uint32 = (@uint32)(editor.scroll_offset_y / (CELL_H + 2.0))
+  local visible_rows: uint32 = EDIT_ROWS
+  local hl_colors: [512]uint32
+
+  local row: uint32 = 0
+  while row < visible_rows and idx < max do
+    local buf_row = row + scroll_row
+    local is_cursor_line = (buf_row == editor.cursor_row)
+    local bg = is_cursor_line and nebula_theme_bg_cursor_line() or nebula_theme_bg_normal()
+
+    if buf_row < mb.line_count then
+      local line = mb:get_line(buf_row)
+      local flat: [512]uint8
+      local line_len = line:flatten(&flat[0], 511)
+      nebula_highlight_scan_nelua(&flat[0], (@uint32)(line_len), nebula_theme_fg_normal(), &hl_colors[0])
+
+      local cursor_byte: int32 = -1
+      if is_cursor_line then cursor_byte = (@int32)(editor.cursor_col) end
+
+      local byte_i: uint32 = 0
+      local col: uint32 = 0
+      while col < EDIT_COLS and idx < max do
+        local ch: uint32 = 32
+        local fg = nebula_theme_fg_normal()
+        local this_bg = bg
+        if byte_i < line_len then
+          ch = (@uint32)(flat[byte_i])
+          fg = hl_colors[byte_i]
+          if ch >= 0xC0 and ch <= 0xDF then ch = 0x3F; byte_i = byte_i + 1
+          elseif ch >= 0xE0 and ch <= 0xEF then ch = 0x3F; byte_i = byte_i + 2
+          elseif ch >= 0xF0 then ch = 0x3F; byte_i = byte_i + 3 end
+          byte_i = byte_i + 1
+        end
+        if cursor_byte >= 0 and (@uint32)(cursor_byte) == byte_i - 1 then
+          this_bg = nebula_theme_bg_cursor(); fg = nebula_theme_fg_cursor()
+        end
+        nebula_dense_grid_fill_instance(&instances[idx], row, col, ch, origin_x, origin_y, CELL_W, CELL_H, fg, this_bg)
+        idx = idx + 1; col = col + 1
+      end
+      while col < EDIT_COLS and idx < max do
+        local this_bg = bg
+        if cursor_byte >= 0 and byte_i == line_len and col == byte_i then this_bg = nebula_theme_bg_cursor() end
+        nebula_dense_grid_fill_instance(&instances[idx], row, col, 32, origin_x, origin_y, CELL_W, CELL_H, nebula_theme_fg_normal(), this_bg)
+        idx = idx + 1; col = col + 1
+      end
+    else
+      local col: uint32 = 0
+      while col < EDIT_COLS and idx < max do
+        nebula_dense_grid_fill_instance(&instances[idx], row, col, 32, origin_x, origin_y, CELL_W, CELL_H, nebula_theme_fg_normal(), nebula_theme_bg_normal())
+        idx = idx + 1; col = col + 1
+      end
+    end
+    row = row + 1
+  end
+  $count = idx
+end
+
+-- =============================================================================
+-- App 声明
+-- =============================================================================
+## nebula_app("TextEditorApp", {
+##   layout = { direction = "row", width = 1280, height = 800 },
+##   components = {
+##     { name = "editor",    type = "EditorBgVisual" },
+##     { name = "line_nums", type = "LineNumDenseVisual",
+##       producer = "nebula_fill_line_nums_editor", cell_w = 10.0, cell_h = 16.0,
+##       max_chars = 250, layout = { flex_basis = 50 } },
+##     { name = "edit_area", type = "EditAreaDenseVisual",
+##       producer = "fill_edit_area", cell_w = 10.0, cell_h = 16.0,
+##       max_chars = 6000, layout = { flex_grow = 1 } },
+##   },
+## })
+
+-- =============================================================================
+-- 窗口标题更新
+-- =============================================================================
+local function update_window_title(cursor_row: uint32, cursor_col: uint32): void
+  local title: [256]uint8
+  local fname: cstring
+  if _editor_has_file then
+    local last_slash: int32 = -1
+    local fi: uint32 = 0
+    while _editor_file_path[fi] ~= 0 and fi < 511 do
+      if _editor_file_path[fi] == 47 then last_slash = (@int32)(fi) end
+      fi = fi + 1
+    end
+    local start: uint32 = last_slash >= 0 and (@uint32)(last_slash + 1) or 0
+    fname = (@cstring)(&_editor_file_path[start])
+  else
+    fname = "[untitled]"
+  end
+  local mod_mark: cstring = _editor_modified and " [+]" or ""
+  snprintf((@cstring)(&title[0]), 255,
+    "%s%s — Ln %d, Col %d — Nebula Editor",
+    fname, mod_mark,
+    (@int32)(cursor_row + 1), (@int32)(cursor_col + 1))
+  glfwSetWindowTitle(_nebula_window, (@cstring)(&title[0]))
+end
+
+-- =============================================================================
+-- 命令行参数
+-- =============================================================================
+global argc: int32 <cimport, nodecl>
+global argv: *[0]cstring <cimport, nodecl>
+
+-- =============================================================================
+-- Main
+-- =============================================================================
+local function main(): int32
+  local renderer: NebulaRenderer
+  local app: TextEditorApp
+
+  ## if ccinfo.is_linux then
+  if argc > 1 then
+    local src = (@*[0]uint8)(argv[1])
+    local si: uint32 = 0
+    while src[si] ~= 0 and si < 511 do
+      _editor_file_path[si] = src[si]; si = si + 1
+    end
+    _editor_file_path[si] = 0
+    _editor_has_file = true
+  end
+  ## end
+
+  if not nebula_init(&renderer, &app, "Nebula Editor", WIN_W, WIN_H) then
+    return 1
+  end
+
+  -- ★ Sugar: 使用 nebula_theme_editor_colors() 简化初始化
+  local dbg, dbc, dbw, hbg, hbc, hbw, pbg, pbc, pbw = nebula_theme_editor_colors()
+  app.editor:init(EditorBgVisual{
+    pos  = Vec2{ x = 0.0, y = 0.0 },
+    size = Vec2{ x = (@float32)(WIN_W), y = (@float32)(WIN_H) },
+    radius = 0.0,
+    default_bg_color = dbg, default_border_color = dbc, default_border_width = dbw,
+    hovered_bg_color = hbg, hovered_border_color = hbc, hovered_border_width = hbw,
+    pressed_bg_color = pbg, pressed_border_color = pbc, pressed_border_width = pbw,
+    pixel_height = 16.0, text_origin_x = 58.0, content_height = 700.0,
+  })
+
+  app.editor.cursor_row = 0
+  app.editor.cursor_col = 0
+  app.editor.line_count = 1
+  app.editor.visual.multi_buf:init()
+
+  -- 加载文件
+  if _editor_has_file then
+    if app.editor.visual.multi_buf:load_file((@cstring)(&_editor_file_path[0])) then
+      app.editor.line_count = app.editor.visual.multi_buf.line_count
+      app.editor.cursor_row = 0
+      app.editor.cursor_col = 0
+      printf("nebula: loaded '%s' (%d lines)\n",
+        (@cstring)(&_editor_file_path[0]), (@int32)(app.editor.line_count))
+    else
+      printf("nebula: cannot open '%s', starting empty buffer\n",
+        (@cstring)(&_editor_file_path[0]))
+      _editor_has_file = false
+    end
+  end
+
+  _editor_modified = false
+  update_window_title(0, 0)
+
+  printf("=== Phase 4.7-S7: Text Editor Demo ===\n")
+  printf("  Features: syntax highlight | line numbers | undo/redo | file I/O\n")
+  printf("  Keys:     Ctrl+S save | Ctrl+Z undo | Ctrl+Y redo\n")
+
+  local input: NebulaInputState
+  local prev_time = glfwGetTime()
+  local prev_undo_cursor: uint32 = 0
+  local title_timer: float32 = 0.0
+
+  while not nebula_should_close() do
+    nebula_poll_events()
+    local now = glfwGetTime()
+    local dt  = (@float32)(now - prev_time)
+    prev_time = now
+    nebula_collect_input(_nebula_window, &input, dt)
+
+    -- Ctrl+S 保存
+    if input.key_pressed == NebulaKey.Save then
+      if _editor_has_file then
+        if app.editor.visual.multi_buf:save_file((@cstring)(&_editor_file_path[0])) then
+          _editor_modified = false
+          prev_undo_cursor = app.editor.undo_stack.cursor
+          printf("nebula: saved '%s' (%d lines)\n",
+            (@cstring)(&_editor_file_path[0]), (@int32)(app.editor.line_count))
+          update_window_title(app.editor.cursor_row, app.editor.cursor_col)
+        else
+          printf("nebula: FAILED to save '%s'\n", (@cstring)(&_editor_file_path[0]))
+        end
+      else
+        printf("nebula: no file path (pass file as command-line argument)\n")
+      end
+    end
+
+    -- 修改检测
+    if app.editor.undo_stack.cursor ~= prev_undo_cursor then
+      _editor_modified = true
+    end
+
+    app.editor.visual.content_height = (@float32)(app.editor.line_count) * (CELL_H + 2.0)
+
+    title_timer = title_timer + dt
+    if title_timer > 0.2 then
+      title_timer = 0.0
+      update_window_title(app.editor.cursor_row, app.editor.cursor_col)
+    end
+
+    nebula_frame_render(&renderer, &app, &input, dt, 0.04, 0.04, 0.06)
+  end
+
+  app:deinit()
+  nebula_shutdown(&renderer)
+  printf("nebula: text editor clean exit\n")
+  return 0
+end
+
+main()

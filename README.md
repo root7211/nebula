@@ -14,12 +14,13 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 进行中 | 66/66 回归测试全绿 | Phase 4.7-S6 已完成（2026-05-03）**
+**Era II 进行中 | 68/68 回归测试全绿 | Phase 4.7-S7 已完成（2026-05-03）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
+| **Phase 4.7-S7 文本编辑器原型** | `text_editor_demo.nelua` — S1-S6 全集成验收（CJK 编辑 + DenseText 渲染 + 行号 + 语法高亮 + Undo/Redo + File I/O + Ctrl+S 保存 + 命令行参数加载文件 + 窗口标题状态显示）+ `NebulaKey.Save` + `glfwSetWindowTitle` 绑定 + `nebula_annotate` 存储 `max_lines` 修复 + **语法糖优化**：`nebula_theme`（内置暗色主题）+ `nebula_editor_visual`（自动生成 Visual record）+ `nebula_builtin_line_nums`（内置行号 Producer）+ 68/68 回归测试全绿 | — |
 | **Phase 4.7-S6 File I/O** | `load_file(path)` / `save_file(path)` 方法生成（C stdio FFI 绑定）+ CRLF 处理 + 空文件 + POSIX 换行末尾 + roundtrip 验证 + 66/66 回归测试全绿 | `91560be` |
 | **Phase 4.7-S5 Undo/Redo** | 编译期 `NebulaUndoStack` 类型生成 + `NebulaKey.Undo`/`Redo` 枚举 + Ctrl+Z/Y/Shift+Z 键映射 + `process_text_input` 全操作记录 + `nebula_inject_buffers` 自动注入 undo stack | `457fd62` |
 | **Phase 4.5-S2 混合管线自动编排** | `nebula_app()` 的 `components` 数组自动检测 Visual 的 `text_mode`，dense 管线自动路由到 `nebula_app_register_dense_text`（消除 `dense_texts` 分离声明）+ highlight_sugar_demo（全糖化语法高亮编辑器，编排样板从 ~80 行→~15 行）+ 33 条冒烟测试 | — |
@@ -138,7 +139,7 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 | 4.5 | 注册原语语法糖 | **S1+S2 已完成**（S1: `nebula_component` + `nebula_inject_buffers` + `nebula_app` + `nebula_auto_states`；S2: 混合管线自动编排 + highlight_sugar_demo） | — |
 | 4.7-S4 | 语法高亮架构 | **已完成**（`highlight_factory.lua` + 编译期规则注入 + 运行时 per-char 着色 + highlight_editor_demo） | 85 |
 | 4.6 | Indirect Drawing | 规划中 | 78 |
-| 4.7 | 文本编辑器原型 | **S1+S2+S3+S4+S5+S6 已完成**（S5: Undo/Redo，S6: File I/O），S7 规划中 | — |
+| 4.7 | 文本编辑器原型 | **S1-S7 已完成**（S7: text_editor_demo 全集成验收） | — |
 | 5.0 | 生态与 CI/CD | 规划中 | — |
 
 > 重要度评分基于五个维度加权综合评分（满分 100），详见 [`docs/PHASE_IMPORTANCE_SCORECARD.md`](docs/PHASE_IMPORTANCE_SCORECARD.md)。
@@ -196,8 +197,11 @@ main()
 
 ```bash
 chmod +x build.sh
-./build.sh form_demo
-LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/form_demo
+./build.sh text_editor_demo
+LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/text_editor_demo
+# 或打开文件编辑
+./build.sh text_editor_demo
+LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/text_editor_demo path/to/file.nelua
 # 或运行终端模拟器
 ./build.sh term_demo
 LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/term_demo
@@ -222,6 +226,7 @@ nebula/
 │   ├── gap_buffer.nelua          # 单行 Gap Buffer
 │   ├── nebula_cursor.nelua       # 光标系统
 │   ├── nebula_arena.nelua        # Frame Arena 分配器
+│   ├── nebula_theme.nelua        # ★ 内置暗色主题颜色包（One Dark 风格）
 │   ├── wgpu_bindings.nelua       # WebGPU C 绑定
 │   ├── glfw_bindings.nelua       # GLFW C 绑定
 │   ├── harfbuzz_bindings.nelua   # HarfBuzz C 绑定（Phase 4.2.3-S0）
@@ -257,6 +262,7 @@ nebula/
 │   ├── button_sugar_demo.nelua  # ★ Phase 4.5 语法糖重写（nebula_component + nebula_app）
 │   ├── multiline_sugar_demo.nelua # ★ Phase 4.5 全糖化（inject_buffers + component + app）
 │   ├── highlight_sugar_demo.nelua # ★ Phase 4.5-S2 全糖化语法高亮编辑器（混合管线自动编排）
+│   ├── text_editor_demo.nelua   # ★ Phase 4.7-S7 文本编辑器原型（S1-S6 全集成验收）
 │   ├── json_viewer_demo.nelua   # ★ Phase 4.X-J JSON 树形浏览器（折叠/展开 + 语法着色）
 │   ├── json_viewer/             # JSON Viewer 子模块
 │   │   ├── json_parser.nelua    # 递归下降 JSON 解析器
@@ -267,7 +273,7 @@ nebula/
 │       ├── pty_bindings.nelua   # POSIX PTY C FFI 绑定
 │       ├── ansi_parser.nelua    # ANSI/VT100 转义序列状态机
 │       └── term_buffer.nelua    # 终端单元格缓冲区
-├── tests/                        # 测试套件 (66 项)
+├── tests/                        # 测试套件 (68 项)
 ├── tools/                        # 构建与测试工具（含 font_preprocessor_cjk）
 ├── assets/                       # 字体/纹理预处理产物（含 CJK shaping 表）
 ├── vendor/                       # 第三方依赖 (wgpu-native, GLFW)
