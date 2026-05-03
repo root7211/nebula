@@ -97,14 +97,14 @@ int main() {
     } while(0)
     CHECK(WGPUBindGroupLayoutEntry, 120);
     CHECK(WGPUBindGroupEntry, 56);
-    CHECK(WGPUBufferDescriptor, 40);
+    CHECK(WGPUBufferDescriptor, 48);
     CHECK(WGPURenderPassColorAttachment, 72);
-    CHECK(WGPUSurfaceConfiguration, 56);
+    CHECK(WGPUSurfaceConfiguration, 64);
     CHECK(WGPURenderPipelineDescriptor, 168);
-    CHECK(WGPUTextureDescriptor, 72);
-    CHECK(WGPUVertexAttribute, 24);
+    CHECK(WGPUTextureDescriptor, 80);
+    CHECK(WGPUVertexAttribute, 32);
     CHECK(WGPUVertexBufferLayout, 40);
-    CHECK(WGPUSamplerDescriptor, 56);
+    CHECK(WGPUSamplerDescriptor, 64);
     if (ok) printf("\n  All struct sizes match wgpu-native %s — bindings OK\n", "v29.0.0.0");
     else    printf("\n  [ERROR] Size mismatch detected — bindings need update!\n");
     return ok ? 0 : 1;
