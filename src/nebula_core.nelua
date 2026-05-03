@@ -609,6 +609,11 @@ global ClickableState = @record{
 ## local gap_buffer_factory_mod = require "derive.gap_buffer_factory"
 ## assert(gap_buffer_factory_mod == "nebula_gap_buffer_factory_v0.2_phase4.4_s3",
 ##   "nebula: failed to load derive/gap_buffer_factory.lua")
+##
+## -- ★ Phase 4.7-S4: 加载语法高亮工厂模块
+## local highlight_factory_mod = require "derive.highlight_factory"
+## assert(highlight_factory_mod == "nebula_highlight_factory_v0.1_phase4.7-s4",
+##   "nebula: failed to load derive/highlight_factory.lua")
 ## 
 ## -- 从 Visual 字段集合中检测着色器特性
 ## local function detect_shader_features(base_fields, all_props)
