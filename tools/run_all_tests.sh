@@ -190,6 +190,10 @@ run_test "smoke_json_viewer (Phase 4.X-J — JSON Viewer pipeline & layout & sep
 run_test "smoke_phase4_7_s4 (Phase 4.7-S4 — 语法高亮架构 & 规则注册 & 扫描函数生成)" \
   nelua-lua tests/smoke_phase4_7_s4.lua
 
+# ★ Phase 4.5-S2: 混合管线自动编排验证（text_mode 检测 + auto/explicit dense 共存 + producer 校验）
+run_test "smoke_phase4_5_s2 (Phase 4.5-S2 — 混合管线自动编排 & text_mode 路由 & sugar demo)" \
+  nelua-lua tests/smoke_phase4_5_s2.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="
@@ -335,6 +339,13 @@ run_test "compile highlight_editor_demo (Phase 4.7-S4 — syntax highlighting + 
   --cflags="-I./vendor/wgpu-native/include" \
   --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
   examples/highlight_editor_demo.nelua -o ~/.cache/nelua/highlight_editor_demo
+
+# ★ Phase 4.5-S2: highlight_sugar_demo 编译回归（语法糖 + 混合管线自动编排 + 统一生命周期）
+run_test "compile highlight_sugar_demo (Phase 4.5-S2 — sugar + auto pipeline + unified lifecycle)" \
+  nelua -c -L src -L assets/generated --add-path . --add-path examples --add-path assets/generated \
+  --cflags="-I./vendor/wgpu-native/include" \
+  --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
+  examples/highlight_sugar_demo.nelua -o ~/.cache/nelua/highlight_sugar_demo
 
 # ★ Phase 4.2.2 D-4.1-C: Storage Buffer 基础设施静态分析测试
 run_test "smoke_phase4_2_2_bench (Phase 4.2.2 D-4.1-C — Storage Buffer infrastructure audit)" \
