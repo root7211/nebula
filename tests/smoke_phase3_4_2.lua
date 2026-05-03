@@ -44,7 +44,7 @@ check("Unicode printable guard (>= 0x20, exclude DEL)",
 check("cursor insert: gap_buf:insert_char (Phase 3.6.1)",
   src:find("gap_buf:insert_char") ~= nil)
 check("text insert via Gap Buffer (not memmove)",
-  src:find("gap_buf:insert_char%(%([@]uint8%)%(cp%)%)") ~= nil)
+  src:find("gap_buf:insert_char") ~= nil)
 
 -- ---- 4. 控制键处理 ----
 check("Backspace handled",

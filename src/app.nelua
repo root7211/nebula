@@ -91,6 +91,14 @@ global function _nebula_key_callback(
     elseif key == 86 then nk = NebulaKey.Paste     -- Ctrl+V (GLFW_KEY_V = 86)
     elseif key == 88 then nk = NebulaKey.Cut       -- Ctrl+X (GLFW_KEY_X = 88)
     elseif key == 65 then nk = NebulaKey.SelectAll -- Ctrl+A (GLFW_KEY_A = 65)
+    -- ★ Phase 4.7-S5: Undo/Redo
+    elseif key == 90 then                          -- Ctrl+Z (GLFW_KEY_Z = 90)
+      if shift_down then
+        nk = NebulaKey.Redo                        -- Ctrl+Shift+Z = Redo
+      else
+        nk = NebulaKey.Undo                        -- Ctrl+Z = Undo
+      end
+    elseif key == 89 then nk = NebulaKey.Redo      -- Ctrl+Y (GLFW_KEY_Y = 89)
     end
   end
 

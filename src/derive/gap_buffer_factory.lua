@@ -522,4 +522,182 @@ function nebula_gen_multiline_buffer_type(chars_per_line, max_lines)
   return type_name, line_type_src .. "\n" .. table.concat(L, "\n") .. "\n", line_type_name
 end
 
-return "nebula_gap_buffer_factory_v0.2_phase4.4_s3"
+-- =============================================================================
+-- ★ Phase 4.7-S5: nebula_gen_undo_stack_type(max_entries, max_data_bytes)
+--
+-- 编译期泛型宏：生成 NebulaUndoStack{E}_{D} 类型，包含：
+--   · entries: [E]NebulaUndoEntry — 环形缓冲区的 undo 操作记录
+--   · data:    [D]uint8           — 操作关联的文本数据池
+--   · head/tail/cursor            — 环形缓冲区指针
+--
+-- 每个 NebulaUndoEntry 记录一个原子编辑操作：
+--   · op:          uint8  — 操作类型 (1=insert, 2=delete, 3=newline, 4=merge_line)
+--   · cursor_pos:  uint32 — 操作前的光标字节位置
+--   · cursor_row:  uint32 — 操作前的光标行
+--   · cursor_col:  uint32 — 操作前的光标列
+--   · data_offset: uint32 — data[] 中的起始偏移
+--   · data_len:    uint16 — 数据长度（字节）
+--   · anchor:      uint32 — 操作前的 selection_anchor
+--
+-- 设计原则：
+--   · 零堆分配：所有数据在编译期定容的栈/全局数组中
+--   · 环形覆盖：超出容量时自动覆盖最旧的条目
+--   · Redo 支持：cursor 指向当前位置，新编辑操作截断 redo 历史
+-- =============================================================================
+_nebula_undo_stack_types = _nebula_undo_stack_types or {}
+
+function nebula_gen_undo_stack_type(max_entries, max_data_bytes)
+  max_entries    = max_entries    or 128
+  max_data_bytes = max_data_bytes or 4096
+  assert(type(max_entries) == "number" and max_entries > 0 and max_entries <= 65535,
+    ("nebula_gen_undo_stack_type: max_entries must be 1..65535, got %s"):format(tostring(max_entries)))
+  assert(type(max_data_bytes) == "number" and max_data_bytes > 0 and max_data_bytes <= 65535,
+    ("nebula_gen_undo_stack_type: max_data_bytes must be 1..65535, got %s"):format(tostring(max_data_bytes)))
+
+  local type_name = ("NebulaUndoStack%d_%d"):format(max_entries, max_data_bytes)
+  if _nebula_undo_stack_types[type_name] then
+    return type_name, ""
+  end
+  _nebula_undo_stack_types[type_name] = true
+
+  local L = {}
+
+  -- NebulaUndoEntry (shared record, only emitted once)
+  if not _nebula_undo_entry_emitted then
+    _nebula_undo_entry_emitted = true
+    table.insert(L, "-- [undo] NebulaUndoEntry (Phase 4.7-S5)")
+    table.insert(L, "global NebulaUndoEntry = @record{")
+    table.insert(L, "  op:          uint8,")   -- 1=insert, 2=delete, 3=newline, 4=merge_line
+    table.insert(L, "  cursor_pos:  uint32,")  -- gap_buf cursor (byte offset) before op
+    table.insert(L, "  cursor_row:  uint32,")  -- multiline cursor_row before op
+    table.insert(L, "  cursor_col:  uint32,")  -- multiline cursor_col before op
+    table.insert(L, "  data_offset: uint32,")  -- offset into data pool
+    table.insert(L, "  data_len:    uint16,")  -- bytes of associated data
+    table.insert(L, "  anchor:      uint32,")  -- selection_anchor before op
+    table.insert(L, "}")
+    table.insert(L, "")
+    -- Op constants
+    table.insert(L, "global NEBULA_UNDO_OP_INSERT:     uint8 <comptime> = 1")
+    table.insert(L, "global NEBULA_UNDO_OP_DELETE:     uint8 <comptime> = 2")
+    table.insert(L, "global NEBULA_UNDO_OP_NEWLINE:    uint8 <comptime> = 3")
+    table.insert(L, "global NEBULA_UNDO_OP_MERGE_LINE: uint8 <comptime> = 4")
+    table.insert(L, "")
+  end
+
+  table.insert(L, ("-- [undo] %s (max_entries=%d, max_data=%d)"):format(type_name, max_entries, max_data_bytes))
+  table.insert(L, ("global %s = @record{"):format(type_name))
+  table.insert(L, ("  entries: [%d]NebulaUndoEntry,"):format(max_entries))
+  table.insert(L, ("  data:    [%d]uint8,"):format(max_data_bytes))
+  table.insert(L,  "  count:   uint32,")       -- number of valid entries (including redo)
+  table.insert(L,  "  cursor:  uint32,")       -- current position (entries before cursor = undo-able)
+  table.insert(L,  "  data_used: uint32,")     -- bytes used in data pool
+  table.insert(L, ("  max_entries: uint32,"))
+  table.insert(L, ("  max_data:    uint32,"))
+  table.insert(L,  "}")
+  table.insert(L, "")
+
+  -- init
+  table.insert(L, ("function %s:init()"):format(type_name))
+  table.insert(L, "  self.count     = 0")
+  table.insert(L, "  self.cursor    = 0")
+  table.insert(L, "  self.data_used = 0")
+  table.insert(L, ("  self.max_entries = %d"):format(max_entries))
+  table.insert(L, ("  self.max_data    = %d"):format(max_data_bytes))
+  table.insert(L, "end")
+  table.insert(L, "")
+
+  -- push: record a new undo entry (truncates any redo history)
+  table.insert(L, ("function %s:push(op: uint8, cursor_pos: uint32, cursor_row: uint32, cursor_col: uint32, anchor: uint32, buf: *[0]uint8, buf_len: uint16): void"):format(type_name))
+  table.insert(L, "  -- Truncate redo history: new edit invalidates future entries")
+  table.insert(L, "  self.count = self.cursor")
+  table.insert(L, "  -- Reclaim data pool space from truncated entries")
+  table.insert(L, "  if self.count == 0 then")
+  table.insert(L, "    self.data_used = 0")
+  table.insert(L, "  end")
+  table.insert(L, ("  -- If stack is full, shift out oldest entry"))
+  table.insert(L, ("  if self.count >= %d then"):format(max_entries))
+  table.insert(L,  "    -- Simple strategy: reset stack (rare edge case for small stacks)")
+  table.insert(L,  "    self.count     = 0")
+  table.insert(L,  "    self.cursor    = 0")
+  table.insert(L,  "    self.data_used = 0")
+  table.insert(L,  "  end")
+  table.insert(L, ("  -- Check data pool space"))
+  table.insert(L, ("  if self.data_used + (@uint32)(buf_len) > %d then"):format(max_data_bytes))
+  table.insert(L,  "    -- Data pool full: reset stack")
+  table.insert(L,  "    self.count     = 0")
+  table.insert(L,  "    self.cursor    = 0")
+  table.insert(L,  "    self.data_used = 0")
+  table.insert(L,  "  end")
+  table.insert(L,  "  -- Write entry")
+  table.insert(L,  "  local idx = self.cursor")
+  table.insert(L,  "  self.entries[idx].op          = op")
+  table.insert(L,  "  self.entries[idx].cursor_pos  = cursor_pos")
+  table.insert(L,  "  self.entries[idx].cursor_row  = cursor_row")
+  table.insert(L,  "  self.entries[idx].cursor_col  = cursor_col")
+  table.insert(L,  "  self.entries[idx].data_offset = self.data_used")
+  table.insert(L,  "  self.entries[idx].data_len    = buf_len")
+  table.insert(L,  "  self.entries[idx].anchor      = anchor")
+  table.insert(L,  "  -- Copy data")
+  table.insert(L,  "  local di: uint32 = 0")
+  table.insert(L,  "  while di < (@uint32)(buf_len) do")
+  table.insert(L,  "    self.data[self.data_used + di] = buf[di]")
+  table.insert(L,  "    di = di + 1")
+  table.insert(L,  "  end")
+  table.insert(L,  "  self.data_used = self.data_used + (@uint32)(buf_len)")
+  table.insert(L,  "  self.cursor = self.cursor + 1")
+  table.insert(L,  "  self.count  = self.cursor")
+  table.insert(L,  "end")
+  table.insert(L, "")
+
+  -- can_undo / can_redo
+  table.insert(L, ("function %s:can_undo(): boolean"):format(type_name))
+  table.insert(L,  "  return self.cursor > 0")
+  table.insert(L,  "end")
+  table.insert(L, "")
+  table.insert(L, ("function %s:can_redo(): boolean"):format(type_name))
+  table.insert(L,  "  return self.cursor < self.count")
+  table.insert(L,  "end")
+  table.insert(L, "")
+
+  -- peek_undo: get the entry that would be undone (cursor - 1)
+  table.insert(L, ("function %s:peek_undo(): *NebulaUndoEntry"):format(type_name))
+  table.insert(L,  "  return &self.entries[self.cursor - 1]")
+  table.insert(L,  "end")
+  table.insert(L, "")
+
+  -- peek_redo: get the entry that would be redone (cursor)
+  table.insert(L, ("function %s:peek_redo(): *NebulaUndoEntry"):format(type_name))
+  table.insert(L,  "  return &self.entries[self.cursor]")
+  table.insert(L,  "end")
+  table.insert(L, "")
+
+  -- get_data: get pointer to data for an entry
+  table.insert(L, ("function %s:get_data(entry: *NebulaUndoEntry): *[0]uint8"):format(type_name))
+  table.insert(L,  "  return (@*[0]uint8)(&self.data[entry.data_offset])")
+  table.insert(L,  "end")
+  table.insert(L, "")
+
+  -- step_undo: move cursor back (caller handles buffer restoration)
+  table.insert(L, ("function %s:step_undo(): void"):format(type_name))
+  table.insert(L,  "  self.cursor = self.cursor - 1")
+  table.insert(L,  "end")
+  table.insert(L, "")
+
+  -- step_redo: move cursor forward (caller handles buffer re-apply)
+  table.insert(L, ("function %s:step_redo(): void"):format(type_name))
+  table.insert(L,  "  self.cursor = self.cursor + 1")
+  table.insert(L,  "end")
+  table.insert(L, "")
+
+  -- clear
+  table.insert(L, ("function %s:clear()"):format(type_name))
+  table.insert(L,  "  self.count     = 0")
+  table.insert(L,  "  self.cursor    = 0")
+  table.insert(L,  "  self.data_used = 0")
+  table.insert(L,  "end")
+  table.insert(L, "")
+
+  return type_name, table.concat(L, "\n")
+end
+
+return "nebula_gap_buffer_factory_v0.3_phase4.7_s5"

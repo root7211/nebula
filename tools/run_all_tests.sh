@@ -194,6 +194,10 @@ run_test "smoke_phase4_7_s4 (Phase 4.7-S4 — 语法高亮架构 & 规则注册 
 run_test "smoke_phase4_5_s2 (Phase 4.5-S2 — 混合管线自动编排 & text_mode 路由 & sugar demo)" \
   nelua-lua tests/smoke_phase4_5_s2.lua
 
+# ★ Phase 4.7-S5: Undo/Redo 架构验证（NebulaKey.Undo/Redo + UndoStack + process_text_input 集成）
+run_test "smoke_phase4_7_s5 (Phase 4.7-S5 — Undo/Redo 架构 & UndoStack & 键映射)" \
+  nelua-lua tests/smoke_phase4_7_s5.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="

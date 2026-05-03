@@ -136,6 +136,9 @@ global NebulaKey = @enum(uint8){
   Paste      = 19,
   Cut        = 20,
   SelectAll  = 21,
+  -- ★ Phase 4.7-S5: Undo/Redo 操作键（Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z）
+  Undo       = 22,
+  Redo       = 23,
 }
 
 -- =============================================================================
@@ -607,7 +610,7 @@ global ClickableState = @record{
 ## 
 ## -- ★ Phase 3.6: 加载 Gap Buffer 工厂模块（使 nebula_gen_gap_buffer_type 在所有 require nebula_core 的文件中可用）
 ## local gap_buffer_factory_mod = require "derive.gap_buffer_factory"
-## assert(gap_buffer_factory_mod == "nebula_gap_buffer_factory_v0.2_phase4.4_s3",
+## assert(gap_buffer_factory_mod == "nebula_gap_buffer_factory_v0.3_phase4.7_s5",
 ##   "nebula: failed to load derive/gap_buffer_factory.lua")
 ##
 ## -- ★ Phase 4.7-S4: 加载语法高亮工厂模块
@@ -863,6 +866,17 @@ global ClickableState = @record{
 ##   for _, f in ipairs(prim_fields) do
 ##     table.insert(lines, ("  %s: %s,"):format(f.name, f.type))
 ##   end
+##   -- ★ Phase 4.7-S5: 动态 context 字段注入（类型依赖编译期参数，如 undo_stack）
+##   local resolved_prims = nebula_resolve_primitives(reg.primitives or {})
+##   for _, prim_name in ipairs(resolved_prims) do
+##     local meta = NEBULA_PRIMITIVES[prim_name]
+##     if meta and meta.dynamic_context_fields then
+##       local dyn_fields = meta.dynamic_context_fields(reg)
+##       for _, f in ipairs(dyn_fields) do
+##         table.insert(lines, ("  %s: %s,"):format(f.name, f.type))
+##       end
+##     end
+##   end
 ##   for _, p in ipairs(all_props) do
 ##     table.insert(lines, ("  current_%s: %s,"):format(p.name, p.type))
 ##   end
@@ -877,6 +891,16 @@ global ClickableState = @record{
 ##   for _, init in ipairs(prim_inits) do
 ##     if init.type == "record_init" then
 ##       table.insert(lines, ("  self.%s = %s{}"):format(init.field, init.record_name))
+##     end
+##   end
+##   -- ★ Phase 4.7-S5: 初始化动态 context 字段（undo_stack）
+##   for _, prim_name in ipairs(resolved_prims) do
+##     local meta = NEBULA_PRIMITIVES[prim_name]
+##     if meta and meta.dynamic_context_fields then
+##       local dyn_fields = meta.dynamic_context_fields(reg)
+##       for _, f in ipairs(dyn_fields) do
+##         table.insert(lines, ("  self.%s:init()"):format(f.name))
+##       end
 ##     end
 ##   end
 ##   -- 用初始状态（states[1]）的视觉值初始化 current_*
@@ -1575,6 +1599,15 @@ global ClickableState = @record{
 ##       for _, stat in ipairs(ast) do inject_statement(stat) end
 ##     end
 ##     print(("[sugar] injected %s (capacity=%d)"):format(buf_type, max_text_len))
+##     -- ★ Phase 4.7-S5: 注入 undo stack 类型
+##     local undo_entries = spec.undo_max_entries or 128
+##     local undo_data    = spec.undo_max_data    or 4096
+##     local undo_type, undo_src = nebula_gen_undo_stack_type(undo_entries, undo_data)
+##     if undo_src and #undo_src > 0 then
+##       local ast = aster.parse(undo_src, "<nebula_inject_buffers:undo:" .. undo_entries .. "_" .. undo_data .. ">")
+##       for _, stat in ipairs(ast) do inject_statement(stat) end
+##     end
+##     print(("[sugar] injected %s (entries=%d, data=%d)"):format(undo_type, undo_entries, undo_data))
 ##   end
 ##
 ##   if has_prim["multiline_editable"] then
