@@ -67,8 +67,8 @@ check("GLFW_KEY_Z = 90 used for Ctrl+Z",
 -- ---- 3. gap_buffer_factory 版本 + undo stack 生成 ----
 print("")
 print("--- 3. Undo Stack Type Generation ---")
-check("gap_buffer_factory version updated to v0.3",
-  gbf_src:find("v0.3_phase4.7_s5") ~= nil)
+check("gap_buffer_factory version updated to v0.4",
+  gbf_src:find("v0.4_phase4.7_s6") ~= nil)
 check("nebula_gen_undo_stack_type function exists",
   gbf_src:find("function nebula_gen_undo_stack_type") ~= nil)
 check("NebulaUndoEntry record generated",

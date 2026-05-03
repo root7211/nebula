@@ -610,7 +610,7 @@ global ClickableState = @record{
 ## 
 ## -- ★ Phase 3.6: 加载 Gap Buffer 工厂模块（使 nebula_gen_gap_buffer_type 在所有 require nebula_core 的文件中可用）
 ## local gap_buffer_factory_mod = require "derive.gap_buffer_factory"
-## assert(gap_buffer_factory_mod == "nebula_gap_buffer_factory_v0.3_phase4.7_s5",
+## assert(gap_buffer_factory_mod == "nebula_gap_buffer_factory_v0.4_phase4.7_s6",
 ##   "nebula: failed to load derive/gap_buffer_factory.lua")
 ##
 ## -- ★ Phase 4.7-S4: 加载语法高亮工厂模块

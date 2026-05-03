@@ -518,6 +518,100 @@ function nebula_gen_multiline_buffer_type(chars_per_line, max_lines)
   table.insert(L, "end")
   table.insert(L, "")
 
+  -- ★ Phase 4.7-S6: C stdio FFI bindings (emitted once)
+  if not _nebula_stdio_emitted then
+    _nebula_stdio_emitted = true
+    table.insert(L, "-- [file_io] C stdio FFI bindings (Phase 4.7-S6)")
+    table.insert(L, "global FILE <cimport, nodecl> = @record{}")
+    table.insert(L, 'global function fopen(path: cstring, mode: cstring): *FILE <cimport, nodecl> end')
+    table.insert(L, 'global function fclose(fp: *FILE): int32 <cimport, nodecl> end')
+    table.insert(L, 'global function fread(buf: pointer, size: csize, count: csize, fp: *FILE): csize <cimport, nodecl> end')
+    table.insert(L, 'global function fwrite(buf: pointer, size: csize, count: csize, fp: *FILE): csize <cimport, nodecl> end')
+    table.insert(L, 'global function fseek(fp: *FILE, offset: clong, whence: int32): int32 <cimport, nodecl> end')
+    table.insert(L, 'global function ftell(fp: *FILE): clong <cimport, nodecl> end')
+    table.insert(L, "")
+  end
+
+  -- ★ Phase 4.7-S6: save_file — 将多行缓冲区内容保存到文件
+  -- 使用 flatten_lines 序列化后一次性写入
+  table.insert(L, ("-- [file_io] %s:save_file (Phase 4.7-S6)"):format(type_name))
+  table.insert(L, ("function %s:save_file(path: cstring): boolean"):format(type_name))
+  table.insert(L, '  local fp = fopen(path, "wb")')
+  table.insert(L, "  if fp == nilptr then return false end")
+  -- 分配足够大的临时缓冲区来装所有行
+  -- max_out = max_lines * (chars_per_line + 1) 保证足够
+  local max_flat = max_lines * (chars_per_line + 1)
+  if max_flat > 65535 then max_flat = 65535 end
+  table.insert(L, ("  local tmp: [%d]uint8"):format(max_flat))
+  table.insert(L, ("  local n = self:flatten_lines(&tmp[0], %d)"):format(max_flat - 1))
+  table.insert(L, "  if n > 0 then")
+  table.insert(L, "    fwrite(&tmp[0], 1, (@csize)(n), fp)")
+  table.insert(L, "  end")
+  table.insert(L, "  -- 末尾添加换行符（POSIX convention）")
+  table.insert(L, "  local nl: uint8 = 10")
+  table.insert(L, "  fwrite(&nl, 1, 1, fp)")
+  table.insert(L, "  fclose(fp)")
+  table.insert(L, "  return true")
+  table.insert(L, "end")
+  table.insert(L, "")
+
+  -- ★ Phase 4.7-S6: load_file — 从文件加载内容到多行缓冲区
+  -- 流程：fread 整个文件 → 按 \n 分行 → clear() → 逐字节 insert_char
+  table.insert(L, ("-- [file_io] %s:load_file (Phase 4.7-S6)"):format(type_name))
+  table.insert(L, ("function %s:load_file(path: cstring): boolean"):format(type_name))
+  table.insert(L, '  local fp = fopen(path, "rb")')
+  table.insert(L, "  if fp == nilptr then return false end")
+  -- 获取文件大小
+  table.insert(L, "  fseek(fp, 0, 2)  -- SEEK_END")
+  table.insert(L, "  local file_size = ftell(fp)")
+  table.insert(L, "  fseek(fp, 0, 0)  -- SEEK_SET")
+  table.insert(L, ("  if file_size <= 0 then"))
+  table.insert(L, "    fclose(fp)")
+  table.insert(L, "    self:clear()")
+  table.insert(L, "    return true")
+  table.insert(L, "  end")
+  -- 限制可读取的最大字节数
+  table.insert(L, ("  local max_bytes: clong = %d"):format(max_flat))
+  table.insert(L, "  if file_size > max_bytes then file_size = max_bytes end")
+  table.insert(L, ("  local buf: [%d]uint8"):format(max_flat))
+  table.insert(L, "  local read_n = fread(&buf[0], 1, (@csize)(file_size), fp)")
+  table.insert(L, "  fclose(fp)")
+  -- 清空当前内容
+  table.insert(L, "  self:clear()")
+  table.insert(L, "  self.lines[0]:clear()")
+  -- 按字节遍历，遇到 \n 就 insert_newline
+  table.insert(L, "  local row: uint32 = 0")
+  table.insert(L, "  local bi: csize = 0")
+  table.insert(L, "  while bi < read_n do")
+  table.insert(L, "    local ch = buf[bi]")
+  table.insert(L, "    if ch == 10 then  -- newline")
+  table.insert(L, ("      if row + 1 < %d then"):format(max_lines))
+  table.insert(L, "        row = row + 1")
+  table.insert(L, "        self.line_count = self.line_count + 1")
+  table.insert(L, "        self.lines[row]:clear()")
+  table.insert(L, "      end")
+  table.insert(L, "    elseif ch ~= 13 then  -- skip CR (handle CRLF)")
+  table.insert(L, "      self.lines[row]:insert_char(ch)")
+  table.insert(L, "    end")
+  table.insert(L, "    bi = bi + 1")
+  table.insert(L, "  end")
+  -- 如果文件以换行结尾，最后一个空行是多余的——去掉它
+  -- （除非文件只有一个换行）
+  table.insert(L, "  -- Strip trailing empty line from POSIX newline")
+  table.insert(L, "  if self.line_count > 1 and self.lines[self.line_count - 1]:len() == 0 then")
+  table.insert(L, "    -- Check if last byte was newline")
+  table.insert(L, "    if read_n > 0 and buf[read_n - 1] == 10 then")
+  table.insert(L, "      self.line_count = self.line_count - 1")
+  table.insert(L, "    end")
+  table.insert(L, "  end")
+  -- 重置光标到文件开头
+  table.insert(L, "  self.cursor_row = 0")
+  table.insert(L, "  self.cursor_col = 0")
+  table.insert(L, "  self.lines[0]:move_cursor_home()")
+  table.insert(L, "  return true")
+  table.insert(L, "end")
+  table.insert(L, "")
+
   -- 行 buffer 类型定义必须在多行类型之前（dependency ordering）
   return type_name, line_type_src .. "\n" .. table.concat(L, "\n") .. "\n", line_type_name
 end
@@ -700,4 +794,4 @@ function nebula_gen_undo_stack_type(max_entries, max_data_bytes)
   return type_name, table.concat(L, "\n")
 end
 
-return "nebula_gap_buffer_factory_v0.3_phase4.7_s5"
+return "nebula_gap_buffer_factory_v0.4_phase4.7_s6"

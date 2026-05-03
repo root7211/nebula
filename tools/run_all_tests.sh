@@ -198,6 +198,10 @@ run_test "smoke_phase4_5_s2 (Phase 4.5-S2 — 混合管线自动编排 & text_mo
 run_test "smoke_phase4_7_s5 (Phase 4.7-S5 — Undo/Redo 架构 & UndoStack & 键映射)" \
   nelua-lua tests/smoke_phase4_7_s5.lua
 
+# ★ Phase 4.7-S6: File I/O 架构验证（load_file/save_file + C stdio FFI + roundtrip）
+run_test "smoke_phase4_7_s6 (Phase 4.7-S6 — File I/O & load_file/save_file & C stdio FFI)" \
+  nelua-lua tests/smoke_phase4_7_s6.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="
