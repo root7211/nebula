@@ -1,5 +1,5 @@
 -- =============================================================================
--- derive/app_factory.lua — Nebula GUI Compiler Phase 4.7-S2
+-- derive/app_factory.lua — Nebula GUI Compiler Phase 4.7-S3
 --
 -- 编译期显式编排工厂（App Factory）
 -- 生成 <App> record + init + update + draw
@@ -20,6 +20,10 @@
 --     · App:init 自动初始化 DenseText 管线 + 加载/绑定 SDF atlas
 --     · App:draw 调用 Producer 函数填充 DenseCharInstance → upload → draw
 --     · App:deinit 释放 DenseText 管线 GPU 资源
+-- ★ Phase 4.7-S3 新增：
+--   · nebula_app_register_dense_text 扩展：opts.layout 字段携带布局约束
+--   · DenseText 组件参与 Flexbox 布局解算（行号栏 + 编辑区并排）
+--   · layout_engine 扩展：flex_grow + flex_basis（固定宽度列 + 弹性列）
 -- ★ Phase 3.11 新增（原语 7：Layout-App 桥接）：
 --   · nebula_app_set_root_layout(app_name, spec) — 声明根节点布局约束
 --   · nebula_app_register_component 扩展：opts.layout 字段携带布局约束
@@ -318,6 +322,7 @@ function nebula_app_register_dense_text(name, visual_type, opts)
     cell_w      = opts.cell_w or 10.0,
     cell_h      = opts.cell_h or 16.0,
     producer    = opts.producer,
+    layout      = opts.layout or nil,  -- ★ Phase 4.7-S3: 布局约束
   })
 end
 
@@ -331,9 +336,11 @@ local function _build_layout_node(name, layout_spec)
     align     = layout_spec.align,
     padding   = layout_spec.padding,
     gap       = layout_spec.gap,
-    width     = layout_spec.width,
-    height    = layout_spec.height,
-    children  = {},
+    width      = layout_spec.width,
+    height     = layout_spec.height,
+    flex_grow  = layout_spec.flex_grow,    -- ★ Phase 4.7-S3
+    flex_basis = layout_spec.flex_basis,   -- ★ Phase 4.7-S3
+    children   = {},
   }
   -- 递归处理子节点
   if layout_spec.children then
@@ -373,6 +380,12 @@ local function _solve_layout(reg)
   for _, comp in ipairs(reg.components) do
     if comp.layout then
       table.insert(root_spec.children, _build_layout_node(comp.name, comp.layout))
+    end
+  end
+  -- ★ Phase 4.7-S3: DenseText 组件参与布局
+  for _, dt in ipairs(reg.dense_texts) do
+    if dt.layout then
+      table.insert(root_spec.children, _build_layout_node(dt.name, dt.layout))
     end
   end
 
@@ -486,6 +499,22 @@ local function gen_app_record(app_name, reg)
       emit(("  pipe_dense_%s: %sDenseTextPipeline,"):format(dt.name, dt.base))
       emit(("  _dense_%s_buf: [%d]DenseCharInstance,"):format(dt.name, dt.max_chars))
     end
+    -- ★ Phase 4.7-S3: 布局坐标字段（供 Producer 读取位置信息）
+    local has_layout = false
+    for _, dt in ipairs(reg.dense_texts) do
+      if dt.layout then has_layout = true; break end
+    end
+    if has_layout then
+      emit("  -- ★ Phase 4.7-S3: DenseText 布局坐标（供 Producer 定位）")
+      for _, dt in ipairs(reg.dense_texts) do
+        if dt.layout then
+          emit(("  dense_layout_%s_x: float32,"):format(dt.name))
+          emit(("  dense_layout_%s_y: float32,"):format(dt.name))
+          emit(("  dense_layout_%s_w: float32,"):format(dt.name))
+          emit(("  dense_layout_%s_h: float32,"):format(dt.name))
+        end
+      end
+    end
   end
 
   emit("")
@@ -591,6 +620,20 @@ local function gen_app_init(app_name, reg)
       emit(("  self.pipe_dense_%s:update_viewport(renderer, vw, vh, %.1f, %.1f)"):format(
         dt.name, dt.cell_w, dt.cell_h))
     end
+    -- ★ Phase 4.7-S3: 注入 DenseText 布局初始坐标
+    if reg.layout_results then
+      for _, dt in ipairs(reg.dense_texts) do
+        local r = reg.layout_results[dt.name]
+        if r then
+          emit(("  -- ★ Phase 4.7-S3: [layout] %s: pos=(%.1f, %.1f) size=(%.1f x %.1f)"):format(
+            dt.name, r.x, r.y, r.w, r.h))
+          emit(("  self.dense_layout_%s_x = %.1f"):format(dt.name, r.x))
+          emit(("  self.dense_layout_%s_y = %.1f"):format(dt.name, r.y))
+          emit(("  self.dense_layout_%s_w = %.1f"):format(dt.name, r.w))
+          emit(("  self.dense_layout_%s_h = %.1f"):format(dt.name, r.h))
+        end
+      end
+    end
   end
 
   emit("")
@@ -637,6 +680,18 @@ local function gen_app_update(app_name, reg)
           comp.name, r.x, r.y))
         emit(("    self.%s.visual.size = Vec2{ x = %.1f, y = %.1f }"):format(
           comp.name, r.w, r.h))
+      end
+    end
+    -- ★ Phase 4.7-S3: DenseText 延迟布局坐标注入
+    for _, dt in ipairs(reg.dense_texts) do
+      if dt.layout then
+        local r = reg.layout_results[dt.name]
+        if r then
+          emit(("    self.dense_layout_%s_x = %.1f"):format(dt.name, r.x))
+          emit(("    self.dense_layout_%s_y = %.1f"):format(dt.name, r.y))
+          emit(("    self.dense_layout_%s_w = %.1f"):format(dt.name, r.w))
+          emit(("    self.dense_layout_%s_h = %.1f"):format(dt.name, r.h))
+        end
       end
     end
     -- Also inject viewport uniform update for first frame
@@ -782,6 +837,18 @@ local function gen_app_update(app_name, reg)
           emit(("      self.%s.visual.size.y = %.6f * input.viewport_h + %.6f"):format(comp.name, c.ch_vh, c.ch_c))
         end
       end
+      -- ★ Phase 4.7-S3: DenseText 布局系数应用
+      for _, dt in ipairs(reg.dense_texts) do
+        if dt.layout then
+          local c = seg.coeffs[dt.name]
+          if c then
+            emit(("      self.dense_layout_%s_x = %.6f * input.viewport_w + %.6f"):format(dt.name, c.cx_vw, c.cx_c))
+            emit(("      self.dense_layout_%s_y = %.6f * input.viewport_h + %.6f"):format(dt.name, c.cy_vh, c.cy_c))
+            emit(("      self.dense_layout_%s_w = %.6f * input.viewport_w + %.6f"):format(dt.name, c.cw_vw, c.cw_c))
+            emit(("      self.dense_layout_%s_h = %.6f * input.viewport_h + %.6f"):format(dt.name, c.ch_vh, c.ch_c))
+          end
+        end
+      end
     end
 
     -- 生成默认分段（最小视口，即溢出区域）
@@ -797,6 +864,18 @@ local function gen_app_update(app_name, reg)
           emit(("      self.%s.visual.pos.y  = %.6f * input.viewport_h + %.6f"):format(comp.name, c.cy_vh, c.cy_c))
           emit(("      self.%s.visual.size.x = %.6f * input.viewport_w + %.6f"):format(comp.name, c.cw_vw, c.cw_c))
           emit(("      self.%s.visual.size.y = %.6f * input.viewport_h + %.6f"):format(comp.name, c.ch_vh, c.ch_c))
+        end
+      end
+      -- ★ Phase 4.7-S3: DenseText 默认段布局系数
+      for _, dt in ipairs(reg.dense_texts) do
+        if dt.layout then
+          local c = default_seg.coeffs[dt.name]
+          if c then
+            emit(("      self.dense_layout_%s_x = %.6f * input.viewport_w + %.6f"):format(dt.name, c.cx_vw, c.cx_c))
+            emit(("      self.dense_layout_%s_y = %.6f * input.viewport_h + %.6f"):format(dt.name, c.cy_vh, c.cy_c))
+            emit(("      self.dense_layout_%s_w = %.6f * input.viewport_w + %.6f"):format(dt.name, c.cw_vw, c.cw_c))
+            emit(("      self.dense_layout_%s_h = %.6f * input.viewport_h + %.6f"):format(dt.name, c.ch_vh, c.ch_c))
+          end
         end
       end
     end
@@ -1161,4 +1240,4 @@ function nebula_app_generate(app_name)
   return source
 end
 
-return "nebula_app_factory_v0.8_phase4.7-s2"
+return "nebula_app_factory_v0.9_phase4.7-s3"

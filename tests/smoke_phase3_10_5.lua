@@ -283,7 +283,7 @@ print("\n--- 7. 行数收敛验证 ---")
 local factory_lines = count_lines(script_dir .. "/../src/derive/app_factory.lua")
 if factory_lines then
   print(("  app_factory.lua: %d 行"):format(factory_lines))
-  assert_le("app_factory.lua ≤ 1200 行（Phase 4.7-S2 新增 DenseText 编排）", factory_lines, 1200)
+  assert_le("app_factory.lua ≤ 1300 行（Phase 4.7-S3 新增 DenseText 编排）", factory_lines, 1300)
 else
   failed = failed + 1
   print("[FAIL] 无法读取 src/derive/app_factory.lua")

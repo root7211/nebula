@@ -592,13 +592,13 @@ global ClickableState = @record{
 ## 
 ## -- ★ Phase 3.1: 加载编译期布局引擎模块
 ## local layout_engine_mod = require "derive.layout_engine"
-## assert(layout_engine_mod == "nebula_layout_engine_v0.2_phase3.12",
-##   "nebula: failed to load derive/layout_engine.lua")  -- ★ Phase 3.12 升级
-## 
+## assert(layout_engine_mod == "nebula_layout_engine_v0.3_phase4.7-s3",
+##   "nebula: failed to load derive/layout_engine.lua")  -- ★ Phase 4.7-S3 升级
+##
 ## -- ★ Phase 3.5.2: 加载应用编排工厂模块
 ## local app_factory_mod = require "derive.app_factory"
-## assert(app_factory_mod == "nebula_app_factory_v0.8_phase4.7-s2",
-##   "nebula: failed to load derive/app_factory.lua")  -- ★ Phase 4.7-S2 升级
+## assert(app_factory_mod == "nebula_app_factory_v0.9_phase4.7-s3",
+##   "nebula: failed to load derive/app_factory.lua")  -- ★ Phase 4.7-S3 升级
 ## 
 ## -- ★ Phase 4.0: 加载公理校验器模块
 ## local axiom_validator_mod = require "derive.axiom_validator"

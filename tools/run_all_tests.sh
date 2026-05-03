@@ -174,6 +174,10 @@ run_test "smoke_phase4_7_s1 (Phase 4.7-S1 — CJK multiline editable & UTF-8 gap
 run_test "smoke_phase4_7_s2 (Phase 4.7-S2 — DenseText App 编排 & Producer 函数 & 生命周期)" \
   nelua-lua tests/smoke_phase4_7_s2.lua
 
+# ★ Phase 4.7-S3: 行号显示 + 多列布局（flex_grow + flex_basis + DenseText 布局）
+run_test "smoke_phase4_7_s3 (Phase 4.7-S3 — 行号显示 & flex_grow/flex_basis & DenseText 布局)" \
+  nelua-lua tests/smoke_phase4_7_s3.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="
@@ -284,6 +288,13 @@ run_test "compile dense_editor_demo (Phase 4.7-S2 — DenseText editor via App o
   --cflags="-I./vendor/wgpu-native/include" \
   --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
   examples/dense_editor_demo.nelua -o ~/.cache/nelua/dense_editor_demo
+
+# ★ Phase 4.7-S3: editor_with_lines_demo 编译回归（行号栏 + 编辑区多列布局 + 双 DenseText）
+run_test "compile editor_with_lines_demo (Phase 4.7-S3 — line numbers + multi-column DenseText layout)" \
+  nelua -c -L src -L assets/generated --add-path . --add-path examples --add-path assets/generated \
+  --cflags="-I./vendor/wgpu-native/include" \
+  --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
+  examples/editor_with_lines_demo.nelua -o ~/.cache/nelua/editor_with_lines_demo
 
 # ★ Phase 4.2.2 D-4.1-C: Storage Buffer 基础设施静态分析测试
 run_test "smoke_phase4_2_2_bench (Phase 4.2.2 D-4.1-C — Storage Buffer infrastructure audit)" \

@@ -15,6 +15,8 @@
 --   padding      : number | {top, right, bottom, left}
 --   gap          : number  (子元素间距)
 --   width/height : number | nil (nil = 自动)
+--   flex_grow    : number  (弹性增长因子，默认 0)  ★ Phase 4.7-S3
+--   flex_basis   : number | nil (主轴初始尺寸)    ★ Phase 4.7-S3
 --
 -- 公开 API：
 --   nebula_layout_node(spec)          -> node table
@@ -66,6 +68,8 @@ function nebula_layout_node(spec)
     gap        = spec.gap or 0,
     width      = spec.width,      -- nil = auto
     height     = spec.height,     -- nil = auto
+    flex_grow  = spec.flex_grow or 0,   -- ★ Phase 4.7-S3: 弹性增长因子（0 = 不增长）
+    flex_basis = spec.flex_basis,       -- ★ Phase 4.7-S3: 主轴初始尺寸（nil = auto）
     children   = spec.children or {},
     -- 解算结果（由 solve 填充）
     resolved_x = 0,
@@ -104,8 +108,15 @@ local function measure_node(node)
   local total_gap = node.gap * math.max(0, #children - 1)
 
   for _, child in ipairs(children) do
-    local cw = (child.width  or (child.content_w + child.padding.left + child.padding.right))
-    local ch = (child.height or (child.content_h + child.padding.top  + child.padding.bottom))
+    -- ★ Phase 4.7-S3: flex_basis 作为主轴初始尺寸（仅在父节点对应主轴方向生效）
+    local cw, ch
+    if is_row then
+      cw = child.width or child.flex_basis or (child.content_w + child.padding.left + child.padding.right)
+      ch = child.height or (child.content_h + child.padding.top  + child.padding.bottom)
+    else
+      cw = child.width or (child.content_w + child.padding.left + child.padding.right)
+      ch = child.height or child.flex_basis or (child.content_h + child.padding.top  + child.padding.bottom)
+    end
     child._outer_w = cw
     child._outer_h = ch
 
@@ -182,6 +193,23 @@ local function layout_node(node, parent_x, parent_y, avail_w, avail_h)
   local free_space = main_avail - main_total - total_gap
   if free_space < 0 then free_space = 0 end
 
+  -- ★ Phase 4.7-S3: flex_grow 弹性分配（在 justify 之前消耗剩余空间）
+  local grow_extras = {}
+  local total_grow = 0
+  for i, child in ipairs(children) do
+    total_grow = total_grow + (child.flex_grow or 0)
+    grow_extras[i] = 0
+  end
+  if total_grow > 0 and free_space > 0 then
+    for i, child in ipairs(children) do
+      local grow = child.flex_grow or 0
+      if grow > 0 then
+        grow_extras[i] = free_space * grow / total_grow
+      end
+    end
+    free_space = 0  -- flex_grow 消耗所有剩余空间
+  end
+
   -- justify 计算起始偏移和间距
   local main_offset = 0
   local extra_gap = 0
@@ -204,13 +232,13 @@ local function layout_node(node, parent_x, parent_y, avail_w, avail_h)
 
   -- 放置子元素
   local cursor = main_offset
-  for _, child in ipairs(children) do
+  for i, child in ipairs(children) do
     local child_main_size, child_cross_size
     if is_row then
-      child_main_size  = child.width  or child._outer_w or 0
+      child_main_size  = (child.width  or child._outer_w or 0) + grow_extras[i]
       child_cross_size = child.height or child._outer_h or 0
     else
-      child_main_size  = child.height or child._outer_h or 0
+      child_main_size  = (child.height or child._outer_h or 0) + grow_extras[i]
       child_cross_size = child.width  or child._outer_w or 0
     end
 
@@ -218,6 +246,12 @@ local function layout_node(node, parent_x, parent_y, avail_w, avail_h)
     local cross_avail = is_row and ch or cw
     local cross_offset = 0
     local align = node.align
+
+    -- ★ Phase 4.7-S3: 交叉轴自动拉伸——当子节点无显式交叉尺寸时，
+    -- 默认拉伸到可用空间（与 CSS Flexbox align-items:stretch 默认行为一致）
+    if child_cross_size <= 0 and cross_avail > 0 then
+      child_cross_size = cross_avail
+    end
 
     if align == "center" then
       cross_offset = (cross_avail - child_cross_size) / 2
@@ -389,7 +423,13 @@ local function _collect_thresholds(node, thresholds_w, thresholds_h)
     local main_total = 0
     local all_fixed = true
     for _, child in ipairs(children) do
-      local sz = is_row and child.width or child.height
+      -- ★ Phase 4.7-S3: flex_basis 作为固定尺寸参与临界点计算
+      local sz
+      if is_row then
+        sz = child.width or child.flex_basis
+      else
+        sz = child.height or child.flex_basis
+      end
       if sz then
         main_total = main_total + sz
       else
@@ -576,4 +616,4 @@ function nebula_layout_derive_segments(root_spec, base_w, base_h)
 end
 
 -- 返回模块标识
-return "nebula_layout_engine_v0.2_phase3.12"
+return "nebula_layout_engine_v0.3_phase4.7-s3"

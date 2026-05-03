@@ -50,8 +50,8 @@ check("nebula_app_end exists",
 check("nebula_app_generate exists",
   type(nebula_app_generate) == "function")
 
-check("app_factory version >= v0.8",
-  app_factory_ver and app_factory_ver:find("v0.8") ~= nil)
+check("app_factory version >= v0.9",
+  app_factory_ver and app_factory_ver:find("v0.9") ~= nil)
 
 -- =============================================================================
 -- 2. 注册 API 基础校验

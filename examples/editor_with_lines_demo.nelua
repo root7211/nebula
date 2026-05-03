@@ -1,0 +1,551 @@
+-- =============================================================================
+-- editor_with_lines_demo.nelua
+-- Nebula GUI Compiler — Phase 4.7-S3
+--
+-- 行号栏 + 编辑区并排渲染演示（多列布局 + 双 DenseText 管线）：
+--   · 验证 layout_engine flex_basis（固定宽度行号栏）+ flex_grow（弹性编辑区）
+--   · 验证同一 App 内两个 DenseText 管线实例共存无 GPU 资源冲突
+--   · 验证 DenseText 组件参与 Flexbox 布局（layout 坐标由 App 注入）
+--   · 验证行号与编辑区滚动同步
+--
+-- 渲染架构：
+--   · standard_instanced 管线：编辑器背景框（全窗口圆角矩形）
+--   · DenseText 管线 1（line_nums）：行号栏（固定宽度，只读）
+--   · DenseText 管线 2（edit_area）：编辑区（弹性宽度，可交互）
+--   · 三条管线由 App 编排层自动管理
+--
+-- 对 Phase 4.5 的输入：
+--   暴露 nebula_app_set_root_layout 对多列布局的真实 API 需求
+-- =============================================================================
+## cinclude "<stdio.h>"
+## cinclude "<string.h>"
+
+require "nebula_core"
+require "glfw_bindings"
+require "wgpu_bindings"
+require "renderer"
+require "app"
+require "text_runtime"
+require "nebula_cursor"
+require "nebula_arena"
+
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+global function snprintf(buf: cstring, size: csize, fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+
+local WIN_W <comptime> = 1280
+local WIN_H <comptime> = 800
+
+-- 行号栏参数
+local LINENUM_COLS <comptime> = 5     -- 行号列宽（含右侧分隔符）
+local LINENUM_CELL_W <comptime> = 10.0
+local LINENUM_CELL_H <comptime> = 16.0
+local LINENUM_MAX_CHARS <comptime> = LINENUM_COLS * 50  -- 250
+
+-- 编辑区参数
+local EDIT_COLS <comptime> = 120
+local EDIT_ROWS <comptime> = 50
+local EDIT_CELL_W <comptime> = 10.0
+local EDIT_CELL_H <comptime> = 16.0
+local EDIT_MAX_CHARS <comptime> = EDIT_COLS * EDIT_ROWS  -- 6000
+
+-- =============================================================================
+-- 编译期类型注入
+-- =============================================================================
+##[[ local _mb_type, _mb_src = nebula_gen_multiline_buffer_type(128, 32) ]]
+##[[ for _, _s in ipairs(aster.parse(_mb_src, "<multiline_buffer:128_32>")) do inject_statement(_s) end ]]
+##[[ local _gb_type, _gb_src = nebula_gen_gap_buffer_type(128) ]]
+##[[ for _, _s in ipairs(aster.parse(_gb_src, "<gap_buffer:128>")) do inject_statement(_s) end ]]
+
+-- =============================================================================
+-- EditorBgVisual — 编辑器背景框（standard_instanced 管线）
+-- =============================================================================
+global EditorBgVisual = @record{
+  pos:    Vec2,
+  size:   Vec2,
+  radius: float32,
+
+  default_bg_color:     Color,
+  default_border_color: Color,
+  default_border_width: float32,
+
+  hovered_bg_color:     Color,
+  hovered_border_color: Color,
+  hovered_border_width: float32,
+
+  pressed_bg_color:     Color,
+  pressed_border_color: Color,
+  pressed_border_width: float32,
+
+  -- Text properties
+  pixel_height: float32,
+  text_origin_x: float32,
+
+  -- Scrollable container
+  content_height: float32,
+
+  -- 多行 buffer
+  multi_buf: NebulaMultiBuf128_32,
+  gap_buf: NebulaBuf128,
+}
+
+##[[
+nebula_annotate("EditorBgVisual", {
+  states     = {"default", "hovered", "focused", "dragging", "draggingbar"},
+  primitives = {"hoverable", "clickable", "focusable", "editable", "scrollable", "multiline_editable"},
+  transitions = {
+    {from="default",      to="hovered",      on="hover_enter"},
+    {from="hovered",      to="default",      on="hover_leave"},
+    {from="hovered",      to="focused",      on="focus"},
+    {from="focused",      to="hovered",      on="blur"},
+    {from="focused",      to="dragging",     on="drag_start"},
+    {from="dragging",     to="focused",      on="drag_end"},
+    {from="default",      to="draggingbar",  on="scrollbar_drag"},
+    {from="hovered",      to="draggingbar",  on="scrollbar_drag"},
+    {from="focused",      to="draggingbar",  on="scrollbar_drag"},
+    {from="draggingbar",  to="focused",      on="scrollbar_release"},
+    {from="draggingbar",  to="hovered",      on="scrollbar_release"},
+    {from="draggingbar",  to="default",      on="scrollbar_release"},
+  },
+  max_text_len = 128,
+  max_lines = 32,
+  component_id = 1,
+})
+]]
+## nebula_derive("EditorBgVisual")
+
+-- =============================================================================
+-- LineNumDenseVisual — 行号栏 DenseText 管线生成用 Visual
+-- =============================================================================
+global LineNumDenseVisual = @record{
+  pos: Vec2,
+  size: Vec2,
+}
+##[[
+nebula_annotate("LineNumDenseVisual", {
+  states = {"default"},
+  primitives = {},
+  transitions = {},
+  text_mode = "dense",
+  max_chars = 1024,
+})
+]]
+## nebula_derive("LineNumDenseVisual")
+
+-- =============================================================================
+-- EditAreaDenseVisual — 编辑区 DenseText 管线生成用 Visual
+-- =============================================================================
+global EditAreaDenseVisual = @record{
+  pos: Vec2,
+  size: Vec2,
+}
+##[[
+nebula_annotate("EditAreaDenseVisual", {
+  states = {"default"},
+  primitives = {},
+  transitions = {},
+  text_mode = "dense",
+  max_chars = 8192,
+})
+]]
+## nebula_derive("EditAreaDenseVisual")
+
+-- =============================================================================
+-- 颜色辅助
+-- =============================================================================
+local function _fg_normal(): uint32
+  return nebula_pack_rgba8(210, 210, 220, 255)
+end
+local function _bg_normal(): uint32
+  return nebula_pack_rgba8(22, 22, 30, 255)
+end
+local function _bg_linenum(): uint32
+  return nebula_pack_rgba8(28, 28, 38, 255)
+end
+local function _fg_linenum(): uint32
+  return nebula_pack_rgba8(90, 90, 110, 255)
+end
+local function _fg_separator(): uint32
+  return nebula_pack_rgba8(50, 50, 70, 255)
+end
+local function _bg_cursor_line(): uint32
+  return nebula_pack_rgba8(35, 35, 50, 255)
+end
+local function _bg_cursor(): uint32
+  return nebula_pack_rgba8(200, 200, 230, 255)
+end
+local function _fg_cursor(): uint32
+  return nebula_pack_rgba8(22, 22, 30, 255)
+end
+
+-- =============================================================================
+-- ★ Phase 4.7-S3: 行号 Producer（只读 DenseText）
+-- 从 app.editor 读取滚动偏移和行数，渲染行号列
+-- =============================================================================
+global function fill_line_nums(
+  app: auto,
+  instances: *[0]DenseCharInstance,
+  count: *uint32,
+  max: uint32
+): void
+  local editor = &app.editor
+  local mb = &editor.visual.multi_buf
+  local origin_x: float32 = app.dense_layout_line_nums_x
+  local origin_y: float32 = app.dense_layout_line_nums_y + 4.0
+  local idx: uint32 = 0
+
+  -- 滚动偏移（逐行滚动，与编辑区同步）
+  local scroll_row: uint32 = (@uint32)(editor.scroll_offset_y / (LINENUM_CELL_H + 2.0))
+  local visible_rows: uint32 = EDIT_ROWS
+
+  local row: uint32 = 0
+  while row < visible_rows and idx < max do
+    local buf_row = row + scroll_row
+    local is_cursor_line = (buf_row == editor.cursor_row)
+    local bg = is_cursor_line and _bg_cursor_line() or _bg_linenum()
+
+    if buf_row < mb.line_count then
+      -- 渲染行号（右对齐，4 位数字 + 分隔符）
+      local num = buf_row + 1
+      local d3 = num / 1000
+      local d2 = (num % 1000) / 100
+      local d1 = (num % 100) / 10
+      local d0 = num % 10
+      local num_chars: [4]uint32 = {
+        d3 > 0 and (48 + d3) or 32,
+        (d3 > 0 or d2 > 0) and (48 + d2) or 32,
+        (d3 > 0 or d2 > 0 or d1 > 0) and (48 + d1) or 32,
+        48 + d0
+      }
+      -- 4 数字列
+      local nc: uint32 = 0
+      while nc < 4 and idx < max do
+        nebula_dense_grid_fill_instance(
+          &instances[idx], row, nc,
+          num_chars[nc], origin_x, origin_y,
+          LINENUM_CELL_W, LINENUM_CELL_H, _fg_linenum(), bg
+        )
+        idx = idx + 1
+        nc = nc + 1
+      end
+      -- 分隔符 '│' → ASCII 124 '|'
+      if idx < max then
+        nebula_dense_grid_fill_instance(
+          &instances[idx], row, 4,
+          124, origin_x, origin_y,
+          LINENUM_CELL_W, LINENUM_CELL_H, _fg_separator(), bg
+        )
+        idx = idx + 1
+      end
+    else
+      -- 空行：波浪号 + 分隔符
+      local nc: uint32 = 0
+      while nc < 4 and idx < max do
+        nebula_dense_grid_fill_instance(
+          &instances[idx], row, nc,
+          nc == 0 and 126 or 32, origin_x, origin_y,
+          LINENUM_CELL_W, LINENUM_CELL_H, _fg_linenum(), _bg_linenum()
+        )
+        idx = idx + 1
+        nc = nc + 1
+      end
+      if idx < max then
+        nebula_dense_grid_fill_instance(
+          &instances[idx], row, 4,
+          124, origin_x, origin_y,
+          LINENUM_CELL_W, LINENUM_CELL_H, _fg_separator(), _bg_linenum()
+        )
+        idx = idx + 1
+      end
+    end
+
+    row = row + 1
+  end
+
+  $count = idx
+end
+
+-- =============================================================================
+-- ★ Phase 4.7-S3: 编辑区 Producer（可交互 DenseText）
+-- 从 app.editor 读取文本内容和光标位置，渲染编辑区
+-- =============================================================================
+global function fill_edit_area(
+  app: auto,
+  instances: *[0]DenseCharInstance,
+  count: *uint32,
+  max: uint32
+): void
+  local editor = &app.editor
+  local mb = &editor.visual.multi_buf
+  local origin_x: float32 = app.dense_layout_edit_area_x
+  local origin_y: float32 = app.dense_layout_edit_area_y + 4.0
+  local idx: uint32 = 0
+
+  local scroll_row: uint32 = (@uint32)(editor.scroll_offset_y / (EDIT_CELL_H + 2.0))
+  local visible_rows: uint32 = EDIT_ROWS
+
+  local row: uint32 = 0
+  while row < visible_rows and idx < max do
+    local buf_row = row + scroll_row
+    local is_cursor_line = (buf_row == editor.cursor_row)
+    local bg = is_cursor_line and _bg_cursor_line() or _bg_normal()
+
+    if buf_row < mb.line_count then
+      local line = mb:get_line(buf_row)
+      local flat: [256]uint8
+      local line_len = line:flatten(&flat[0], 255)
+
+      local cursor_byte: int32 = -1
+      if is_cursor_line then
+        cursor_byte = (@int32)(editor.cursor_col)
+      end
+
+      local byte_i: uint32 = 0
+      local col: uint32 = 0
+      while col < EDIT_COLS and idx < max do
+        local ch: uint32 = 32
+        local fg = _fg_normal()
+        local this_bg = bg
+
+        if byte_i < line_len then
+          ch = (@uint32)(flat[byte_i])
+          if ch >= 0xC0 and ch <= 0xDF then
+            ch = 0x3F; byte_i = byte_i + 1
+          elseif ch >= 0xE0 and ch <= 0xEF then
+            ch = 0x3F; byte_i = byte_i + 2
+          elseif ch >= 0xF0 then
+            ch = 0x3F; byte_i = byte_i + 3
+          end
+          byte_i = byte_i + 1
+        end
+
+        if cursor_byte >= 0 and (@uint32)(cursor_byte) == byte_i - 1 then
+          this_bg = _bg_cursor()
+          fg = _fg_cursor()
+        end
+
+        nebula_dense_grid_fill_instance(
+          &instances[idx], row, col,
+          ch, origin_x, origin_y,
+          EDIT_CELL_W, EDIT_CELL_H, fg, this_bg
+        )
+        idx = idx + 1
+        col = col + 1
+      end
+
+      -- 行尾空白填充
+      while col < EDIT_COLS and idx < max do
+        local this_bg = bg
+        if cursor_byte >= 0 and byte_i == line_len and col == byte_i then
+          this_bg = _bg_cursor()
+        end
+        nebula_dense_grid_fill_instance(
+          &instances[idx], row, col,
+          32, origin_x, origin_y,
+          EDIT_CELL_W, EDIT_CELL_H, _fg_normal(), this_bg
+        )
+        idx = idx + 1
+        col = col + 1
+      end
+    else
+      -- 无内容行
+      local col: uint32 = 0
+      while col < EDIT_COLS and idx < max do
+        nebula_dense_grid_fill_instance(
+          &instances[idx], row, col,
+          32, origin_x, origin_y,
+          EDIT_CELL_W, EDIT_CELL_H, _fg_normal(), _bg_normal()
+        )
+        idx = idx + 1
+        col = col + 1
+      end
+    end
+
+    row = row + 1
+  end
+
+  $count = idx
+end
+
+-- =============================================================================
+-- ★ Phase 4.7-S3: App 编排声明
+-- 行号栏（flex_basis=50px 固定宽度）+ 编辑区（flex_grow=1 弹性宽度）
+-- 两个 DenseText 管线由 App 自动管理
+-- =============================================================================
+##[[
+  -- ★ Phase 4.7-S3: 根布局 = row 方向（行号 | 编辑区）
+  nebula_app_set_root_layout("EditorWithLinesApp", {
+    direction = "row",
+    width = 1280,
+    height = 800,
+  })
+
+  nebula_app_begin("EditorWithLinesApp")
+    -- 背景框
+    nebula_app_register_component("editor", "EditorBgVisual")
+
+    -- 行号栏（固定宽度 = 5 cols × 10px = 50px）
+    nebula_app_register_dense_text("line_nums", "LineNumDenseVisual", {
+      max_chars = 250,
+      cell_w = 10.0,
+      cell_h = 16.0,
+      producer = "fill_line_nums",
+      layout = { flex_basis = 50 },
+    })
+
+    -- 编辑区（弹性宽度，占据剩余空间）
+    nebula_app_register_dense_text("edit_area", "EditAreaDenseVisual", {
+      max_chars = 6000,
+      cell_w = 10.0,
+      cell_h = 16.0,
+      producer = "fill_edit_area",
+      layout = { flex_grow = 1 },
+    })
+  nebula_app_end()
+]]
+## nebula_derive_app("EditorWithLinesApp")
+
+-- =============================================================================
+-- Main program
+-- =============================================================================
+local function main(): int32
+  if glfwInit() == 0 then printf("glfw: init failed\n") return 1 end
+  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
+
+  local window = glfwCreateWindow(WIN_W, WIN_H,
+    "Nebula Phase 4.7-S3 — Editor with Line Numbers (Multi-Column DenseText)", nilptr, nilptr)
+  if window == nilptr then printf("glfw: window creation failed\n") return 1 end
+
+  nebula_input_install_callbacks(window)
+
+  local renderer: NebulaRenderer
+  if not renderer:init(window, WIN_W, WIN_H) then return 1 end
+
+  local app: EditorWithLinesApp
+  if not app:init(&renderer, WIN_W, WIN_H) then return 1 end
+
+  -- Initialize editor visual
+  app.editor:init(EditorBgVisual{
+    pos  = Vec2{ x = 0.0, y = 0.0 },
+    size = Vec2{ x = (@float32)(WIN_W), y = (@float32)(WIN_H) },
+    radius = 0.0,
+
+    default_bg_color     = Color{ r=0.08, g=0.08, b=0.12, a=1.0 },
+    default_border_color = Color{ r=0.15, g=0.15, b=0.25, a=1.0 },
+    default_border_width = 0.0,
+
+    hovered_bg_color     = Color{ r=0.08, g=0.08, b=0.12, a=1.0 },
+    hovered_border_color = Color{ r=0.20, g=0.30, b=0.60, a=1.0 },
+    hovered_border_width = 1.0,
+
+    pressed_bg_color     = Color{ r=0.10, g=0.10, b=0.16, a=1.0 },
+    pressed_border_color = Color{ r=0.30, g=0.50, b=0.90, a=1.0 },
+    pressed_border_width = 1.0,
+
+    pixel_height = 16.0,
+    text_origin_x = 58.0,  -- after line number column
+    content_height = 700.0,
+  })
+
+  -- Initialize multiline state
+  app.editor.cursor_row = 0
+  app.editor.cursor_col = 0
+  app.editor.line_count = 1
+  app.editor.visual.multi_buf:init()
+
+  -- Pre-fill demo text
+  local line0 = app.editor.visual.multi_buf:get_line(0)
+  local demo0: cstring = "-- Nebula Phase 4.7-S3: Editor with Line Numbers"
+  local d0 = (@*[0]uint8)(demo0)
+  local i0: uint16 = 0
+  while d0[i0] ~= 0 do line0:insert_char(d0[i0]); i0 = i0 + 1 end
+
+  app.editor.visual.multi_buf:insert_newline()
+  local line1 = app.editor.visual.multi_buf:get_line(1)
+  local demo1: cstring = "-- Two independent DenseText pipelines: line_nums + edit_area"
+  local d1 = (@*[0]uint8)(demo1)
+  local i1: uint16 = 0
+  while d1[i1] ~= 0 do line1:insert_char(d1[i1]); i1 = i1 + 1 end
+
+  app.editor.visual.multi_buf:insert_newline()
+  local line2 = app.editor.visual.multi_buf:get_line(2)
+  local demo2: cstring = "-- Layout: flex_basis=50px (line nums) | flex_grow=1 (editor)"
+  local d2 = (@*[0]uint8)(demo2)
+  local i2: uint16 = 0
+  while d2[i2] ~= 0 do line2:insert_char(d2[i2]); i2 = i2 + 1 end
+
+  app.editor.visual.multi_buf:insert_newline()
+  local line3 = app.editor.visual.multi_buf:get_line(3)
+  local demo3: cstring = ""
+  local d3 = (@*[0]uint8)(demo3)
+  local i3: uint16 = 0
+  while d3[i3] ~= 0 do line3:insert_char(d3[i3]); i3 = i3 + 1 end
+
+  app.editor.visual.multi_buf:insert_newline()
+  local line4 = app.editor.visual.multi_buf:get_line(4)
+  local demo4: cstring = "local function fibonacci(n)"
+  local d4 = (@*[0]uint8)(demo4)
+  local i4: uint16 = 0
+  while d4[i4] ~= 0 do line4:insert_char(d4[i4]); i4 = i4 + 1 end
+
+  app.editor.visual.multi_buf:insert_newline()
+  local line5 = app.editor.visual.multi_buf:get_line(5)
+  local demo5: cstring = "  if n <= 1 then return n end"
+  local d5 = (@*[0]uint8)(demo5)
+  local i5: uint16 = 0
+  while d5[i5] ~= 0 do line5:insert_char(d5[i5]); i5 = i5 + 1 end
+
+  app.editor.visual.multi_buf:insert_newline()
+  local line6 = app.editor.visual.multi_buf:get_line(6)
+  local demo6: cstring = "  return fibonacci(n-1) + fibonacci(n-2)"
+  local d6 = (@*[0]uint8)(demo6)
+  local i6: uint16 = 0
+  while d6[i6] ~= 0 do line6:insert_char(d6[i6]); i6 = i6 + 1 end
+
+  app.editor.visual.multi_buf:insert_newline()
+  local line7 = app.editor.visual.multi_buf:get_line(7)
+  local demo7: cstring = "end"
+  local d7 = (@*[0]uint8)(demo7)
+  local i7: uint16 = 0
+  while d7[i7] ~= 0 do line7:insert_char(d7[i7]); i7 = i7 + 1 end
+
+  -- Update state
+  app.editor.line_count = app.editor.visual.multi_buf.line_count
+  app.editor.cursor_row = 0
+  app.editor.cursor_col = 0
+  app.editor.visual.multi_buf.cursor_row = 0
+  app.editor.visual.multi_buf.cursor_col = 0
+
+  printf("=== Phase 4.7-S3: Editor with Line Numbers ===\n")
+  printf("  Line nums: %d cols x %d rows (flex_basis=50px)\n", LINENUM_COLS, EDIT_ROWS)
+  printf("  Edit area: %d cols x %d rows (flex_grow=1)\n", EDIT_COLS, EDIT_ROWS)
+  printf("  Layout: line_nums.x=%.0f line_nums.w=%.0f | edit_area.x=%.0f edit_area.w=%.0f\n",
+    app.dense_layout_line_nums_x, app.dense_layout_line_nums_w,
+    app.dense_layout_edit_area_x, app.dense_layout_edit_area_w)
+  printf("  Lines: %d pre-filled\n", (@int32)(app.editor.line_count))
+  printf("  - Two independent DenseText pipelines managed by App\n")
+  printf("  - Line numbers scroll in sync with editor\n")
+
+  local input: NebulaInputState
+  local prev_time = glfwGetTime()
+
+  while glfwWindowShouldClose(window) == 0 do
+    glfwPollEvents()
+    local now = glfwGetTime()
+    local dt  = (@float32)(now - prev_time)
+    prev_time = now
+    nebula_collect_input(window, &input, dt)
+
+    app.editor.visual.content_height = (@float32)(app.editor.line_count) * (EDIT_CELL_H + 2.0)
+
+    nebula_frame_render(&renderer, &app, &input, dt, 0.04, 0.04, 0.06)
+  end
+
+  app:deinit()
+  glfwDestroyWindow(window)
+  glfwTerminate()
+  printf("nebula: editor with lines demo clean exit\n")
+  return 0
+end
+
+main()
