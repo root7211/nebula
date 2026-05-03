@@ -597,8 +597,8 @@ global ClickableState = @record{
 ## 
 ## -- ★ Phase 3.5.2: 加载应用编排工厂模块
 ## local app_factory_mod = require "derive.app_factory"
-## assert(app_factory_mod == "nebula_app_factory_v0.7_phase4.1",
-##   "nebula: failed to load derive/app_factory.lua")  -- ★ Phase 4.1 升级
+## assert(app_factory_mod == "nebula_app_factory_v0.8_phase4.7-s2",
+##   "nebula: failed to load derive/app_factory.lua")  -- ★ Phase 4.7-S2 升级
 ## 
 ## -- ★ Phase 4.0: 加载公理校验器模块
 ## local axiom_validator_mod = require "derive.axiom_validator"

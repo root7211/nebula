@@ -1,5 +1,5 @@
 -- =============================================================================
--- derive/app_factory.lua — Nebula GUI Compiler Phase 3.11
+-- derive/app_factory.lua — Nebula GUI Compiler Phase 4.7-S2
 --
 -- 编译期显式编排工厂（App Factory）
 -- 生成 <App> record + init + update + draw
@@ -14,6 +14,12 @@
 --     · mode = "static"  — 静态文本，初始化后不再更新
 --     · mode = "dynamic" — 动态文本，通过 updater 函数每帧更新
 --     · mode = "bound"   — 绑定到 editable 组件（原有行为）
+-- ★ Phase 4.7-S2 新增：
+--   · nebula_app_register_dense_text — DenseText 管线接入 App 编排
+--     · App record 注入 DenseTextPipeline + SDF 字体 atlas + Instance 缓冲区
+--     · App:init 自动初始化 DenseText 管线 + 加载/绑定 SDF atlas
+--     · App:draw 调用 Producer 函数填充 DenseCharInstance → upload → draw
+--     · App:deinit 释放 DenseText 管线 GPU 资源
 -- ★ Phase 3.11 新增（原语 7：Layout-App 桥接）：
 --   · nebula_app_set_root_layout(app_name, spec) — 声明根节点布局约束
 --   · nebula_app_register_component 扩展：opts.layout 字段携带布局约束
@@ -26,6 +32,14 @@ nebula_app_registry = nebula_app_registry or {}
 
 -- 当前正在构建的 App 名称
 local _current_app = nil
+
+-- ★ Phase 4.7-S2: 辅助函数——从 visual_type 提取 base 名
+local function _extract_base(visual_type)
+  if visual_type:sub(-#"Visual") == "Visual" then
+    return visual_type:sub(1, #visual_type - #"Visual")
+  end
+  return visual_type
+end
 
 -- ★ Phase 3.11: 预注册根布局配置（允许在 nebula_app_begin 之前调用 nebula_app_set_root_layout）
 local _pending_root_layouts = {}
@@ -48,6 +62,7 @@ function nebula_app_begin(app_name, opts)
     components  = {},  -- 静态组件列表：{name, visual_type, base, component_id, layout}
     slots       = {},  -- 动态插槽列表：{name, visual_type, base, max_instances, producer}
     texts       = {},  -- ★ Phase 3.9: 文本组件列表：{name, visual_type, base, mode, bound_to, placeholder, mask_password, updater}
+    dense_texts = {},  -- ★ Phase 4.7-S2: DenseText 组件列表：{name, visual_type, base, max_chars, cell_w, cell_h, producer}
     shadows     = {},  -- ★ Phase 3.10.5: 阴影组件列表：{name, visual_type, base, blur_radius}
     -- 按 visual_type 分组，用于生成共享 Pipeline
     type_groups = {},  -- {visual_type -> {pipeline_name, base, members=[{name, is_slot}]}}
@@ -100,9 +115,7 @@ function nebula_app_register_component(name, visual_type, opts)
   assert(_current_app, "nebula_app_register_component: must be called between nebula_app_begin and nebula_app_end")
   opts = opts or {}
   local reg = nebula_app_registry[_current_app]
-  local base = visual_type:sub(-#"Visual") == "Visual"
-    and visual_type:sub(1, #visual_type - #"Visual")
-    or visual_type
+  local base = _extract_base(visual_type)
 
   table.insert(reg.components, {
     name         = name,
@@ -273,6 +286,41 @@ function nebula_app_register_shadow(name, visual_type, opts)
   })
 end
 
+-- ★ Phase 4.7-S2: 注册一个 DenseText 渲染组件（高密度文本管线）
+--
+-- 将 Phase 4.X 的 DenseText 管线接入 App 编排层。
+-- App 自动管理 DenseText 管线的生命周期（init/deinit），
+-- 并在每帧调用 producer 函数填充 DenseCharInstance 数组后 upload + draw。
+--
+-- visual_type 必须通过 nebula_annotate + nebula_derive 以 text_mode="dense" 预先派生，
+-- 以确保 <Base>DenseTextPipeline 类型已生成。
+--
+-- opts:
+--   max_chars : number  — 最大字符数（默认 6000）
+--   cell_w    : number  — 单元格宽度（像素，默认 10.0）
+--   cell_h    : number  — 单元格高度（像素，默认 16.0）
+--   producer  : string  — 帧级 Producer 函数名
+--                         签名：function(app: *<App>, instances: *[0]DenseCharInstance, count: *uint32, max: uint32): void
+--                         职责：从 App 状态（如 multi_buf）读取文本内容，填充 DenseCharInstance 数组
+function nebula_app_register_dense_text(name, visual_type, opts)
+  assert(_current_app, "nebula_app_register_dense_text: must be called between nebula_app_begin and nebula_app_end")
+  opts = opts or {}
+  local reg = nebula_app_registry[_current_app]
+  local base = _extract_base(visual_type)
+
+  assert(opts.producer, ("nebula_app_register_dense_text: '%s' requires opts.producer"):format(name))
+
+  table.insert(reg.dense_texts, {
+    name        = name,
+    visual_type = visual_type,
+    base        = base,
+    max_chars   = opts.max_chars or 6000,
+    cell_w      = opts.cell_w or 10.0,
+    cell_h      = opts.cell_h or 16.0,
+    producer    = opts.producer,
+  })
+end
+
 -- ★ Phase 3.11: 内部辅助函数 — 将组件的 layout 字段转换为 layout_engine 节点
 -- 递归处理 layout.children（允许容器组件声明嵌套布局）
 local function _build_layout_node(name, layout_spec)
@@ -429,6 +477,17 @@ local function gen_app_record(app_name, reg)
     end
   end
 
+  -- ★ Phase 4.7-S2: 注入 DenseText 管线 + SDF 字体 + Instance 缓冲区
+  if #reg.dense_texts > 0 then
+    emit("")
+    emit("  -- ★ Phase 4.7-S2: DenseText 管线（高密度文本渲染）")
+    emit("  _dense_font: NebulaAsciiFontAtlas,")
+    for _, dt in ipairs(reg.dense_texts) do
+      emit(("  pipe_dense_%s: %sDenseTextPipeline,"):format(dt.name, dt.base))
+      emit(("  _dense_%s_buf: [%d]DenseCharInstance,"):format(dt.name, dt.max_chars))
+    end
+  end
+
   emit("")
   emit("  -- ★ Phase 3.8: FrameArena（内嵌后备内存，无堆分配）")
   emit("  arena: NebulaArena,")
@@ -516,6 +575,21 @@ local function gen_app_init(app_name, reg)
     for _, shd in ipairs(reg.shadows) do
       emit(("  if not self.pipe_%s:init(renderer, %d, %d) then return false end"):format(
         shd.base:lower(), shd.win_w, shd.win_h))
+    end
+  end
+
+  -- ★ Phase 4.7-S2: 初始化 DenseText 管线 + SDF 字体 atlas
+  if #reg.dense_texts > 0 then
+    emit("")
+    emit("  -- ★ Phase 4.7-S2: 初始化 DenseText 管线（高密度文本渲染）")
+    emit("  if not nebula_text_load_ascii_font(&self._dense_font, renderer) then return false end")
+    for _, dt in ipairs(reg.dense_texts) do
+      emit(("  if not self.pipe_dense_%s:init(renderer, %d) then return false end"):format(
+        dt.name, dt.max_chars))
+      emit(("  if not self.pipe_dense_%s:update_atlas(renderer, self._dense_font.view, self._dense_font.sampler) then return false end"):format(
+        dt.name))
+      emit(("  self.pipe_dense_%s:update_viewport(renderer, vw, vh, %.1f, %.1f)"):format(
+        dt.name, dt.cell_w, dt.cell_h))
     end
   end
 
@@ -652,6 +726,13 @@ local function gen_app_update(app_name, reg)
       if not updated_pipes[group.pipeline_name] then
         emit(("    self.pipe_%s:update_viewport(self.renderer, input.viewport_w, input.viewport_h)"):format(group.base:lower()))
         updated_pipes[group.pipeline_name] = true
+      end
+    end
+    -- ★ Phase 4.7-S2: 更新 DenseText 管线视口
+    if #reg.dense_texts > 0 then
+      for _, dt in ipairs(reg.dense_texts) do
+        emit(("    self.pipe_dense_%s:update_viewport(self.renderer, input.viewport_w, input.viewport_h, %.1f, %.1f)"):format(
+          dt.name, dt.cell_w, dt.cell_h))
       end
     end
     emit("    -- 分段线性插値：根据视口尺寸选择对应系数段重新计算组件坐标")
@@ -923,6 +1004,24 @@ local function gen_app_draw(app_name, reg)
     end
   end
 
+  -- ★ Phase 4.7-S2: DenseText 管线绘制（在所有其他管线之后，最顶层）
+  if #reg.dense_texts > 0 then
+    emit("")
+    emit("  -- ★ Phase 4.7-S2: DenseText 管线绘制（Producer → upload → draw）")
+    for _, dt in ipairs(reg.dense_texts) do
+      emit(("  do"):format())
+      emit(("    local _dt_count: uint32 = 0"):format())
+      emit(("    %s(self, &self._dense_%s_buf[0], &_dt_count, %d)"):format(
+        dt.producer, dt.name, dt.max_chars))
+      emit(("    if _dt_count > 0 then"):format())
+      emit(("      self.pipe_dense_%s:upload(self.renderer, &self._dense_%s_buf[0], _dt_count)"):format(
+        dt.name, dt.name))
+      emit(("      self.pipe_dense_%s:draw(pass, _dt_count)"):format(dt.name))
+      emit(("    end"):format())
+      emit(("  end"):format())
+    end
+  end
+
   emit("end")
 
   return table.concat(L, "\n")
@@ -972,6 +1071,15 @@ local function gen_app_deinit(app_name, reg)
       if mode == "sdf" then
         emit(("  if self.%s.mesh.vertex_buffer ~= nilptr then wgpuBufferRelease(self.%s.mesh.vertex_buffer) end"):format(txt.name, txt.name))
       end
+    end
+  end
+
+  -- ★ Phase 4.7-S2: 释放 DenseText 管线
+  if #reg.dense_texts > 0 then
+    emit("")
+    emit("  -- ★ Phase 4.7-S2: 释放 DenseText 管线")
+    for _, dt in ipairs(reg.dense_texts) do
+      emit(("  self.pipe_dense_%s:deinit()"):format(dt.name))
     end
   end
 
@@ -1033,10 +1141,11 @@ function nebula_app_generate(app_name)
     for _ in pairs(reg.layout_results) do layout_count = layout_count + 1 end
   end
 
-  print((("[derive-app] %s: emit App record + init + update + draw + pre_pass + surface_pass (%d components, %d texts, %d slots [%d producer], %d shadows, %d type_groups, %d layout_nodes, arena=%dB)"):format(
+  print((("[derive-app] %s: emit App record + init + update + draw + pre_pass + surface_pass (%d components, %d texts, %d dense_texts, %d slots [%d producer], %d shadows, %d type_groups, %d layout_nodes, arena=%dB)"):format(
     app_name,
     #reg.components,
     text_count,
+    #reg.dense_texts,
     #reg.slots,
     slot_producer_count,
     #reg.shadows,
@@ -1052,4 +1161,4 @@ function nebula_app_generate(app_name)
   return source
 end
 
-return "nebula_app_factory_v0.7_phase4.1"
+return "nebula_app_factory_v0.8_phase4.7-s2"

@@ -274,7 +274,7 @@ assert_contains("mixed: draw_surface_pass 包含 draw_composite",
 print("\n--- 6. app_factory.lua 版本标识 ---")
 -- ★ Phase 3.12 升级：版本号已更新
 assert_contains("app_factory 版本包含 phase 前缀",
-  factory_version:sub(1, 26), "nebula_app_factory_v0.7_ph")  -- 兼容 Phase 3.12+
+  factory_version:sub(1, 26), "nebula_app_factory_v0.")  -- 兼容 Phase 4.7-S2+
 
 -- =============================================================================
 -- 7. 行数收敛验证
@@ -283,7 +283,7 @@ print("\n--- 7. 行数收敛验证 ---")
 local factory_lines = count_lines(script_dir .. "/../src/derive/app_factory.lua")
 if factory_lines then
   print(("  app_factory.lua: %d 行"):format(factory_lines))
-  assert_le("app_factory.lua ≤ 1100 行（Phase 4.2.2-fix 新增 deinit）", factory_lines, 1100)
+  assert_le("app_factory.lua ≤ 1200 行（Phase 4.7-S2 新增 DenseText 编排）", factory_lines, 1200)
 else
   failed = failed + 1
   print("[FAIL] 无法读取 src/derive/app_factory.lua")
