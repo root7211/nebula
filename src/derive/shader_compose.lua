@@ -430,7 +430,7 @@ struct SlugBandMeta {
 }
 @group(0) @binding(1) var<storage, read> slug_curves:     array<SlugCurveData>;
 @group(0) @binding(2) var<storage, read> slug_band_metas: array<SlugBandMeta>;
-@group(0) @binding(3) var<storage, read> slug_band_refs:  array<u16>;
+@group(0) @binding(3) var<storage, read> slug_band_refs:  array<u32>;
 
 // ---- 顶点输入/输出 (Phase 4.2.2: 5 attributes) ----
 struct SlugVertexInput {
