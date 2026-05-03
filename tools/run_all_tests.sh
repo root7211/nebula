@@ -178,6 +178,10 @@ run_test "smoke_phase4_7_s2 (Phase 4.7-S2 — DenseText App 编排 & Producer �
 run_test "smoke_phase4_7_s3 (Phase 4.7-S3 — 行号显示 & flex_grow/flex_basis & DenseText 布局)" \
   nelua-lua tests/smoke_phase4_7_s3.lua
 
+# ★ Phase 4.5: 语法糖 API 验证（auto_states + inject_buffers + nebula_component + nebula_app）
+run_test "smoke_phase4_5 (Phase 4.5 — 语法糖 API & 自动推导 & 向后兼容)" \
+  nelua-lua tests/smoke_phase4_5.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="
@@ -295,6 +299,20 @@ run_test "compile editor_with_lines_demo (Phase 4.7-S3 — line numbers + multi-
   --cflags="-I./vendor/wgpu-native/include" \
   --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
   examples/editor_with_lines_demo.nelua -o ~/.cache/nelua/editor_with_lines_demo
+
+# ★ Phase 4.5: button_sugar_demo 编译回归（nebula_component + nebula_app 语法糖）
+run_test "compile button_sugar_demo (Phase 4.5 — nebula_component + nebula_app sugar)" \
+  nelua -c -L src -L assets/generated --add-path . --add-path examples --add-path assets/generated \
+  --cflags="-I./vendor/wgpu-native/include" \
+  --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
+  examples/button_sugar_demo.nelua -o ~/.cache/nelua/button_sugar_demo
+
+# ★ Phase 4.5: multiline_sugar_demo 编译回归（inject_buffers + component + app 全糖化）
+run_test "compile multiline_sugar_demo (Phase 4.5 — inject_buffers + component + app 全糖化)" \
+  nelua -c -L src -L assets/generated --add-path . --add-path examples --add-path assets/generated \
+  --cflags="-I./vendor/wgpu-native/include" \
+  --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
+  examples/multiline_sugar_demo.nelua -o ~/.cache/nelua/multiline_sugar_demo
 
 # ★ Phase 4.2.2 D-4.1-C: Storage Buffer 基础设施静态分析测试
 run_test "smoke_phase4_2_2_bench (Phase 4.2.2 D-4.1-C — Storage Buffer infrastructure audit)" \

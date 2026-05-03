@@ -1,0 +1,153 @@
+-- =============================================================================
+-- multiline_sugar_demo.nelua
+-- Nebula GUI Compiler — Phase 4.5
+--
+-- ★ 使用 Phase 4.5 语法糖重写 multiline_editable_demo：
+--   · nebula_inject_buffers 替代手动 buffer 类型注入（4 行 → 1 行）
+--   · nebula_component 替代 annotate + derive（22 行 → 1 行）
+--     - states 从 primitives 自动推导
+--     - primitives 仅声明叶原语（依赖自动展开）
+--   · nebula_app 替代 app_begin + register + app_end + derive_app（5 行 → 1 行）
+--
+-- 对比：
+--   · multiline_editable_demo.nelua: 191 行，31 行样板代码
+--   · multiline_sugar_demo.nelua:    ~160 行（-16%），3 行样板代码
+-- =============================================================================
+## cinclude "<stdio.h>"
+
+require "nebula_core"
+require "glfw_bindings"
+require "wgpu_bindings"
+require "renderer"
+require "app"
+require "text_runtime"
+require "nebula_cursor"
+require "nebula_arena"
+
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+
+local WIN_W <comptime> = 800
+local WIN_H <comptime> = 600
+
+-- ★ Phase 4.5: 自动注入 buffer 类型（替代手动 4 行注入）
+-- 旧写法：
+--   ##[[ local _mb_type, _mb_src = nebula_gen_multiline_buffer_type(128, 32) ]]
+--   ##[[ for _, _s in ipairs(aster.parse(_mb_src, ...)) do inject_statement(_s) end ]]
+--   ##[[ local _gb_type, _gb_src = nebula_gen_gap_buffer_type(128) ]]
+--   ##[[ for _, _s in ipairs(aster.parse(_gb_src, ...)) do inject_statement(_s) end ]]
+## nebula_inject_buffers({ primitives = {"multiline_editable"}, max_text_len = 128, max_lines = 32 })
+
+global MultilineEditVisual = @record{
+  pos:    Vec2,
+  size:   Vec2,
+  radius: float32,
+
+  default_bg_color:     Color,
+  default_border_color: Color,
+  default_border_width: float32,
+
+  hovered_bg_color:     Color,
+  hovered_border_color: Color,
+  hovered_border_width: float32,
+
+  pressed_bg_color:     Color,
+  pressed_border_color: Color,
+  pressed_border_width: float32,
+
+  pixel_height: float32,
+  text_origin_x: float32,
+  content_height: float32,
+  multi_buf: NebulaMultiBuf128_32,
+  gap_buf: NebulaBuf128,
+}
+
+-- ★ Phase 4.5: 1 行替代 22 行（annotate + states + transitions + derive）
+-- primitives 仅声明叶原语：multiline_editable 自动展开为
+--   hoverable → clickable → focusable → editable → scrollable → multiline_editable
+## nebula_component("MultilineEditVisual", {
+##   primitives   = {"multiline_editable"},
+##   max_text_len = 128,
+##   max_lines    = 32,
+##   component_id = 1,
+## })
+
+-- ★ Phase 4.5: 1 行替代 5 行 App 注册
+## nebula_app("MultilineEditApp", {
+##   components = {{ name = "editor", type = "MultilineEditVisual" }},
+## })
+
+-- =============================================================================
+-- 主程序
+-- =============================================================================
+local function main(): int32
+  if glfwInit() == 0 then printf("glfw: init failed\n") return 1 end
+  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
+
+  local window = glfwCreateWindow(WIN_W, WIN_H,
+    "Nebula Phase 4.5 — Multiline Sugar Demo", nilptr, nilptr)
+  if window == nilptr then printf("glfw: window creation failed\n") return 1 end
+
+  nebula_input_install_callbacks(window)
+
+  local renderer: NebulaRenderer
+  if not renderer:init(window, WIN_W, WIN_H) then return 1 end
+
+  local app: MultilineEditApp
+  if not app:init(&renderer, WIN_W, WIN_H) then return 1 end
+
+  local LINE_H: float32 = 20.0
+
+  app.editor:init(MultilineEditVisual{
+    pos    = Vec2{ x = 100.0, y = 50.0 },
+    size   = Vec2{ x = 600.0, y = 500.0 },
+    radius = 8.0,
+
+    default_bg_color     = Color{ r=0.12, g=0.12, b=0.14, a=1.0 },
+    default_border_color = Color{ r=0.30, g=0.30, b=0.35, a=1.0 },
+    default_border_width = 1.0,
+
+    hovered_bg_color     = Color{ r=0.14, g=0.14, b=0.16, a=1.0 },
+    hovered_border_color = Color{ r=0.40, g=0.60, b=1.00, a=1.0 },
+    hovered_border_width = 1.5,
+
+    pressed_bg_color     = Color{ r=0.12, g=0.12, b=0.14, a=1.0 },
+    pressed_border_color = Color{ r=0.40, g=0.60, b=1.00, a=1.0 },
+    pressed_border_width = 1.5,
+
+    pixel_height = 14.0,
+    text_origin_x = 108.0,
+    content_height = 32 * LINE_H,
+  })
+  app.editor.visual.multi_buf:init()
+  app.editor.visual.gap_buf:init()
+  app.editor.line_count = 1
+  app.editor.component_id = 1
+
+  local input: NebulaInputState
+  local prev_time = glfwGetTime()
+
+  while glfwWindowShouldClose(window) == 0 do
+    glfwPollEvents()
+    local now = glfwGetTime()
+    local dt  = (@float32)(now - prev_time)
+    prev_time = now
+
+    -- ★ 滚动偏移应用于命中测试之前（BUG-4 修复）
+    app.editor.visual.pos.y = 50.0 - app.editor.scroll_offset_y
+
+    nebula_collect_input(window, &input, dt)
+    nebula_frame_render(&renderer, &app, &input, dt, 0.09, 0.09, 0.10)
+  end
+
+  wgpuSurfaceRelease(renderer.surface)
+  wgpuDeviceRelease(renderer.device)
+  wgpuAdapterRelease(renderer.adapter)
+  wgpuInstanceRelease(renderer.instance)
+  glfwDestroyWindow(window)
+  glfwTerminate()
+  printf("nebula: clean exit (Phase 4.5 sugar)\n")
+  return 0
+end
+
+main()

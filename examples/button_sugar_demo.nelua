@@ -1,0 +1,141 @@
+-- =============================================================================
+-- button_sugar_demo.nelua
+-- Nebula GUI Compiler — Phase 4.5
+--
+-- ★ 使用 Phase 4.5 语法糖重写 button_demo：
+--   · nebula_component 替代 nebula_annotate + nebula_derive（省去 states/transitions 声明）
+--   · nebula_app 替代 nebula_app_begin + register + app_end + nebula_derive_app
+--
+-- 对比：
+--   · button_demo.nelua: 147 行
+--   · button_sugar_demo.nelua: ~115 行（-22%）
+-- =============================================================================
+## cinclude "<stdio.h>"
+
+require "nebula_core"
+require "glfw_bindings"
+require "wgpu_bindings"
+require "renderer"
+require "app"
+require "nebula_arena"
+
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+
+local WIN_W <comptime> = 800
+local WIN_H <comptime> = 600
+
+-- =============================================================================
+-- ★ Phase 4.5: 单行声明替代 annotate + derive + states + transitions
+-- =============================================================================
+global ButtonVisual = @record{
+  pos:    Vec2,
+  size:   Vec2,
+  radius: float32,
+
+  default_bg_color:     Color,
+  default_border_color: Color,
+  default_border_width: float32,
+
+  hovered_bg_color:     Color,
+  hovered_border_color: Color,
+  hovered_border_width: float32,
+
+  pressed_bg_color:     Color,
+  pressed_border_color: Color,
+  pressed_border_width: float32,
+}
+
+-- ★ 旧写法（12 行）：
+-- ##[[ nebula_annotate("ButtonVisual", {
+--   states     = {"default", "hovered", "pressed"},
+--   primitives = {"hoverable", "clickable"},
+--   transitions = {
+--     {from="default", to="hovered", on="hover_enter"},
+--     {from="hovered", to="default", on="hover_leave"},
+--     {from="hovered", to="pressed", on="press"},
+--     {from="pressed", to="hovered", on="release"},
+--   },
+-- }) ]]
+-- ## nebula_derive("ButtonVisual")
+
+-- ★ 新写法（1 行）：states/transitions 从 primitives 自动推导
+## nebula_component("ButtonVisual", { primitives = {"clickable"} })
+
+-- =============================================================================
+-- ★ Phase 4.5: App 一站式声明
+-- =============================================================================
+
+-- ★ 旧写法（5 行）：
+-- ##[[ nebula_app_begin("ButtonApp")
+--   nebula_app_register_component("btn", "ButtonVisual")
+-- nebula_app_end() ]]
+-- ## nebula_derive_app("ButtonApp")
+
+-- ★ 新写法（1 行）：
+## nebula_app("ButtonApp", { components = {{ name="btn", type="ButtonVisual" }} })
+
+-- =============================================================================
+-- 主程序（与 button_demo.nelua 完全相同）
+-- =============================================================================
+local function main(): int32
+  if glfwInit() == 0 then printf("glfw: init failed\n") return 1 end
+  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
+
+  local window = glfwCreateWindow(WIN_W, WIN_H, "Nebula Phase 4.5 — Sugar Demo", nilptr, nilptr)
+  if window == nilptr then printf("glfw: window creation failed\n") return 1 end
+
+  nebula_input_install_callbacks(window)
+
+  local renderer: NebulaRenderer
+  if not renderer:init(window, WIN_W, WIN_H) then return 1 end
+
+  local app: ButtonApp
+  if not app:init(&renderer, WIN_W, WIN_H) then return 1 end
+
+  app.btn:init(ButtonVisual{
+    pos    = Vec2{ x = 300.0, y = 250.0 },
+    size   = Vec2{ x = 200.0, y = 60.0 },
+    radius = 12.0,
+
+    default_bg_color     = Color{ r=0.22, g=0.22, b=0.24, a=1.0 },
+    default_border_color = Color{ r=0.40, g=0.40, b=0.45, a=1.0 },
+    default_border_width = 1.0,
+
+    hovered_bg_color     = Color{ r=0.28, g=0.28, b=0.32, a=1.0 },
+    hovered_border_color = Color{ r=0.40, g=0.60, b=1.00, a=1.0 },
+    hovered_border_width = 2.0,
+
+    pressed_bg_color     = Color{ r=0.16, g=0.16, b=0.20, a=1.0 },
+    pressed_border_color = Color{ r=0.60, g=0.80, b=1.00, a=1.0 },
+    pressed_border_width = 2.5,
+  })
+
+  local input: NebulaInputState
+  local prev_time = glfwGetTime()
+
+  while glfwWindowShouldClose(window) == 0 do
+    glfwPollEvents()
+    local now = glfwGetTime()
+    local dt  = (@float32)(now - prev_time)
+    prev_time = now
+    nebula_collect_input(window, &input, dt)
+
+    if app.btn.click.just_clicked then
+      printf("nebula: button clicked! (Phase 4.5 sugar)\n")
+    end
+
+    nebula_frame_render(&renderer, &app, &input, dt, 0.09, 0.09, 0.10)
+  end
+
+  wgpuSurfaceRelease(renderer.surface)
+  wgpuDeviceRelease(renderer.device)
+  wgpuAdapterRelease(renderer.adapter)
+  wgpuInstanceRelease(renderer.instance)
+  glfwDestroyWindow(window)
+  glfwTerminate()
+  printf("nebula: clean exit (Phase 4.5 sugar)\n")
+  return 0
+end
+
+main()

@@ -1493,7 +1493,228 @@ global ClickableState = @record{
 ##     inject_statement(stat)
 ##   end
 ## end
-## 
+##
+## -- =============================================================================
+## -- ★ Phase 4.5: 语法糖 API
+## -- =============================================================================
+##
+## -- ★ Phase 4.5 S1: nebula_auto_states(primitives) -> states[]
+## --
+## -- 从原语列表自动推导所需的状态枚举。
+## -- 算法：
+## --   1. 解析原语依赖（nebula_resolve_primitives）
+## --   2. 收集所有 state_transitions 的 target（小写化）
+## --   3. 始终以 "default" 为首项
+## --   4. 按 priority 降序排列（与状态机 if-elseif 链一致）
+## function nebula_auto_states(primitives)
+##   local resolved = nebula_resolve_primitives(primitives)
+##   -- 收集所有 transition targets 及其最高 priority
+##   local state_set = {}
+##   local state_priority = {}
+##   for _, prim_name in ipairs(resolved) do
+##     local meta = NEBULA_PRIMITIVES[prim_name]
+##     if meta and meta.state_transitions then
+##       for _, tr in ipairs(meta.state_transitions) do
+##         local s = tr.target:lower()
+##         if not state_set[s] then
+##           state_set[s] = true
+##           state_priority[s] = tr.priority or 0
+##         else
+##           -- 取最高 priority
+##           if (tr.priority or 0) > state_priority[s] then
+##             state_priority[s] = tr.priority or 0
+##           end
+##         end
+##       end
+##     end
+##   end
+##   -- 按 priority 降序排列
+##   local sorted = {}
+##   for s, _ in pairs(state_set) do
+##     table.insert(sorted, { name = s, priority = state_priority[s] })
+##   end
+##   table.sort(sorted, function(a, b) return a.priority > b.priority end)
+##   -- 构建最终 states 列表：default 在首位
+##   local states = { "default" }
+##   for _, item in ipairs(sorted) do
+##     table.insert(states, item.name)
+##   end
+##   return states
+## end
+##
+## -- ★ Phase 4.5 S1: nebula_inject_buffers(spec)
+## --
+## -- 在 Visual record 定义之前调用，自动注入所需的 buffer 类型。
+## -- 根据 primitives 列表中的原语和 spec 参数决定注入哪些类型：
+## --   · editable → NebulaBuf{max_text_len}
+## --   · multiline_editable → NebulaMultiBuf{max_text_len}_{max_lines}
+## --
+## -- spec:
+## --   primitives   : string[]  — 原语列表（自动展开依赖）
+## --   max_text_len : number?   — 单行容量（默认 255）
+## --   max_lines    : number?   — 多行行数（默认 32）
+## function nebula_inject_buffers(spec)
+##   spec = spec or {}
+##   local prims = spec.primitives or {}
+##   local resolved = nebula_resolve_primitives(prims)
+##   local has_prim = {}
+##   for _, p in ipairs(resolved) do has_prim[p] = true end
+##
+##   local max_text_len = spec.max_text_len or 255
+##   local max_lines    = spec.max_lines or 32
+##
+##   if has_prim["editable"] then
+##     local buf_type, buf_src = nebula_gen_gap_buffer_type(max_text_len)
+##     if buf_src and #buf_src > 0 then
+##       local ast = aster.parse(buf_src, "<nebula_inject_buffers:gap:" .. max_text_len .. ">")
+##       for _, stat in ipairs(ast) do inject_statement(stat) end
+##     end
+##     print(("[sugar] injected %s (capacity=%d)"):format(buf_type, max_text_len))
+##   end
+##
+##   if has_prim["multiline_editable"] then
+##     local mb_type, mb_src = nebula_gen_multiline_buffer_type(max_text_len, max_lines)
+##     if mb_src and #mb_src > 0 then
+##       local ast = aster.parse(mb_src, "<nebula_inject_buffers:multi:" .. max_text_len .. "_" .. max_lines .. ">")
+##       for _, stat in ipairs(ast) do inject_statement(stat) end
+##     end
+##     print(("[sugar] injected %s (lines=%d, capacity=%d)"):format(mb_type, max_lines, max_text_len))
+##   end
+## end
+##
+## -- ★ Phase 4.5 S1: nebula_component(type_name, spec)
+## --
+## -- 语法糖：合并 nebula_annotate + nebula_derive 为单次调用。
+## -- 同时支持从 primitives 自动推导 states（如果 spec.states 未显式指定）。
+## --
+## -- 使用前（旧 API，12+ 行）：
+## --   global ButtonVisual = @record{ ... }
+## --   ##[[ nebula_annotate("ButtonVisual", {
+## --     states     = {"default", "hovered", "pressed"},
+## --     primitives = {"hoverable", "clickable"},
+## --     transitions = {...},
+## --   }) ]]
+## --   ## nebula_derive("ButtonVisual")
+## --
+## -- 使用后（新 API，1 行）：
+## --   global ButtonVisual = @record{ ... }
+## --   ## nebula_component("ButtonVisual", {
+## --     primitives = {"hoverable", "clickable"},
+## --   })
+## --
+## -- spec 字段与 nebula_annotate 完全兼容。额外行为：
+## --   · states 缺省时，从 primitives 的 state_transitions 自动推导
+## --   · transitions 缺省时，自动生成（基于已推导的 states）
+## function nebula_component(type_name, spec)
+##   spec = spec or {}
+##   -- 自动推导 states（如果用户未显式指定）
+##   if not spec.states and spec.primitives and #spec.primitives > 0 then
+##     spec.states = nebula_auto_states(spec.primitives)
+##     print(("[sugar] %s: auto-derived states = {%s}"):format(
+##       type_name, table.concat(spec.states, ", ")))
+##   end
+##   -- 自动生成 transitions（如果用户未显式指定）
+##   if not spec.transitions and spec.states and #spec.states > 1 then
+##     local transitions = {}
+##     for i = 2, #spec.states do
+##       local st = spec.states[i]
+##       -- 生成 default <-> state 的双向转换
+##       table.insert(transitions, {
+##         from = "default", to = st,
+##         on = st .. "_enter",
+##       })
+##       table.insert(transitions, {
+##         from = st, to = "default",
+##         on = st .. "_leave",
+##       })
+##     end
+##     spec.transitions = transitions
+##   end
+##   nebula_annotate(type_name, spec)
+##   nebula_derive(type_name)
+## end
+##
+## -- ★ Phase 4.5 S2: nebula_app(app_name, spec)
+## --
+## -- 语法糖：合并 nebula_app_begin + 注册 + 布局 + nebula_app_end + nebula_derive_app。
+## --
+## -- 使用前（旧 API，10+ 行）：
+## --   ##[[ nebula_app_set_root_layout("ButtonApp", {direction="column", width=800, height=600})
+## --     nebula_app_begin("ButtonApp")
+## --       nebula_app_register_component("btn", "ButtonVisual")
+## --     nebula_app_end()
+## --   ]]
+## --   ## nebula_derive_app("ButtonApp")
+## --
+## -- 使用后（新 API，1 行）：
+## --   ## nebula_app("ButtonApp", {
+## --     layout = {direction="column", width=800, height=600},
+## --     components = {
+## --       {name="btn", type="ButtonVisual"},
+## --     },
+## --   })
+## --
+## -- spec 字段：
+## --   layout      : table?   — 根布局约束（传给 nebula_app_set_root_layout）
+## --   arena_size  : number?  — FrameArena 字节数
+## --   components  : table[]? — 静态组件 [{name, type, component_id?, layout?}]
+## --   slots       : table[]? — 动态插槽 [{name, type, max_instances?, producer?}]
+## --   texts       : table[]? — 文本组件 [{name, type, bound_to?, placeholder?, mask_password?, mode?, updater?}]
+## --   dense_texts : table[]? — DenseText [{name, type, max_chars?, cell_w?, cell_h?, producer?, layout?}]
+## --   shadows     : table[]? — 阴影组件 [{name, type, blur_radius?}]
+## function nebula_app(app_name, spec)
+##   spec = spec or {}
+##   -- 设置根布局（如果指定）
+##   if spec.layout then
+##     nebula_app_set_root_layout(app_name, spec.layout)
+##   end
+##   -- 开始 App 注册
+##   nebula_app_begin(app_name, { arena_size = spec.arena_size })
+##   -- 注册静态组件
+##   for _, c in ipairs(spec.components or {}) do
+##     nebula_app_register_component(c.name, c.type, {
+##       component_id = c.component_id,
+##       layout       = c.layout,
+##     })
+##   end
+##   -- 注册动态插槽
+##   for _, s in ipairs(spec.slots or {}) do
+##     nebula_app_register_slot(s.name, s.type, {
+##       max_instances = s.max_instances,
+##       producer      = s.producer,
+##     })
+##   end
+##   -- 注册文本组件
+##   for _, t in ipairs(spec.texts or {}) do
+##     nebula_app_register_text(t.name, t.type, {
+##       bound_to      = t.bound_to,
+##       placeholder   = t.placeholder,
+##       mask_password = t.mask_password,
+##       mode          = t.mode,
+##       updater       = t.updater,
+##     })
+##   end
+##   -- 注册 DenseText 组件
+##   for _, d in ipairs(spec.dense_texts or {}) do
+##     nebula_app_register_dense_text(d.name, d.type, {
+##       max_chars = d.max_chars,
+##       cell_w    = d.cell_w,
+##       cell_h    = d.cell_h,
+##       producer  = d.producer,
+##       layout    = d.layout,
+##     })
+##   end
+##   -- 注册阴影组件
+##   for _, sh in ipairs(spec.shadows or {}) do
+##     nebula_app_register_shadow(sh.name, sh.type, {
+##       blur_radius = sh.blur_radius,
+##     })
+##   end
+##   -- 结束 + 生成
+##   nebula_app_end()
+##   nebula_derive_app(app_name)
+## end
+##
 
 -- =============================================================================
 -- 数学工具函数（运行时，完全内联）
