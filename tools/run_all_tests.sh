@@ -182,6 +182,10 @@ run_test "smoke_phase4_7_s3 (Phase 4.7-S3 — 行号显示 & flex_grow/flex_basi
 run_test "smoke_phase4_5 (Phase 4.5 — 语法糖 API & 自动推导 & 向后兼容)" \
   nelua-lua tests/smoke_phase4_5.lua
 
+# ★ Phase 4.X-J: JSON Viewer 冒烟测试（DenseText + scrollable + layout + 框架/应用分离）
+run_test "smoke_json_viewer (Phase 4.X-J — JSON Viewer pipeline & layout & separation)" \
+  nelua-lua tests/smoke_json_viewer.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="
@@ -313,6 +317,13 @@ run_test "compile multiline_sugar_demo (Phase 4.5 — inject_buffers + component
   --cflags="-I./vendor/wgpu-native/include" \
   --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
   examples/multiline_sugar_demo.nelua -o ~/.cache/nelua/multiline_sugar_demo
+
+# ★ Phase 4.X-J: json_viewer_demo 编译回归（DenseText + scrollable + fold + 语法着色）
+run_test "compile json_viewer_demo (Phase 4.X-J — JSON Viewer syntax coloring + fold/unfold)" \
+  nelua -c -L src -L assets/generated -L examples/json_viewer --add-path . --add-path examples --add-path assets/generated \
+  --cflags="-I./vendor/wgpu-native/include" \
+  --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
+  examples/json_viewer_demo.nelua -o ~/.cache/nelua/json_viewer_demo
 
 # ★ Phase 4.2.2 D-4.1-C: Storage Buffer 基础设施静态分析测试
 run_test "smoke_phase4_2_2_bench (Phase 4.2.2 D-4.1-C — Storage Buffer infrastructure audit)" \

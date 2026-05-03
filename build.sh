@@ -47,7 +47,7 @@ done
 
 # 验证 Demo 目标
 case "$DEMO_TARGET" in
-  button_demo|layout_demo|login_demo|form_demo|dynamic_list_demo|shadow_demo|text_demo|slider_demo|scrollable_demo|dropdown_demo|multiline_editable_demo|slug_bench|cjk_text_demo|dense_text_demo|term_demo|cjk_editor_demo|dense_editor_demo|editor_with_lines_demo|button_sugar_demo|multiline_sugar_demo)
+  button_demo|layout_demo|login_demo|form_demo|dynamic_list_demo|shadow_demo|text_demo|slider_demo|scrollable_demo|dropdown_demo|multiline_editable_demo|slug_bench|cjk_text_demo|dense_text_demo|term_demo|cjk_editor_demo|dense_editor_demo|editor_with_lines_demo|button_sugar_demo|multiline_sugar_demo|json_viewer_demo)
     ;;
   *)
     echo "[nebula] Error: unknown demo target '$DEMO_TARGET'"
@@ -73,6 +73,9 @@ if [ "$NEBULA_TARGET" == "linux" ]; then
   if [ "$DEMO_TARGET" == "term_demo" ]; then
     LDFLAGS="$LDFLAGS -lutil"
     NELUA_FLAGS="$NELUA_FLAGS -L $SCRIPT_DIR/examples/term"
+  fi
+  if [ "$DEMO_TARGET" == "json_viewer_demo" ]; then
+    NELUA_FLAGS="$NELUA_FLAGS -L $SCRIPT_DIR/examples/json_viewer"
   fi
   
 elif [ "$NEBULA_TARGET" == "windows" ]; then

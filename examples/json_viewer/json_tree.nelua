@@ -1,0 +1,255 @@
+-- =============================================================================
+-- json_tree.nelua
+-- Application-layer JSON tree view logic.
+-- Computes visible lines (respecting folds), formats lines with syntax colors.
+--
+-- NO framework dependency — uses only json_parser types.
+-- Separation: lives in examples/json_viewer/ (application, not framework).
+-- =============================================================================
+
+require "json_parser"
+
+global JSON_MAX_VISIBLE  <comptime> = 2048
+global JSON_INDENT_WIDTH <comptime> = 2
+global JSON_MAX_LINE_LEN <comptime> = 200
+
+-- Per-character colored output
+global JsonLineChar = @record{
+  ch: uint32,   -- codepoint
+  fg: uint32,   -- packed RGBA8
+}
+
+-- A visible line entry: either an opening/content line or a closing brace
+global JsonVisibleLine = @record{
+  node_idx:   int32,
+  is_closing: boolean,  -- true = closing brace/bracket for this container
+}
+
+-- Tree view state (L1 persistent, recomputed on fold changes)
+global JsonTreeView = @record{
+  doc:            *JsonDocument,
+  lines:          [JSON_MAX_VISIBLE]JsonVisibleLine,
+  line_count:     uint32,
+}
+
+-- =============================================================================
+-- One Dark color palette (packed RGBA8: r | g<<8 | b<<16 | a<<24)
+-- =============================================================================
+global function jv_color_key(): uint32       return 0xFFEFAF61 end  -- #61AFEF blue
+global function jv_color_string(): uint32    return 0xFF79C398 end  -- #98C379 green
+global function jv_color_number(): uint32    return 0xFF669AD1 end  -- #D19A66 orange
+global function jv_color_bool(): uint32      return 0xFFDD78C6 end  -- #C678DD purple
+global function jv_color_null(): uint32      return 0xFF70635C end  -- #5C6370 grey
+global function jv_color_punct(): uint32     return 0xFFBFB2AB end  -- #ABB2BF light grey
+global function jv_color_fold(): uint32      return 0xFF7BC0E5 end  -- #E5C07B yellow
+global function jv_color_linenum(): uint32   return 0xFF63524B end  -- #4B5263 dark grey
+global function jv_color_bg(): uint32        return 0xFF342C28 end  -- #282C34
+global function jv_color_linenum_bg(): uint32 return 0xFF2B2521 end -- #21252B
+
+-- =============================================================================
+-- Visible line computation (DFS walk, skip folded subtrees)
+-- =============================================================================
+
+-- Internal recursive DFS
+local function _compute_visible_rec(
+  tv: *JsonTreeView, node_idx: int32
+): void
+  if node_idx < 0 or tv.line_count >= JSON_MAX_VISIBLE then return end
+
+  local node = &tv.doc.nodes[node_idx]
+
+  -- Emit opening / content line
+  tv.lines[tv.line_count] = JsonVisibleLine{
+    node_idx = node_idx,
+    is_closing = false,
+  }
+  tv.line_count = tv.line_count + 1
+
+  local is_container = (node.node_type == JSON_OBJECT or node.node_type == JSON_ARRAY)
+
+  if is_container and not node.folded then
+    -- Recurse into children
+    local child = node.first_child
+    while child >= 0 and tv.line_count < JSON_MAX_VISIBLE do
+      _compute_visible_rec(tv, child)
+      child = tv.doc.nodes[child].next_sibling
+    end
+    -- Emit closing brace
+    if tv.line_count < JSON_MAX_VISIBLE then
+      tv.lines[tv.line_count] = JsonVisibleLine{
+        node_idx = node_idx,
+        is_closing = true,
+      }
+      tv.line_count = tv.line_count + 1
+    end
+  end
+end
+
+function JsonTreeView:compute_visible(): void
+  self.line_count = 0
+  if self.doc == nilptr or self.doc.node_count == 0 then return end
+  _compute_visible_rec(self, 0)
+end
+
+-- =============================================================================
+-- Fold toggle (only for object/array nodes)
+-- =============================================================================
+function JsonTreeView:toggle_fold(node_idx: int32): boolean
+  if node_idx < 0 or (@uint32)(node_idx) >= self.doc.node_count then return false end
+  local node = &self.doc.nodes[node_idx]
+  if node.node_type ~= JSON_OBJECT and node.node_type ~= JSON_ARRAY then return false end
+  node.folded = not node.folded
+  self:compute_visible()
+  return true
+end
+
+-- =============================================================================
+-- Line formatting — fills a char+color buffer for one visible line
+-- =============================================================================
+
+global JsonFormattedLine = @record{
+  chars: [JSON_MAX_LINE_LEN]JsonLineChar,
+  len:   uint32,
+}
+
+-- Append a single character with color
+local function _emit(line: *JsonFormattedLine, ch: uint32, fg: uint32): void
+  if line.len >= JSON_MAX_LINE_LEN then return end
+  line.chars[line.len] = JsonLineChar{ ch = ch, fg = fg }
+  line.len = line.len + 1
+end
+
+-- Append a text span from text_buf with color
+local function _emit_text(line: *JsonFormattedLine, doc: *JsonDocument,
+                          start: uint32, len: uint16, fg: uint32): void
+  local i: uint16 = 0
+  while i < len and line.len < JSON_MAX_LINE_LEN do
+    line.chars[line.len] = JsonLineChar{
+      ch = (@uint32)(doc.text_buf[start + i]),
+      fg = fg,
+    }
+    line.len = line.len + 1
+    i = i + 1
+  end
+end
+
+-- Append N spaces
+local function _emit_spaces(line: *JsonFormattedLine, n: uint32, fg: uint32): void
+  local i: uint32 = 0
+  while i < n do
+    _emit(line, 32, fg)
+    i = i + 1
+  end
+end
+
+-- Append a cstring with color
+local function _emit_cstr(line: *JsonFormattedLine, s: cstring, fg: uint32): void
+  local p = (@*[0]uint8)(s)
+  local i: uint32 = 0
+  while p[i] ~= 0 and line.len < JSON_MAX_LINE_LEN do
+    _emit(line, (@uint32)(p[i]), fg)
+    i = i + 1
+  end
+end
+
+-- Value color based on node type
+local function _value_color(node_type: uint8): uint32
+  if node_type == JSON_STRING then return jv_color_string()
+  elseif node_type == JSON_NUMBER then return jv_color_number()
+  elseif node_type == JSON_BOOL then return jv_color_bool()
+  elseif node_type == JSON_NULL then return jv_color_null()
+  else return jv_color_punct()
+  end
+end
+
+-- Format a single visible line
+function JsonTreeView:format_line(vline: *JsonVisibleLine, out: *JsonFormattedLine): void
+  out.len = 0
+  local doc = self.doc
+  local node = &doc.nodes[vline.node_idx]
+  local has_sibling = (node.next_sibling >= 0)
+  local indent = (@uint32)(node.depth) * JSON_INDENT_WIDTH
+
+  if vline.is_closing then
+    -- Closing brace/bracket line
+    _emit_spaces(out, indent, jv_color_punct())
+    if node.node_type == JSON_OBJECT then
+      _emit(out, 125, jv_color_punct())  -- '}'
+    else
+      _emit(out, 93, jv_color_punct())   -- ']'
+    end
+    if has_sibling then
+      _emit(out, 44, jv_color_punct())   -- ','
+    end
+    return
+  end
+
+  local is_container = (node.node_type == JSON_OBJECT or node.node_type == JSON_ARRAY)
+
+  -- Indentation
+  _emit_spaces(out, indent, jv_color_punct())
+
+  -- Fold indicator (1 char + 1 space)
+  if is_container then
+    if node.folded then
+      _emit(out, 43, jv_color_fold())    -- '+' folded
+    else
+      _emit(out, 45, jv_color_fold())    -- '-' expanded
+    end
+  else
+    _emit(out, 32, jv_color_punct())     -- ' ' leaf
+  end
+  _emit(out, 32, jv_color_punct())       -- separator space
+
+  -- Key (if present)
+  if node.key_len > 0 then
+    _emit(out, 34, jv_color_key())       -- '"'
+    _emit_text(out, doc, node.key_start, node.key_len, jv_color_key())
+    _emit(out, 34, jv_color_key())       -- '"'
+    _emit_cstr(out, ": ", jv_color_punct())
+  end
+
+  -- Value
+  if is_container then
+    local open_ch: uint32 = node.node_type == JSON_OBJECT and 123 or 91
+    local close_ch: uint32 = node.node_type == JSON_OBJECT and 125 or 93
+    if node.folded then
+      _emit(out, open_ch, jv_color_punct())
+      _emit_cstr(out, " ... ", jv_color_null())
+      -- Child count hint
+      local count = node.child_count
+      if count >= 100 then
+        _emit(out, 48 + (count / 100) % 10, jv_color_number())
+      end
+      if count >= 10 then
+        _emit(out, 48 + (count / 10) % 10, jv_color_number())
+      end
+      _emit(out, 48 + count % 10, jv_color_number())
+      _emit(out, 32, jv_color_null())
+      if count == 1 then
+        _emit_cstr(out, "item ", jv_color_null())
+      else
+        _emit_cstr(out, "items ", jv_color_null())
+      end
+      _emit(out, close_ch, jv_color_punct())
+      if has_sibling then
+        _emit(out, 44, jv_color_punct()) -- ','
+      end
+    else
+      _emit(out, open_ch, jv_color_punct())
+    end
+  else
+    -- Leaf value
+    local fg = _value_color(node.node_type)
+    if node.node_type == JSON_STRING then
+      _emit(out, 34, fg)                 -- '"'
+      _emit_text(out, doc, node.val_start, node.val_len, fg)
+      _emit(out, 34, fg)                 -- '"'
+    elseif node.val_len > 0 then
+      _emit_text(out, doc, node.val_start, node.val_len, fg)
+    end
+    if has_sibling then
+      _emit(out, 44, jv_color_punct())   -- ','
+    end
+  end
+end

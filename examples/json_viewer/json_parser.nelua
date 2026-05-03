@@ -1,0 +1,316 @@
+-- =============================================================================
+-- json_parser.nelua
+-- Application-layer recursive descent JSON parser.
+-- NO framework dependency — pure data transformation (S2 runtime).
+--
+-- Builds a flat JsonNode array in DFS order with parent/child/sibling links.
+-- Text content (keys + values) stored in a separate text_buf with (start, len).
+--
+-- Separation: this file lives in examples/json_viewer/ because JSON parsing
+-- is application logic, not a framework primitive.
+-- =============================================================================
+
+-- Node type constants
+global JSON_NULL   <comptime> = 0
+global JSON_BOOL   <comptime> = 1
+global JSON_NUMBER <comptime> = 2
+global JSON_STRING <comptime> = 3
+global JSON_ARRAY  <comptime> = 4
+global JSON_OBJECT <comptime> = 5
+
+-- Capacity limits
+global JSON_MAX_NODES    <comptime> = 4096
+global JSON_TEXT_BUF_CAP <comptime> = 65536
+global JSON_MAX_DEPTH    <comptime> = 64
+
+global JsonNode = @record{
+  node_type:    uint8,
+  key_start:    uint32,
+  key_len:      uint16,
+  val_start:    uint32,
+  val_len:      uint16,
+  parent:       int32,
+  first_child:  int32,
+  next_sibling: int32,
+  child_count:  uint16,
+  depth:        uint8,
+  folded:       boolean,
+}
+
+global JsonDocument = @record{
+  nodes:       [JSON_MAX_NODES]JsonNode,
+  node_count:  uint32,
+  text_buf:    [JSON_TEXT_BUF_CAP]uint8,
+  text_len:    uint32,
+  has_error:   boolean,
+  error_pos:   uint32,
+  -- internal parser state (not public API)
+  _src:        *[0]uint8,
+  _src_len:    uint32,
+  _pos:        uint32,
+}
+
+-- =============================================================================
+-- Internal helpers
+-- =============================================================================
+
+function JsonDocument:_alloc_node(): int32
+  if self.node_count >= JSON_MAX_NODES then
+    self.has_error = true
+    return -1
+  end
+  local idx = (@int32)(self.node_count)
+  self.node_count = self.node_count + 1
+  local n = &self.nodes[idx]
+  n.node_type    = JSON_NULL
+  n.key_start    = 0
+  n.key_len      = 0
+  n.val_start    = 0
+  n.val_len      = 0
+  n.parent       = -1
+  n.first_child  = -1
+  n.next_sibling = -1
+  n.child_count  = 0
+  n.depth        = 0
+  n.folded       = false
+  return idx
+end
+
+function JsonDocument:_store_text(start: uint32, len: uint32): (uint32, uint16)
+  if len == 0 then return 0, 0 end
+  if self.text_len + len > JSON_TEXT_BUF_CAP then
+    self.has_error = true
+    return 0, 0
+  end
+  local dst = self.text_len
+  local i: uint32 = 0
+  while i < len do
+    self.text_buf[dst + i] = self._src[start + i]
+    i = i + 1
+  end
+  self.text_len = self.text_len + len
+  return dst, (@uint16)(len)
+end
+
+function JsonDocument:_skip_ws(): void
+  while self._pos < self._src_len do
+    local ch = self._src[self._pos]
+    if ch == 32 or ch == 9 or ch == 10 or ch == 13 then
+      self._pos = self._pos + 1
+    else
+      break
+    end
+  end
+end
+
+function JsonDocument:_peek(): uint8
+  if self._pos >= self._src_len then return 0 end
+  return self._src[self._pos]
+end
+
+function JsonDocument:_expect(ch: uint8): boolean
+  self:_skip_ws()
+  if self._pos < self._src_len and self._src[self._pos] == ch then
+    self._pos = self._pos + 1
+    return true
+  end
+  self.has_error = true
+  self.error_pos = self._pos
+  return false
+end
+
+function JsonDocument:_add_child(parent_idx: int32, child_idx: int32): void
+  if parent_idx < 0 then return end
+  local parent = &self.nodes[parent_idx]
+  if parent.first_child < 0 then
+    parent.first_child = child_idx
+  else
+    local cur = parent.first_child
+    while self.nodes[cur].next_sibling >= 0 do
+      cur = self.nodes[cur].next_sibling
+    end
+    self.nodes[cur].next_sibling = child_idx
+  end
+  parent.child_count = parent.child_count + 1
+  self.nodes[child_idx].parent = parent_idx
+end
+
+-- =============================================================================
+-- Token parsers
+-- =============================================================================
+
+function JsonDocument:_parse_string(): (uint32, uint16)
+  self._pos = self._pos + 1  -- skip opening '"'
+  local start = self._pos
+  while self._pos < self._src_len do
+    local ch = self._src[self._pos]
+    if ch == 34 then -- '"'
+      local len = self._pos - start
+      self._pos = self._pos + 1  -- skip closing '"'
+      return self:_store_text(start, len)
+    elseif ch == 92 then -- '\'
+      self._pos = self._pos + 2  -- skip escape pair
+    else
+      self._pos = self._pos + 1
+    end
+  end
+  self.has_error = true
+  self.error_pos = self._pos
+  return 0, 0
+end
+
+function JsonDocument:_parse_literal(expected: cstring, exp_len: uint32): (uint32, uint16)
+  local start = self._pos
+  local exp = (@*[0]uint8)(expected)
+  local i: uint32 = 0
+  while i < exp_len do
+    if self._pos >= self._src_len or self._src[self._pos] ~= exp[i] then
+      self.has_error = true
+      self.error_pos = self._pos
+      return 0, 0
+    end
+    self._pos = self._pos + 1
+    i = i + 1
+  end
+  return self:_store_text(start, exp_len)
+end
+
+-- =============================================================================
+-- Recursive descent: parse_value
+-- =============================================================================
+
+function JsonDocument:_parse_value(parent_idx: int32, depth: uint8): int32
+  if self.has_error then return -1 end
+  if depth >= JSON_MAX_DEPTH then
+    self.has_error = true
+    self.error_pos = self._pos
+    return -1
+  end
+
+  self:_skip_ws()
+  if self._pos >= self._src_len then
+    self.has_error = true
+    self.error_pos = self._pos
+    return -1
+  end
+
+  local ch = self:_peek()
+  local node_idx = self:_alloc_node()
+  if node_idx < 0 then return -1 end
+  local node = &self.nodes[node_idx]
+  node.depth = depth
+
+  if ch == 123 then -- '{'
+    node.node_type = JSON_OBJECT
+    self._pos = self._pos + 1
+    self:_skip_ws()
+    if self:_peek() ~= 125 then
+      while not self.has_error do
+        self:_skip_ws()
+        if self:_peek() ~= 34 then
+          self.has_error = true
+          self.error_pos = self._pos
+          break
+        end
+        local key_start: uint32, key_len: uint16 = self:_parse_string()
+        if not self:_expect(58) then break end  -- ':'
+        local child_idx = self:_parse_value(node_idx, depth + 1)
+        if child_idx < 0 then break end
+        self.nodes[child_idx].key_start = key_start
+        self.nodes[child_idx].key_len = key_len
+        self:_skip_ws()
+        if self:_peek() == 44 then
+          self._pos = self._pos + 1
+        else
+          break
+        end
+      end
+    end
+    if not self:_expect(125) then return -1 end  -- '}'
+    if parent_idx >= 0 then self:_add_child(parent_idx, node_idx) end
+
+  elseif ch == 91 then -- '['
+    node.node_type = JSON_ARRAY
+    self._pos = self._pos + 1
+    self:_skip_ws()
+    if self:_peek() ~= 93 then
+      while not self.has_error do
+        local child_idx = self:_parse_value(node_idx, depth + 1)
+        if child_idx < 0 then break end
+        self:_skip_ws()
+        if self:_peek() == 44 then
+          self._pos = self._pos + 1
+        else
+          break
+        end
+      end
+    end
+    if not self:_expect(93) then return -1 end  -- ']'
+    if parent_idx >= 0 then self:_add_child(parent_idx, node_idx) end
+
+  elseif ch == 34 then -- '"'
+    node.node_type = JSON_STRING
+    node.val_start, node.val_len = self:_parse_string()
+    if parent_idx >= 0 then self:_add_child(parent_idx, node_idx) end
+
+  elseif ch == 116 then -- 't'
+    node.node_type = JSON_BOOL
+    node.val_start, node.val_len = self:_parse_literal("true", 4)
+    if parent_idx >= 0 then self:_add_child(parent_idx, node_idx) end
+
+  elseif ch == 102 then -- 'f'
+    node.node_type = JSON_BOOL
+    node.val_start, node.val_len = self:_parse_literal("false", 5)
+    if parent_idx >= 0 then self:_add_child(parent_idx, node_idx) end
+
+  elseif ch == 110 then -- 'n'
+    node.node_type = JSON_NULL
+    node.val_start, node.val_len = self:_parse_literal("null", 4)
+    if parent_idx >= 0 then self:_add_child(parent_idx, node_idx) end
+
+  elseif (ch >= 48 and ch <= 57) or ch == 45 then -- digit or '-'
+    node.node_type = JSON_NUMBER
+    local start = self._pos
+    if self._src[self._pos] == 45 then self._pos = self._pos + 1 end
+    while self._pos < self._src_len do
+      local c = self._src[self._pos]
+      if (c >= 48 and c <= 57) or c == 46 or c == 101 or c == 69 or c == 43 or c == 45 then
+        self._pos = self._pos + 1
+      else
+        break
+      end
+    end
+    node.val_start, node.val_len = self:_store_text(start, self._pos - start)
+    if parent_idx >= 0 then self:_add_child(parent_idx, node_idx) end
+
+  else
+    self.has_error = true
+    self.error_pos = self._pos
+    return -1
+  end
+
+  return node_idx
+end
+
+-- =============================================================================
+-- Public API
+-- =============================================================================
+
+function JsonDocument:parse(src: *[0]uint8, src_len: uint32): boolean
+  self.node_count = 0
+  self.text_len   = 0
+  self.has_error   = false
+  self.error_pos   = 0
+  self._src        = src
+  self._src_len    = src_len
+  self._pos        = 0
+
+  self:_parse_value(-1, 0)
+
+  return not self.has_error and self.node_count > 0
+end
+
+-- Retrieve text slice from text_buf
+function JsonDocument:get_text(start: uint32, len: uint16): (*[0]uint8, uint16)
+  return (@*[0]uint8)(&self.text_buf[start]), len
+end

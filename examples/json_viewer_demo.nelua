@@ -1,0 +1,474 @@
+-- =============================================================================
+-- json_viewer_demo.nelua
+-- Nebula GUI Compiler — Phase 4.X-J
+--
+-- Read-only JSON tree browser with:
+--   · Syntax coloring (key=blue, string=green, number=orange, bool=purple,
+--     null=grey, punctuation=white — One Dark theme)
+--   · Tree node fold/unfold (click +/- indicator)
+--   · Vertical scrolling (mouse wheel + keyboard)
+--   · Line numbers
+--
+-- Architecture:
+--   · standard_instanced pipeline: background (scrollable container)
+--   · DenseText pipeline 1 (line_nums): fixed-width line number gutter
+--   · DenseText pipeline 2 (content): elastic-width syntax-colored content
+--   · Three pipelines managed by App orchestration
+--
+-- Framework/Application separation:
+--   · examples/json_viewer/json_parser.nelua — application-layer parser
+--   · examples/json_viewer/json_tree.nelua   — application-layer tree view
+--   · examples/json_viewer_demo.nelua        — this demo
+--   · src/ is untouched — no framework changes needed
+-- =============================================================================
+## cinclude "<stdio.h>"
+## cinclude "<string.h>"
+
+require "nebula_core"
+require "glfw_bindings"
+require "wgpu_bindings"
+require "renderer"
+require "app"
+require "text_runtime"
+require "nebula_cursor"
+require "nebula_arena"
+
+-- Application-layer modules (from examples/json_viewer/)
+require "json_parser"
+require "json_tree"
+
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+global function snprintf(buf: cstring, size: csize, fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+
+local WIN_W <comptime> = 1280
+local WIN_H <comptime> = 800
+
+-- Line number gutter
+local LINENUM_COLS   <comptime> = 6
+local LINENUM_CELL_W <comptime> = 10.0
+local LINENUM_CELL_H <comptime> = 16.0
+
+-- Content area
+local CONTENT_COLS   <comptime> = 140
+local CONTENT_ROWS   <comptime> = 50
+local CONTENT_CELL_W <comptime> = 10.0
+local CONTENT_CELL_H <comptime> = 16.0
+local CONTENT_LINE_GAP <comptime> = 2.0
+
+-- =============================================================================
+-- Global application state (L1 persistent)
+-- =============================================================================
+global g_json_doc: JsonDocument
+global g_tree_view: JsonTreeView
+global g_scroll_row: uint32 = 0
+
+-- =============================================================================
+-- Embedded sample JSON
+-- =============================================================================
+-- PLACEHOLDER: sample JSON string
+local SAMPLE_JSON: cstring = [[{
+  "name": "Nebula GUI Compiler",
+  "version": "0.2.0-dev",
+  "description": "Shape-Is paradigm: compile-time derivation engine",
+  "features": {
+    "rendering": {
+      "backend": "wgpu-native",
+      "shading": "SDF",
+      "text_modes": ["Slug", "DenseText", "CJK"]
+    },
+    "layout": {
+      "engine": "Flexbox",
+      "responsive": true,
+      "directions": ["row", "column"]
+    },
+    "primitives": [
+      "hoverable", "clickable", "focusable", "editable",
+      "scrollable", "multiline_editable", "draggable_value"
+    ]
+  },
+  "phases_completed": [1, 2, 3, 4],
+  "current_phase": 4.5,
+  "axioms": {
+    "A": "Phase Closure",
+    "B": "Lifecycle Tiers",
+    "C": "Shape-Is-Rendering"
+  },
+  "platforms": ["linux", "windows", "web"],
+  "metrics": {
+    "test_count": 58,
+    "demos": 20,
+    "core_lines": 8900,
+    "pass_rate": 1.0,
+    "zero_heap": true,
+    "debug_mode": null
+  }
+}]]
+
+-- =============================================================================
+-- JsonViewerBgVisual — background container (scrollable + clickable)
+-- =============================================================================
+global JsonViewerBgVisual = @record{
+  pos:    Vec2,
+  size:   Vec2,
+  radius: float32,
+  default_bg_color:      Color,
+  default_border_color:  Color,
+  default_border_width:  float32,
+  hovered_bg_color:      Color,
+  hovered_border_color:  Color,
+  hovered_border_width:  float32,
+  draggingbar_bg_color:      Color,
+  draggingbar_border_color:  Color,
+  draggingbar_border_width:  float32,
+  content_height: float32,
+}
+
+##[[
+nebula_annotate("JsonViewerBgVisual", {
+  states     = {"default", "hovered", "draggingbar"},
+  primitives = {"hoverable", "clickable", "scrollable"},
+  transitions = {
+    {from="default",      to="hovered",     on="hover_enter"},
+    {from="hovered",      to="default",     on="hover_leave"},
+    {from="hovered",      to="draggingbar", on="scrollbar_drag"},
+    {from="draggingbar",  to="hovered",     on="scrollbar_release"},
+    {from="default",      to="draggingbar", on="scrollbar_drag"},
+    {from="draggingbar",  to="default",     on="scrollbar_release"},
+  },
+})
+]]
+## nebula_derive("JsonViewerBgVisual")
+
+-- =============================================================================
+-- DenseText Visual types (pipeline generation only)
+-- =============================================================================
+global LineNumDenseVisual = @record{ pos: Vec2, size: Vec2 }
+##[[
+nebula_annotate("LineNumDenseVisual", {
+  states = {"default"}, primitives = {}, transitions = {},
+  text_mode = "dense", max_chars = 1024,
+})
+]]
+## nebula_derive("LineNumDenseVisual")
+
+global ContentDenseVisual = @record{ pos: Vec2, size: Vec2 }
+##[[
+nebula_annotate("ContentDenseVisual", {
+  states = {"default"}, primitives = {}, transitions = {},
+  text_mode = "dense", max_chars = 16384,
+})
+]]
+## nebula_derive("ContentDenseVisual")
+
+-- =============================================================================
+-- Producer: line numbers (read-only gutter)
+-- =============================================================================
+global function fill_json_line_nums(
+  app: auto,
+  instances: *[0]DenseCharInstance,
+  count: *uint32,
+  max: uint32
+): void
+  local origin_x: float32 = app.dense_layout_line_nums_x
+  local origin_y: float32 = app.dense_layout_line_nums_y + 4.0
+  local idx: uint32 = 0
+  local visible_rows: uint32 = CONTENT_ROWS
+  local total_lines = g_tree_view.line_count
+
+  local row: uint32 = 0
+  while row < visible_rows and idx < max do
+    local line_idx = row + g_scroll_row
+    local bg = jv_color_linenum_bg()
+
+    if line_idx < total_lines then
+      local num = line_idx + 1
+      local digits: [5]uint32 = {
+        num >= 10000 and (48 + (num / 10000) % 10) or 32,
+        num >= 1000  and (48 + (num / 1000) % 10) or 32,
+        num >= 100   and (48 + (num / 100) % 10) or 32,
+        num >= 10    and (48 + (num / 10) % 10) or 32,
+        48 + num % 10
+      }
+      local nc: uint32 = 0
+      while nc < 5 and idx < max do
+        nebula_dense_grid_fill_instance(
+          &instances[idx], row, nc,
+          digits[nc], origin_x, origin_y,
+          LINENUM_CELL_W, LINENUM_CELL_H, jv_color_linenum(), bg
+        )
+        idx = idx + 1
+        nc = nc + 1
+      end
+      -- separator '|'
+      if idx < max then
+        nebula_dense_grid_fill_instance(
+          &instances[idx], row, 5,
+          124, origin_x, origin_y,
+          LINENUM_CELL_W, LINENUM_CELL_H, 0xFF40383C, bg
+        )
+        idx = idx + 1
+      end
+    else
+      -- empty row
+      local nc: uint32 = 0
+      while nc < LINENUM_COLS and idx < max do
+        nebula_dense_grid_fill_instance(
+          &instances[idx], row, nc,
+          nc == 0 and 126 or 32, origin_x, origin_y,
+          LINENUM_CELL_W, LINENUM_CELL_H, jv_color_linenum(), bg
+        )
+        idx = idx + 1
+        nc = nc + 1
+      end
+    end
+    row = row + 1
+  end
+  $count = idx
+end
+
+-- =============================================================================
+-- Producer: syntax-colored JSON content
+-- =============================================================================
+global function fill_json_content(
+  app: auto,
+  instances: *[0]DenseCharInstance,
+  count: *uint32,
+  max: uint32
+): void
+  local origin_x: float32 = app.dense_layout_content_x
+  local origin_y: float32 = app.dense_layout_content_y + 4.0
+  local idx: uint32 = 0
+  local visible_rows: uint32 = CONTENT_ROWS
+  local bg = jv_color_bg()
+
+  local formatted: JsonFormattedLine
+
+  local row: uint32 = 0
+  while row < visible_rows and idx < max do
+    local line_idx = row + g_scroll_row
+
+    if line_idx < g_tree_view.line_count then
+      local vline = &g_tree_view.lines[line_idx]
+      g_tree_view:format_line(vline, &formatted)
+
+      local col: uint32 = 0
+      while col < formatted.len and col < CONTENT_COLS and idx < max do
+        nebula_dense_grid_fill_instance(
+          &instances[idx], row, col,
+          formatted.chars[col].ch, origin_x, origin_y,
+          CONTENT_CELL_W, CONTENT_CELL_H,
+          formatted.chars[col].fg, bg
+        )
+        idx = idx + 1
+        col = col + 1
+      end
+      -- fill remaining columns with background
+      while col < CONTENT_COLS and idx < max do
+        nebula_dense_grid_fill_instance(
+          &instances[idx], row, col,
+          32, origin_x, origin_y,
+          CONTENT_CELL_W, CONTENT_CELL_H,
+          jv_color_punct(), bg
+        )
+        idx = idx + 1
+        col = col + 1
+      end
+    else
+      -- empty row
+      local col: uint32 = 0
+      while col < CONTENT_COLS and idx < max do
+        nebula_dense_grid_fill_instance(
+          &instances[idx], row, col,
+          32, origin_x, origin_y,
+          CONTENT_CELL_W, CONTENT_CELL_H,
+          jv_color_punct(), bg
+        )
+        idx = idx + 1
+        col = col + 1
+      end
+    end
+    row = row + 1
+  end
+  $count = idx
+end
+
+-- =============================================================================
+-- App orchestration
+-- =============================================================================
+##[[
+  nebula_app_set_root_layout("JsonViewerApp", {
+    direction = "row",
+    width = 1280,
+    height = 800,
+  })
+
+  nebula_app_begin("JsonViewerApp")
+    nebula_app_register_component("viewer", "JsonViewerBgVisual")
+
+    nebula_app_register_dense_text("line_nums", "LineNumDenseVisual", {
+      max_chars = 300,
+      cell_w = 10.0,
+      cell_h = 16.0,
+      producer = "fill_json_line_nums",
+      layout = { flex_basis = 60 },
+    })
+
+    nebula_app_register_dense_text("content", "ContentDenseVisual", {
+      max_chars = 7000,
+      cell_w = 10.0,
+      cell_h = 16.0,
+      producer = "fill_json_content",
+      layout = { flex_grow = 1 },
+    })
+  nebula_app_end()
+]]
+## nebula_derive_app("JsonViewerApp")
+
+-- =============================================================================
+-- Main program
+-- =============================================================================
+local function main(): int32
+  if glfwInit() == 0 then printf("glfw: init failed\n") return 1 end
+  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
+
+  local window = glfwCreateWindow(WIN_W, WIN_H,
+    "Nebula Phase 4.X-J — JSON Viewer (Syntax Coloring + Fold/Unfold)",
+    nilptr, nilptr)
+  if window == nilptr then printf("glfw: window creation failed\n") return 1 end
+
+  nebula_input_install_callbacks(window)
+
+  local renderer: NebulaRenderer
+  if not renderer:init(window, WIN_W, WIN_H) then return 1 end
+
+  local app: JsonViewerApp
+  if not app:init(&renderer, WIN_W, WIN_H) then return 1 end
+
+  -- Initialize background visual
+  app.viewer:init(JsonViewerBgVisual{
+    pos  = Vec2{ x = 0.0, y = 0.0 },
+    size = Vec2{ x = (@float32)(WIN_W), y = (@float32)(WIN_H) },
+    radius = 0.0,
+    default_bg_color      = Color{ r=0.16, g=0.17, b=0.20, a=1.0 },
+    default_border_color  = Color{ r=0.20, g=0.22, b=0.28, a=1.0 },
+    default_border_width  = 0.0,
+    hovered_bg_color      = Color{ r=0.16, g=0.17, b=0.20, a=1.0 },
+    hovered_border_color  = Color{ r=0.25, g=0.35, b=0.55, a=1.0 },
+    hovered_border_width  = 1.0,
+    draggingbar_bg_color      = Color{ r=0.16, g=0.17, b=0.20, a=1.0 },
+    draggingbar_border_color  = Color{ r=0.30, g=0.50, b=0.80, a=1.0 },
+    draggingbar_border_width  = 1.0,
+    content_height = 800.0,
+  })
+
+  -- Parse embedded JSON
+  local src = (@*[0]uint8)(SAMPLE_JSON)
+  local src_len: uint32 = 0
+  while src[src_len] ~= 0 do src_len = src_len + 1 end
+
+  if g_json_doc:parse(src, src_len) then
+    printf("json: parsed OK — %d nodes, %d bytes text\n",
+      (@int32)(g_json_doc.node_count), (@int32)(g_json_doc.text_len))
+  else
+    printf("json: parse error at byte %d\n", (@int32)(g_json_doc.error_pos))
+    return 1
+  end
+
+  -- Initialize tree view and compute visible lines
+  g_tree_view.doc = &g_json_doc
+  g_tree_view:compute_visible()
+  printf("json: %d visible lines (all expanded)\n", (@int32)(g_tree_view.line_count))
+
+  printf("=== Phase 4.X-J: JSON Viewer ===\n")
+  printf("  Layout: line_nums.x=%.0f (basis=60) | content.x=%.0f (grow=1)\n",
+    app.dense_layout_line_nums_x, app.dense_layout_content_x)
+  printf("  Scroll: mouse wheel / arrow keys / PageUp/PageDown\n")
+  printf("  Fold:   click +/- indicator to toggle\n")
+
+  local input: NebulaInputState
+  local prev_time = glfwGetTime()
+
+  while glfwWindowShouldClose(window) == 0 do
+    glfwPollEvents()
+    local now = glfwGetTime()
+    local dt  = (@float32)(now - prev_time)
+    prev_time = now
+    nebula_collect_input(window, &input, dt)
+
+    -- Update content height for scrollbar
+    app.viewer.visual.content_height =
+      (@float32)(g_tree_view.line_count) * (CONTENT_CELL_H + CONTENT_LINE_GAP)
+
+    -- Sync scroll: convert pixel offset to row index
+    g_scroll_row = (@uint32)(app.viewer.scroll_offset_y / (CONTENT_CELL_H + CONTENT_LINE_GAP))
+    if g_scroll_row + CONTENT_ROWS > g_tree_view.line_count and g_tree_view.line_count > CONTENT_ROWS then
+      g_scroll_row = g_tree_view.line_count - CONTENT_ROWS
+    end
+
+    -- Keyboard scrolling via NebulaKey enum
+    if input.key_pressed == NebulaKey.Up then
+      if g_scroll_row > 0 then g_scroll_row = g_scroll_row - 1 end
+      app.viewer.scroll_offset_y = (@float32)(g_scroll_row) * (CONTENT_CELL_H + CONTENT_LINE_GAP)
+    elseif input.key_pressed == NebulaKey.Down then
+      if g_scroll_row + CONTENT_ROWS < g_tree_view.line_count then
+        g_scroll_row = g_scroll_row + 1
+      end
+      app.viewer.scroll_offset_y = (@float32)(g_scroll_row) * (CONTENT_CELL_H + CONTENT_LINE_GAP)
+    elseif input.key_pressed == NebulaKey.Home then
+      g_scroll_row = 0
+      app.viewer.scroll_offset_y = 0.0
+    elseif input.key_pressed == NebulaKey.End then
+      if g_tree_view.line_count > CONTENT_ROWS then
+        g_scroll_row = g_tree_view.line_count - CONTENT_ROWS
+      else
+        g_scroll_row = 0
+      end
+      app.viewer.scroll_offset_y = (@float32)(g_scroll_row) * (CONTENT_CELL_H + CONTENT_LINE_GAP)
+    end
+
+    -- Render frame
+    nebula_frame_render(&renderer, &app, &input, dt, 0.16, 0.17, 0.20)
+
+    -- Fold click detection (after frame render, just_clicked is set)
+    if app.viewer.click.just_clicked then
+      local content_x: float32 = app.dense_layout_content_x
+      local content_y: float32 = app.dense_layout_content_y + 4.0
+      local mx = input.mouse_x
+      local my = input.mouse_y
+
+      -- Check if click is in the content area
+      if mx >= content_x and my >= content_y then
+        local clicked_row = (@uint32)((my - content_y) / (CONTENT_CELL_H + CONTENT_LINE_GAP))
+        local clicked_col = (@uint32)((mx - content_x) / CONTENT_CELL_W)
+        local line_idx = clicked_row + g_scroll_row
+
+        if line_idx < g_tree_view.line_count then
+          local vline = &g_tree_view.lines[line_idx]
+          local node = &g_json_doc.nodes[vline.node_idx]
+          local is_container = (node.node_type == JSON_OBJECT or node.node_type == JSON_ARRAY)
+
+          if is_container and not vline.is_closing then
+            -- Check if click is in fold indicator column area
+            local fold_col = (@uint32)(node.depth) * JSON_INDENT_WIDTH
+            if clicked_col >= fold_col and clicked_col <= fold_col + 1 then
+              g_tree_view:toggle_fold(vline.node_idx)
+              printf("json: toggle fold node %d → %s (%d visible lines)\n",
+                (@int32)(vline.node_idx),
+                node.folded and "folded" or "expanded",
+                (@int32)(g_tree_view.line_count))
+            end
+          end
+        end
+      end
+    end
+  end
+
+  app:deinit()
+  glfwDestroyWindow(window)
+  glfwTerminate()
+  printf("nebula: json viewer demo clean exit\n")
+  return 0
+end
+
+main()

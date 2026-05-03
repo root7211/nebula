@@ -1,0 +1,42 @@
+{
+  "name": "Nebula GUI Compiler",
+  "version": "0.2.0-dev",
+  "description": "Shape-Is paradigm: compile-time derivation engine",
+  "features": {
+    "rendering": {
+      "backend": "wgpu-native",
+      "shading": "SDF",
+      "text_modes": ["Slug", "DenseText", "CJK"]
+    },
+    "layout": {
+      "engine": "Flexbox",
+      "responsive": true,
+      "directions": ["row", "column"]
+    },
+    "primitives": [
+      "hoverable",
+      "clickable",
+      "focusable",
+      "editable",
+      "scrollable",
+      "multiline_editable",
+      "draggable_value"
+    ]
+  },
+  "phases_completed": [1, 2, 3, 4],
+  "current_phase": 4.5,
+  "axioms": {
+    "A": "Phase Closure",
+    "B": "Lifecycle Tiers",
+    "C": "Shape-Is-Rendering"
+  },
+  "platforms": ["linux", "windows", "web"],
+  "metrics": {
+    "test_count": 58,
+    "demos": 20,
+    "core_lines": 8900,
+    "pass_rate": 1.0,
+    "zero_heap": true,
+    "debug_mode": null
+  }
+}
