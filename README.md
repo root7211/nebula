@@ -14,12 +14,13 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 进行中 | 53/53 回归测试全绿 | Phase 4.7-S3 次序（2026-05-03）**
+**Era II 进行中 | 55/55 回归测试全绿 | Phase 4.5 次序（2026-05-03）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
+| **Phase 4.7-S3 行号显示** | flex_grow/flex_basis 布局支持 + 多列 DenseText 布局（行号栏固定宽度 + 编辑区弹性宽度）+ editor_with_lines_demo（双 DenseText 管线并排）+ 55/55 回归测试全绿 | `c4a7743` |
 | **Phase 4.7-S2 DenseText 接入 App 编排** | `nebula_app_register_dense_text` API + Producer 模式 + App 自动管理 DenseText 管线生命周期（init/draw/deinit）+ dense_editor_demo（DenseText + multiline_editable + App 编排三者整合）+ 28 条冒烟测试 | — |
 | **Phase 4.7-S1 CJK multiline 升级** | UTF-8 aware gap buffer（move_cursor_left_char 等 5 个新方法）+ CJK 显示宽度函数 + cjk_editor_demo + 43 条冒烟测试，editable 原语全面升级为 char-aware | — |
 | **wgpu-native v29.0.0.0 绑定对齐** | 12 个结构体布局修复（新增字段、类型宽度、字段顺序），14/14 demo 编译通过，42/42 结构体尺寸验证 OK | `f051974` |
@@ -128,10 +129,11 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 | 4.X-J | JSON Viewer | **规划中**（DenseText 语法着色 + 折叠/展开 + 滚动 + 行号） | — |
 | 4.7-S1 | CJK multiline editable | **已完成**（UTF-8 gap buffer + CJK 显示宽度 + cjk_editor_demo） | 85 |
 | 4.7-S2 | DenseText 接入 App 编排 | **已完成**（`nebula_app_register_dense_text` + Producer 模式 + dense_editor_demo） | 86 |
-| 4.7-S3 | 行号显示（独立 DenseText 列） | 规划中 | — |
-| 4.5 | 注册原语语法糖 | 规划中（**调序：4.7-S1~S4 之后**，待样本充分后设计） | — |
+| 4.7-S3 | 行号显示（独立 DenseText 列） | **已完成**（flex_grow/flex_basis + 多列 DenseText + editor_with_lines_demo） | 84 |
+| 4.5 | 注册原语语法糖 | **下一步**（S1~S3 已积累充分样本：布局糖 + 混合管线糖 + CJK 元数据） | — |
+| 4.7-S4 | 语法高亮架构 | 规划中（应用层特性，可在 4.5 之后与 S5~S7 一并实施） | — |
 | 4.6 | Indirect Drawing | 规划中 | 78 |
-| 4.7 | 文本编辑器原型 | **S1+S2 已完成**，S3~S7 规划中 | — |
+| 4.7 | 文本编辑器原型 | **S1+S2+S3 已完成**，S4~S7 规划中 | — |
 | 5.0 | 生态与 CI/CD | 规划中 | — |
 
 > 重要度评分基于五个维度加权综合评分（满分 100），详见 [`docs/PHASE_IMPORTANCE_SCORECARD.md`](docs/PHASE_IMPORTANCE_SCORECARD.md)。
@@ -243,12 +245,14 @@ nebula/
 │   ├── cjk_text_demo.nelua      # CJK + ASCII 混排 Slug 渲染
 │   ├── dense_text_demo.nelua    # 高密度文本网格（120×50 = 6000 chars）
 │   ├── cjk_editor_demo.nelua   # CJK + ASCII 混排多行编辑器（Phase 4.7-S1）
+│   ├── dense_editor_demo.nelua  # DenseText + App 编排编辑器（Phase 4.7-S2）
+│   ├── editor_with_lines_demo.nelua # 行号栏 + 编辑区多列布局（Phase 4.7-S3）
 │   ├── term_demo.nelua          # 终端模拟器原型（PTY + ANSI + Dense Text）
 │   └── term/                    # 终端模拟器子模块
 │       ├── pty_bindings.nelua   # POSIX PTY C FFI 绑定
 │       ├── ansi_parser.nelua    # ANSI/VT100 转义序列状态机
 │       └── term_buffer.nelua    # 终端单元格缓冲区
-├── tests/                        # 测试套件 (51 项)
+├── tests/                        # 测试套件 (55 项)
 ├── tools/                        # 构建与测试工具（含 font_preprocessor_cjk）
 ├── assets/                       # 字体/纹理预处理产物（含 CJK shaping 表）
 ├── vendor/                       # 第三方依赖 (wgpu-native, GLFW)
