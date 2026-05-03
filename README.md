@@ -14,13 +14,15 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 进行中 | 64/64 回归测试全绿 | Phase 4.5-S2 已完成（2026-05-03）**
+**Era II 进行中 | 66/66 回归测试全绿 | Phase 4.7-S6 已完成（2026-05-03）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
-| **Phase 4.5-S2 混合管线自动编排** | `nebula_app()` 的 `components` 数组自动检测 Visual 的 `text_mode`，dense 管线自动路由到 `nebula_app_register_dense_text`（消除 `dense_texts` 分离声明）+ highlight_sugar_demo（全糖化语法高亮编辑器，编排样板从 ~80 行→~15 行）+ 33 条冒烟测试 + 64/64 回归测试全绿 | — |
+| **Phase 4.7-S6 File I/O** | `load_file(path)` / `save_file(path)` 方法生成（C stdio FFI 绑定）+ CRLF 处理 + 空文件 + POSIX 换行末尾 + roundtrip 验证 + 66/66 回归测试全绿 | `91560be` |
+| **Phase 4.7-S5 Undo/Redo** | 编译期 `NebulaUndoStack` 类型生成 + `NebulaKey.Undo`/`Redo` 枚举 + Ctrl+Z/Y/Shift+Z 键映射 + `process_text_input` 全操作记录 + `nebula_inject_buffers` 自动注入 undo stack | `457fd62` |
+| **Phase 4.5-S2 混合管线自动编排** | `nebula_app()` 的 `components` 数组自动检测 Visual 的 `text_mode`，dense 管线自动路由到 `nebula_app_register_dense_text`（消除 `dense_texts` 分离声明）+ highlight_sugar_demo（全糖化语法高亮编辑器，编排样板从 ~80 行→~15 行）+ 33 条冒烟测试 | — |
 | **Phase 4.7-S4 语法高亮架构** | `highlight_factory.lua` 编译期模块（`nebula_highlight_rules` 规则注册 + `nebula_derive_highlighter` 扫描函数生成）+ 4 种 token 着色（关键字分组 + 行注释 + 字符串字面量 + 数字字面量）+ highlight_editor_demo（Nelua 语法高亮编辑器）+ 30 条冒烟测试 + 62/62 回归测试全绿 | — |
 | **Phase 4.5 S1 语法糖 API** | `nebula_component`（合并 annotate+derive，自动推导 states/transitions）+ `nebula_inject_buffers`（自动注入 buffer 类型）+ `nebula_app`（一站式 App 编排）+ `nebula_auto_states`（从 primitives 推导状态枚举）+ button_sugar_demo + multiline_sugar_demo + 45 条冒烟测试 | — |
 | **Phase 4.7-S3 行号显示** | flex_grow/flex_basis 布局支持 + 多列 DenseText 布局（行号栏固定宽度 + 编辑区弹性宽度）+ editor_with_lines_demo（双 DenseText 管线并排）+ 55/55 回归测试全绿 | `c4a7743` |
@@ -136,7 +138,7 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 | 4.5 | 注册原语语法糖 | **S1+S2 已完成**（S1: `nebula_component` + `nebula_inject_buffers` + `nebula_app` + `nebula_auto_states`；S2: 混合管线自动编排 + highlight_sugar_demo） | — |
 | 4.7-S4 | 语法高亮架构 | **已完成**（`highlight_factory.lua` + 编译期规则注入 + 运行时 per-char 着色 + highlight_editor_demo） | 85 |
 | 4.6 | Indirect Drawing | 规划中 | 78 |
-| 4.7 | 文本编辑器原型 | **S1+S2+S3+S4 已完成**，S5~S7 规划中 | — |
+| 4.7 | 文本编辑器原型 | **S1+S2+S3+S4+S5+S6 已完成**（S5: Undo/Redo，S6: File I/O），S7 规划中 | — |
 | 5.0 | 生态与 CI/CD | 规划中 | — |
 
 > 重要度评分基于五个维度加权综合评分（满分 100），详见 [`docs/PHASE_IMPORTANCE_SCORECARD.md`](docs/PHASE_IMPORTANCE_SCORECARD.md)。
@@ -265,7 +267,7 @@ nebula/
 │       ├── pty_bindings.nelua   # POSIX PTY C FFI 绑定
 │       ├── ansi_parser.nelua    # ANSI/VT100 转义序列状态机
 │       └── term_buffer.nelua    # 终端单元格缓冲区
-├── tests/                        # 测试套件 (64 项)
+├── tests/                        # 测试套件 (66 项)
 ├── tools/                        # 构建与测试工具（含 font_preprocessor_cjk）
 ├── assets/                       # 字体/纹理预处理产物（含 CJK shaping 表）
 ├── vendor/                       # 第三方依赖 (wgpu-native, GLFW)
