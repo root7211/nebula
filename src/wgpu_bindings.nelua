@@ -582,18 +582,16 @@ global WGPUTexelCopyBufferLayout <cimport, nodecl> = @record{
 }
 
 global WGPUVertexAttribute <cimport, nodecl> = @record{
-  nextInChain:    pointer,
   format:         WGPUVertexFormat,
   offset:         uint64,
   shaderLocation: uint32,
 }
 
 global WGPUVertexBufferLayout <cimport, nodecl> = @record{
-  nextInChain:   pointer,
-  stepMode:      WGPUVertexStepMode,
-  arrayStride:   uint64,
+  stepMode:       WGPUVertexStepMode,
+  arrayStride:    uint64,
   attributeCount: csize,
-  attributes:    *WGPUVertexAttribute,
+  attributes:     *WGPUVertexAttribute,
 }
 
 -- ===== 纹理描述符 =====
