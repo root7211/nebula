@@ -278,6 +278,20 @@ global function nebula_shutdown(renderer: *NebulaRenderer): void
   glfwTerminate()
 end
 
+-- ★ Phase 4.5-S3: nebula_frame_begin
+-- 帧循环整合：poll_events + dt 计算 + input 收集，省去 ~5 行样板。
+-- 性能：1 次函数调用 + 4 次赋值 ≈ ~5ns/frame（帧预算 16.6ms 的 0.00003%）。
+global _nebula_prev_time: float64 = 0.0
+
+global function nebula_frame_begin(input: *NebulaInputState): float32
+  nebula_poll_events()
+  local now = glfwGetTime()
+  local dt = (@float32)(now - _nebula_prev_time)
+  _nebula_prev_time = now
+  nebula_collect_input(_nebula_window, input, dt)
+  return dt
+end
+
 -- ★ Phase 3.8: nebula_frame_render
 -- 泛型帧渲染函数：Surface 获取 → RenderPass 创建 → app:update+draw → submit+present
 -- 公理 C（形即渲染）：渲染循环不持有帧间状态；泛型展开后等价于手写静态代码。

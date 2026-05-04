@@ -292,7 +292,7 @@ end
 local app_nelua_lines = count_lines(script_dir .. "/../src/app.nelua")
 if app_nelua_lines then
   print(("  app.nelua: %d 行"):format(app_nelua_lines))
-  assert_le("app.nelua ≤ 530 行（Phase 4.7-S5: undo/redo 快捷键）", app_nelua_lines, 530)  -- ★ Phase 3.12 升级
+  assert_le("app.nelua ≤ 545 行（Phase 4.5-S3: nebula_frame_begin）", app_nelua_lines, 545)  -- ★ Phase 4.5-S3 升级
 else
   failed = failed + 1
   print("[FAIL] 无法读取 src/app.nelua")

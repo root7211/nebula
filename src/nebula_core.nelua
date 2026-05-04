@@ -844,7 +844,48 @@ global ClickableState = @record{
 ## 
 ##   return table.concat(lines, "\n")
 ## end
-## 
+##
+## -- ★ Phase 4.5-S3: NEBULA_THEME_DEFAULTS — 编译期主题默认值表
+## -- 用户可在 require "nebula_core" 后、调用 nebula_derive 前覆盖：
+## --   ##[[ NEBULA_THEME_DEFAULTS.hovered.border = { r=1.0, g=0.4, b=0.0, a=1.0 } ]]
+## NEBULA_THEME_DEFAULTS = {
+##   default = {
+##     bg     = { r=0.22, g=0.22, b=0.24, a=1.0 },
+##     border = { r=0.40, g=0.40, b=0.45, a=1.0 },
+##     border_width = 1.0,
+##     track  = { r=0.20, g=0.20, b=0.25, a=1.0 },
+##     thumb  = { r=0.45, g=0.45, b=0.50, a=1.0 },
+##   },
+##   hovered = {
+##     bg     = { r=0.28, g=0.28, b=0.32, a=1.0 },
+##     border = { r=0.40, g=0.60, b=1.00, a=1.0 },
+##     border_width = 2.0,
+##     track  = { r=0.22, g=0.22, b=0.28, a=1.0 },
+##     thumb  = { r=0.55, g=0.65, b=0.90, a=1.0 },
+##   },
+##   pressed = {
+##     bg     = { r=0.16, g=0.16, b=0.20, a=1.0 },
+##     border = { r=0.60, g=0.80, b=1.00, a=1.0 },
+##     border_width = 2.5,
+##     track  = { r=0.16, g=0.16, b=0.22, a=1.0 },
+##     thumb  = { r=0.65, g=0.80, b=1.00, a=1.0 },
+##   },
+##   focused = {
+##     bg     = { r=0.16, g=0.18, b=0.24, a=1.0 },
+##     border = { r=0.35, g=0.60, b=1.00, a=1.0 },
+##     border_width = 2.0,
+##     track  = { r=0.18, g=0.20, b=0.28, a=1.0 },
+##     thumb  = { r=0.50, g=0.70, b=1.00, a=1.0 },
+##   },
+##   draggingbar = {
+##     bg     = { r=0.16, g=0.16, b=0.22, a=1.0 },
+##     border = { r=0.50, g=0.80, b=1.00, a=1.0 },
+##     border_width = 2.5,
+##     track  = { r=0.25, g=0.25, b=0.32, a=1.0 },
+##     thumb  = { r=0.65, g=0.80, b=1.00, a=1.0 },
+##   },
+## }
+##
 ## -- ---- 生成 Context 记录 + 方法 ----
 ## -- visual_type_name: 原始视觉规格名（如 "ButtonVisual"）——用于字段类型引用
 ## -- base:             派生基名（如 "Button"）——用于生成 Context/SM/State 名称
@@ -926,7 +967,63 @@ global ClickableState = @record{
 ##     end
 ##   end
 ##   table.insert(lines, "end")
-## 
+##
+##   -- ===== init_themed(pos, size, radius) — Phase 4.5-S3 =====
+##   -- 使用 NEBULA_THEME_DEFAULTS 编译期主题表生成默认颜色的 init 快捷方法。
+##   -- 仅对非 DenseText 的交互型 Visual 生成（DenseText 无颜色字段）。
+##   -- 只为 Visual record 中实际存在的字段生成赋值。
+##   if reg.text_mode ~= "dense" and reg.states and #reg.states > 0 then
+##     -- 检查 Visual 是否有 radius 字段
+##     local has_radius = false
+##     for _, f in ipairs(base_fields) do
+##       if f.name == "radius" then has_radius = true; break end
+##     end
+##     if has_radius then
+##       table.insert(lines, ("function %s:init_themed(pos: Vec2, size: Vec2, radius: float32): void"):format(ctx))
+##       table.insert(lines, ("  self:init(%s{"):format(type_name))
+##       table.insert(lines, "    pos = pos, size = size, radius = radius,")
+##     else
+##       table.insert(lines, ("function %s:init_themed(pos: Vec2, size: Vec2): void"):format(ctx))
+##       table.insert(lines, ("  self:init(%s{"):format(type_name))
+##       table.insert(lines, "    pos = pos, size = size,")
+##     end
+##     -- 辅助：检查某状态某属性是否存在于 Visual record
+##     local function has_field(state, prop)
+##       return state_fields and state_fields[state] and state_fields[state][prop]
+##     end
+##     for _, s in ipairs(reg.states) do
+##       local theme = NEBULA_THEME_DEFAULTS[s] or NEBULA_THEME_DEFAULTS["default"]
+##       if theme then
+##         if has_field(s, "bg_color") then
+##           local c = theme.bg
+##           table.insert(lines, ("    %s_bg_color = Color{ r=%.3f, g=%.3f, b=%.3f, a=%.1f },"):format(
+##             s, c.r, c.g, c.b, c.a))
+##         end
+##         if has_field(s, "border_color") then
+##           local c = theme.border
+##           table.insert(lines, ("    %s_border_color = Color{ r=%.3f, g=%.3f, b=%.3f, a=%.1f },"):format(
+##             s, c.r, c.g, c.b, c.a))
+##         end
+##         if has_field(s, "border_width") then
+##           table.insert(lines, ("    %s_border_width = %.1f,"):format(s, theme.border_width))
+##         end
+##         if has_field(s, "track_color") and theme.track then
+##           local c = theme.track
+##           table.insert(lines, ("    %s_track_color = Color{ r=%.3f, g=%.3f, b=%.3f, a=%.1f },"):format(
+##             s, c.r, c.g, c.b, c.a))
+##         end
+##         if has_field(s, "thumb_color") and theme.thumb then
+##           local c = theme.thumb
+##           table.insert(lines, ("    %s_thumb_color = Color{ r=%.3f, g=%.3f, b=%.3f, a=%.1f },"):format(
+##             s, c.r, c.g, c.b, c.a))
+##         end
+##       end
+##     end
+##     table.insert(lines, "  })")
+##     table.insert(lines, "end")
+##     print(("[sugar] %s: generated init_themed with %d states"):format(ctx, #reg.states))
+##   end
+##
 ##   -- ===== 每个属性的 state-取值 helper =====
 ##   -- 用作内部的 if-else 选择器
 ##   for _, p in ipairs(all_props) do
@@ -1738,6 +1835,141 @@ global ClickableState = @record{
 ##
 ##   print(("[sugar] nebula_editor_visual: %s (%s + %s, id=%d)"):format(
 ##     type_name, mb_type, gb_type, component_id))
+## end
+##
+## -- ★ Phase 4.5-S3: nebula_visual(type_name, spec)
+## --
+## -- L2 层 Visual 声明糖：从 primitives 自动推导 states、record 字段、buffer 类型，
+## -- 然后注入 record AST 并调用 nebula_component 完成全套 derive。
+## --
+## -- 输入 spec:
+## --   primitives   : string[]  — 必选：交互原语列表（如 {"clickable"}）
+## --   fields       : string[]  — 可选：用户附加字段（如 {"score: int32"}）
+## --   text_mode    : string?   — 可选："dense" 时生成轻量 record
+## --   max_chars    : number?   — 可选：text_mode="dense" 时的容量
+## --   max_text_len : number?   — 可选：editable 系原语的 buffer 容量
+## --   max_lines    : number?   — 可选：multiline_editable 的行数
+## --   component_id : number?   — 可选：focusable 组件 ID
+## --
+## -- 转换链：
+## --   1. 解析 primitives 依赖链 (nebula_resolve_primitives)
+## --   2. 推导 states (nebula_auto_states)
+## --   3. 生成 record 字段（基础 + 每状态颜色三元组 + 原语附加 + 用户附加）
+## --   4. inject_statement 注入 record AST
+## --   5. 如需 editable/multiline → 前置 nebula_inject_buffers
+## --   6. 调用 nebula_component(type_name, spec)
+## --
+## function nebula_visual(type_name, spec)
+##   spec = spec or {}
+##   local primitives = spec.primitives or {}
+##   local text_mode  = spec.text_mode
+##
+##   -- DenseText 简写路径：text_mode="dense" 时只需 pos+size
+##   if text_mode == "dense" then
+##     local record_src = ("global %s = @record{ pos: Vec2, size: Vec2 }"):format(type_name)
+##     local ast = aster.parse(record_src, "<nebula_visual:" .. type_name .. ">")
+##     for _, stat in ipairs(ast) do
+##       inject_statement(stat)
+##     end
+##     nebula_component(type_name, {
+##       text_mode = "dense",
+##       max_chars = spec.max_chars or 256,
+##     })
+##     print(("[sugar] nebula_visual: %s (dense, max_chars=%d)"):format(
+##       type_name, spec.max_chars or 256))
+##     return
+##   end
+##
+##   -- 交互型 Visual 路径
+##   local resolved = nebula_resolve_primitives(primitives)
+##   local has_prim = {}
+##   for _, p in ipairs(resolved) do has_prim[p] = true end
+##
+##   -- Step 1-2: 推导 states
+##   local states = nebula_auto_states(primitives)
+##
+##   -- Step 3: 生成 record 字段
+##   local fields = {}
+##
+##   -- 基础字段（永远生成）
+##   table.insert(fields, "  pos: Vec2,")
+##   table.insert(fields, "  size: Vec2,")
+##   table.insert(fields, "  radius: float32,")
+##
+##   -- 每个 state 的颜色三元组
+##   for _, s in ipairs(states) do
+##     table.insert(fields, ("  %s_bg_color: Color,"):format(s))
+##     table.insert(fields, ("  %s_border_color: Color,"):format(s))
+##     table.insert(fields, ("  %s_border_width: float32,"):format(s))
+##   end
+##
+##   -- scrollable 附加字段：content_height + 每状态 track/thumb 颜色
+##   if has_prim["scrollable"] or has_prim["multiline_editable"] then
+##     table.insert(fields, "  content_height: float32,")
+##     for _, s in ipairs(states) do
+##       table.insert(fields, ("  %s_track_color: Color,"):format(s))
+##       table.insert(fields, ("  %s_thumb_color: Color,"):format(s))
+##     end
+##   end
+##
+##   -- editable 附加字段
+##   if has_prim["editable"] or has_prim["multiline_editable"] then
+##     table.insert(fields, "  pixel_height: float32,")
+##   end
+##
+##   -- multiline_editable 附加字段
+##   if has_prim["multiline_editable"] then
+##     local max_text_len = spec.max_text_len or 256
+##     local max_lines    = spec.max_lines    or 32
+##     local mb_type = ("NebulaMultiBuf%d_%d"):format(max_text_len, max_lines)
+##     local gb_type = ("NebulaBuf%d"):format(max_text_len)
+##     table.insert(fields, "  text_origin_x: float32,")
+##     table.insert(fields, ("  multi_buf: %s,"):format(mb_type))
+##     table.insert(fields, ("  gap_buf: %s,"):format(gb_type))
+##   elseif has_prim["editable"] then
+##     local max_text_len = spec.max_text_len or 256
+##     local gb_type = ("NebulaBuf%d"):format(max_text_len)
+##     table.insert(fields, ("  gap_buf: %s,"):format(gb_type))
+##   end
+##
+##   -- 用户附加字段
+##   if spec.fields then
+##     for _, f in ipairs(spec.fields) do
+##       table.insert(fields, ("  %s,"):format(f))
+##     end
+##   end
+##
+##   -- Step 4: 组装 record 源码
+##   local record_src = ("global %s = @record{\n%s\n}"):format(
+##     type_name, table.concat(fields, "\n"))
+##
+##   -- Step 5: 如需 buffer 类型，先注入
+##   if has_prim["editable"] or has_prim["multiline_editable"] then
+##     nebula_inject_buffers({
+##       primitives   = primitives,
+##       max_text_len = spec.max_text_len or 256,
+##       max_lines    = spec.max_lines or 32,
+##     })
+##   end
+##
+##   -- 注入 record AST
+##   local ast = aster.parse(record_src, "<nebula_visual:" .. type_name .. ">")
+##   for _, stat in ipairs(ast) do
+##     inject_statement(stat)
+##   end
+##
+##   -- Step 6: 调用 nebula_component
+##   nebula_component(type_name, {
+##     primitives   = primitives,
+##     text_mode    = text_mode,
+##     max_chars    = spec.max_chars,
+##     max_text_len = spec.max_text_len,
+##     max_lines    = spec.max_lines,
+##     component_id = spec.component_id or 0,
+##   })
+##
+##   print(("[sugar] nebula_visual: %s (primitives={%s}, states={%s})"):format(
+##     type_name, table.concat(primitives, ","), table.concat(states, ",")))
 ## end
 ##
 ## -- ★ Phase 4.5 Sugar Optimization: nebula_editor_init_visual(opts)

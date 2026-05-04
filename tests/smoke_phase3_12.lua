@@ -500,7 +500,7 @@ if af_lines then
   print(("  [INFO] app_factory.lua: %d 行"):format(af_lines))
 end
 if app_lines then
-  assert_le("app.nelua 行数 <= 530 (Phase 4.7-S5: undo/redo shortcuts)", app_lines, 530)
+  assert_le("app.nelua 行数 <= 545 (Phase 4.5-S3: nebula_frame_begin)", app_lines, 545)
   print(("  [INFO] app.nelua: %d 行"):format(app_lines))
 end
 

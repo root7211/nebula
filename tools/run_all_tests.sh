@@ -206,6 +206,9 @@ run_test "smoke_phase4_7_s6 (Phase 4.7-S6 — File I/O & load_file/save_file & C
 run_test "smoke_phase4_7_s7 (Phase 4.7-S7 — Text Editor prototype & S1-S6 integration)" \
   nelua-lua tests/smoke_phase4_7_s7.lua
 
+run_test "smoke_phase4_5_s3 (Phase 4.5-S3 — 语法糖深化: nebula_visual + init_themed + nebula_frame_begin)" \
+  nelua-lua tests/smoke_phase4_5_s3.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="
@@ -337,6 +340,13 @@ run_test "compile multiline_sugar_demo (Phase 4.5 — inject_buffers + component
   --cflags="-I./vendor/wgpu-native/include" \
   --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
   examples/multiline_sugar_demo.nelua -o ~/.cache/nelua/multiline_sugar_demo
+
+# ★ Phase 4.5-S3: button_v2_demo 编译回归（nebula_visual + init_themed + nebula_frame_begin 极限形态）
+run_test "compile button_v2_demo (Phase 4.5-S3 — nebula_visual + init_themed + frame_begin)" \
+  nelua -c -L src -L assets/generated --add-path . --add-path examples --add-path assets/generated \
+  --cflags="-I./vendor/wgpu-native/include" \
+  --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
+  examples/button_v2_demo.nelua -o ~/.cache/nelua/button_v2_demo
 
 # ★ Phase 4.X-J: json_viewer_demo 编译回归（DenseText + scrollable + fold + 语法着色）
 run_test "compile json_viewer_demo (Phase 4.X-J — JSON Viewer syntax coloring + fold/unfold)" \

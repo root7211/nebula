@@ -1,0 +1,22 @@
+-- =============================================================================
+-- nebula.nelua — 统一入口模块
+--
+-- ★ Phase 4.5-S3: 用 1 行 require "nebula" 替代 ~10 行 require 列表。
+-- Nelua 的 require 是编译期包含，未使用符号自动 DCE（dead code elimination）。
+-- =============================================================================
+
+## cinclude "<stdio.h>"
+## cinclude "<string.h>"
+
+require "nebula_core"
+require "glfw_bindings"
+require "wgpu_bindings"
+require "renderer"
+require "app"
+require "text_runtime"
+require "nebula_cursor"
+require "nebula_arena"
+require "nebula_theme"
+
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+global function snprintf(buf: cstring, size: csize, fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
