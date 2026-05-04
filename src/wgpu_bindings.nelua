@@ -97,7 +97,7 @@ global WGPUVertexStepMode_Undefined <comptime> = (@WGPUVertexStepMode)(0x0000000
 global WGPUVertexStepMode_Vertex    <comptime> = (@WGPUVertexStepMode)(0x00000002)
 global WGPUVertexStepMode_Instance  <comptime> = (@WGPUVertexStepMode)(0x00000003)
 
-global WGPUShaderStage = @uint32
+global WGPUShaderStage = @uint64
 global WGPUShaderStage_Vertex   <comptime> = (@WGPUShaderStage)(0x00000001)
 global WGPUShaderStage_Fragment <comptime> = (@WGPUShaderStage)(0x00000002)
 
@@ -281,9 +281,7 @@ global WGPUBindGroupLayoutEntry <cimport, nodecl> = @record{
   nextInChain:      pointer,
   binding:          uint32,
   _pad0:            uint32,    -- padding for 8-byte alignment of visibility
-  visibility:       uint64,   -- WGPUShaderStage = WGPUFlags = uint64_t
-  bindingArraySize: uint32,   -- ★ Phase 4.8: added for wgpu-native v29
-  _pad1:            uint32,   -- padding for 8-byte alignment of buffer.nextInChain
+  visibility:       WGPUShaderStage,  -- WGPUFlags = uint64_t
   buffer:           record{
     nextInChain:      pointer,
     type:             uint32,
