@@ -2149,10 +2149,12 @@ global ClickableState = @record{
 ## --   shadows     : table[]? — 阴影组件 [{name, type, blur_radius?}]
 ## function nebula_app(app_name, spec)
 ##   spec = spec or {}
-##   -- 设置根布局（如果指定）
-##   if spec.layout then
-##     nebula_app_set_root_layout(app_name, spec.layout)
+##   -- ★ 默认 layout：省略时自动使用 1280x800，消除布局样板
+##   if not spec.layout then
+##     spec.layout = { direction = "column", width = 1280, height = 800 }
 ##   end
+##   -- 设置根布局
+##   nebula_app_set_root_layout(app_name, spec.layout)
 ##   -- 开始 App 注册
 ##   nebula_app_begin(app_name, { arena_size = spec.arena_size })
 ##   -- ★ Phase 4.5 S2: 注册组件（混合管线自动编排）

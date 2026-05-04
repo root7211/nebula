@@ -1,5 +1,5 @@
 -- minimal_editor_demo.nelua — Nebula GUI Compiler
--- 文档愿景验证：最小编辑器（~30 行框架代码）
+-- 文档愿景验证：最小编辑器（框架代码 12 行）
 -- 操作：点击窗口获取焦点后可输入文字
 
 require "nebula"
@@ -11,7 +11,6 @@ require "nebula"
 ##   component_id = 1,
 ## })
 ## nebula_app("EditorApp", {
-##   layout = { direction = "row", width = 1280, height = 800 },
 ##   components = {
 ##     { name = "editor", type = "EditorVisual" },
 ##   },
@@ -20,10 +19,10 @@ require "nebula"
 local function main(): int32
   local renderer: NebulaRenderer
   local app: EditorApp
-  if not nebula_init(&renderer, &app, "Minimal Editor", 1280, 800) then
+  if not nebula_init(&renderer, &app, "Minimal Editor", EditorApp_WIN_WIDTH, EditorApp_WIN_HEIGHT) then
     return 1
   end
-  app.editor:init_themed(Vec2{x = 0.0, y = 0.0}, Vec2{x = 1280.0, y = 800.0}, 0.0)
+  app.editor:init_themed(Vec2{x = 0.0, y = 0.0}, Vec2{x = (@float32)(EditorApp_WIN_WIDTH), y = (@float32)(EditorApp_WIN_HEIGHT)}, 0.0)
 
   local input: NebulaInputState
   while not nebula_should_close() do

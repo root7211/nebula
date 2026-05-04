@@ -527,6 +527,14 @@ local function gen_app_record(app_name, reg)
   end
   emit("}")
 
+  -- ★ 窗口尺寸常量（从 root_layout 推导，供 nebula_init / init_themed 使用）
+  local win_w = (reg.root_layout and reg.root_layout.width)  or 1280
+  local win_h = (reg.root_layout and reg.root_layout.height) or 800
+  emit("")
+  emit("-- ★ 窗口尺寸常量（供 nebula_init / init_themed 使用）")
+  emit(("global %s_WIN_WIDTH: integer <comptime> = %d"):format(app_name, win_w))
+  emit(("global %s_WIN_HEIGHT: integer <comptime> = %d"):format(app_name, win_h))
+
   return table.concat(L, "\n")
 end
 
