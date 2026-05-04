@@ -1,15 +1,16 @@
 -- =============================================================================
 -- text_editor_demo.nelua
--- Nebula GUI Compiler — Phase 4.7-S7
+-- Nebula GUI Compiler — Phase 4.7-S7 + Phase 4.8-S1
 --
--- 文本编辑器原型——Phase 4.7 收官 demo：
+-- 文本编辑器原型——Phase 4.7 收官 demo + Phase 4.8 S1 选区可视化 + 系统剪贴板：
 --   · S1: CJK multiline editable（UTF-8 aware gap buffer）
 --   · S2: DenseText App 编排（Producer 模式）
 --   · S3: 行号显示（内置 Producer）
 --   · S4: 语法高亮（编译期规则注入 + 运行时 per-char 着色）
 --   · S5: Undo/Redo（Ctrl+Z / Ctrl+Y）
 --   · S6: File I/O（load_file / save_file）
---   · S7: 集成验收（本文件）— 能打开 .txt/.nelua 文件，编辑、保存、中英文输入
+--   · S7: 集成验收
+--   · Phase 4.8-S1: 选区可视化（Shift+Arrow 选区扩展 + 蓝色背景高亮）+ 系统剪贴板（Ctrl+C/V/X/A）
 --
 -- ★ Sugar Optimization:
 --   · nebula_theme — 内置暗色主题（消除 8 行颜色函数）
@@ -121,6 +122,22 @@ global function fill_edit_area(
   local visible_rows: uint32 = EDIT_ROWS
   local hl_colors: [512]uint32
 
+  -- ★ Phase 4.8 S1: compute ordered selection bounds
+  local sel_active: boolean = (editor.sel_anchor_row ~= editor.cursor_row) or (editor.sel_anchor_col ~= editor.cursor_col)
+  local sel_sr: uint32 = 0
+  local sel_sc: uint32 = 0
+  local sel_er: uint32 = 0
+  local sel_ec: uint32 = 0
+  if sel_active then
+    if editor.sel_anchor_row < editor.cursor_row or (editor.sel_anchor_row == editor.cursor_row and editor.sel_anchor_col < editor.cursor_col) then
+      sel_sr = editor.sel_anchor_row; sel_sc = editor.sel_anchor_col
+      sel_er = editor.cursor_row; sel_ec = editor.cursor_col
+    else
+      sel_sr = editor.cursor_row; sel_sc = editor.cursor_col
+      sel_er = editor.sel_anchor_row; sel_ec = editor.sel_anchor_col
+    end
+  end
+
   local row: uint32 = 0
   while row < visible_rows and idx < max do
     local buf_row = row + scroll_row
@@ -150,6 +167,24 @@ global function fill_edit_area(
           elseif ch >= 0xF0 then ch = 0x3F; byte_i = byte_i + 3 end
           byte_i = byte_i + 1
         end
+        -- ★ Phase 4.8 S1: selection background override
+        if sel_active then
+          local in_sel: boolean = false
+          if buf_row > sel_sr and buf_row < sel_er then
+            in_sel = true  -- entire row is selected
+          elseif buf_row == sel_sr and buf_row == sel_er then
+            -- single-row selection
+            local prev_byte = byte_i > 0 and (byte_i - 1) or 0
+            if prev_byte >= sel_sc and prev_byte < sel_ec then in_sel = true end
+          elseif buf_row == sel_sr then
+            local prev_byte = byte_i > 0 and (byte_i - 1) or 0
+            if prev_byte >= sel_sc then in_sel = true end
+          elseif buf_row == sel_er then
+            local prev_byte = byte_i > 0 and (byte_i - 1) or 0
+            if prev_byte < sel_ec then in_sel = true end
+          end
+          if in_sel then this_bg = nebula_theme_bg_selected() end
+        end
         if cursor_byte >= 0 and (@uint32)(cursor_byte) == byte_i - 1 then
           this_bg = nebula_theme_bg_cursor(); fg = nebula_theme_fg_cursor()
         end
@@ -158,6 +193,14 @@ global function fill_edit_area(
       end
       while col < EDIT_COLS and idx < max do
         local this_bg = bg
+        -- ★ Phase 4.8 S1: selection bg for trailing empty cells
+        if sel_active then
+          if buf_row > sel_sr and buf_row < sel_er then
+            this_bg = nebula_theme_bg_selected()
+          elseif buf_row == sel_sr and buf_row ~= sel_er and byte_i >= sel_sc then
+            this_bg = nebula_theme_bg_selected()
+          end
+        end
         if cursor_byte >= 0 and byte_i == line_len and col == byte_i then this_bg = nebula_theme_bg_cursor() end
         nebula_dense_grid_fill_instance(&instances[idx], row, col, 32, origin_x, origin_y, CELL_W, CELL_H, nebula_theme_fg_normal(), this_bg)
         idx = idx + 1; col = col + 1
@@ -242,6 +285,9 @@ local function main(): int32
   app.editor.cursor_row = 0
   app.editor.cursor_col = 0
   app.editor.line_count = 1
+  -- ★ Phase 4.8 S1: initialize selection anchor
+  app.editor.sel_anchor_row = 0
+  app.editor.sel_anchor_col = 0
   app.editor.visual.multi_buf:init()
 
   -- 加载文件

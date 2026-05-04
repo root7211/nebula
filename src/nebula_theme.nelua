@@ -39,6 +39,11 @@ global function nebula_theme_fg_separator(): uint32
   return nebula_pack_rgba8(50, 50, 70, 255)
 end
 
+-- 选区背景（VSCode 风格蓝色）
+global function nebula_theme_bg_selected(): uint32
+  return nebula_pack_rgba8(38, 79, 120, 255)
+end
+
 -- 光标行 / 光标
 global function nebula_theme_bg_cursor_line(): uint32
   return nebula_pack_rgba8(35, 35, 50, 255)

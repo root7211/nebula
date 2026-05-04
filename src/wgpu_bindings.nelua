@@ -282,14 +282,16 @@ global WGPUBindGroupLayoutEntry <cimport, nodecl> = @record{
   binding:          uint32,
   _pad0:            uint32,    -- padding for 8-byte alignment of visibility
   visibility:       uint64,   -- WGPUShaderStage = WGPUFlags = uint64_t
+  bindingArraySize: uint32,   -- ★ Phase 4.8: added for wgpu-native v29
+  _pad1:            uint32,   -- padding for 8-byte alignment of buffer.nextInChain
   buffer:           record{
     nextInChain:      pointer,
     type:             uint32,
     hasDynamicOffset: uint32,  -- WGPUBool = uint32_t
     minBindingSize:   uint64,
   },
-  sampler:          record{ nextInChain: pointer, type: uint32 },
-  texture:          record{ nextInChain: pointer, sampleType: uint32, viewDimension: uint32, multisampled: uint32 },
+  sampler:          record{ nextInChain: pointer, type: uint32, _pad: uint32 },
+  texture:          record{ nextInChain: pointer, sampleType: uint32, viewDimension: uint32, multisampled: uint32, _pad: uint32 },
   storageTexture:   record{ nextInChain: pointer, access: uint32, format: WGPUTextureFormat, viewDimension: uint32 },
 }
 

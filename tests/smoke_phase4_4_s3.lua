@@ -89,13 +89,18 @@ local me = NEBULA_PRIMITIVES["multiline_editable"]
 assert_eq("§2.2: multiline_editable has 2 dependencies", #me.dependencies, 2)
 assert_eq("§2.3: dep[1] = editable", me.dependencies[1], "editable")
 assert_eq("§2.4: dep[2] = scrollable", me.dependencies[2], "scrollable")
-assert_eq("§2.5: multiline_editable has 3 context fields", #me.context_fields, 3)
+assert_eq("§2.5: multiline_editable has 5 context fields", #me.context_fields, 5)
 assert_eq("§2.6: ctx[1] = cursor_row", me.context_fields[1].name, "cursor_row")
 assert_eq("§2.6b: cursor_row type = uint32", me.context_fields[1].type, "uint32")
 assert_eq("§2.7: ctx[2] = cursor_col", me.context_fields[2].name, "cursor_col")
 assert_eq("§2.7b: cursor_col type = uint32", me.context_fields[2].type, "uint32")
 assert_eq("§2.8: ctx[3] = line_count", me.context_fields[3].name, "line_count")
 assert_eq("§2.8b: line_count type = uint32", me.context_fields[3].type, "uint32")
+-- ★ Phase 4.8 S1: selection anchor fields
+assert_eq("§2.9: ctx[4] = sel_anchor_row", me.context_fields[4].name, "sel_anchor_row")
+assert_eq("§2.9b: sel_anchor_row type = uint32", me.context_fields[4].type, "uint32")
+assert_eq("§2.10: ctx[5] = sel_anchor_col", me.context_fields[5].name, "sel_anchor_col")
+assert_eq("§2.10b: sel_anchor_col type = uint32", me.context_fields[5].type, "uint32")
 
 -- §3: nebula_gen_process_input generates multiline key handling
 local gen = nebula_gen_process_input({

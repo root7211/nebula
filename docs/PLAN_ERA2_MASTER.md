@@ -1,8 +1,8 @@
 # Nebula Era II 后半段实施总计划
 
 **创建日期**：2026-05-01
-**最后更新**：2026-05-02
-**基准状态**：47/47 回归测试全绿 | D-4.1-C PASSED | Phase 4.2.3-S2 已完成
+**最后更新**：2026-05-04
+**基准状态**：70/70 回归测试全绿 | D-4.1-C PASSED | Phase 4.8-S1 已完成
 
 ---
 
@@ -20,6 +20,10 @@
 | 4.X input | ✅ | 剪贴板 + Unicode 字符输入 |
 | 全代码库审计 | ✅ | 10 项修复（2 高危 + 4 中危 + 2 低危 BUG + 2 内存安全，commit `8647048`） |
 | 交互原语行为验证 | ✅ | 40 条运行时行为断言 + BUG-4/5/6 回归守护（commit `c424005`） |
+| 4.5 S1-S3 | ✅ | 语法糖优化（inject_buffers / editor_visual / builtin_line_nums） |
+| 4.7 S1-S7 | ✅ | 文本编辑器原型（语法高亮 / 行号 / Undo/Redo / File I/O） |
+| 4.8-S1 | ✅ | 选区可视化 + 系统剪贴板（Shift+Arrow / Ctrl+C/V/X/A） |
+| wgpu 绑定修复 | ✅ | `WGPUBindGroupLayoutEntry.bindingArraySize` 字段对齐修复 |
 
 ---
 
@@ -181,29 +185,37 @@
 ## 6. 里程碑时间线（相对顺序）
 
 ```
-现在（2026-05-02）
+现在（2026-05-04）
  │
  ├─ 第一梯队: 4.2.3 S0+S1+S2 ✅ 已完成
  │
- ├─ 第二梯队: 4.X (高密度文本 Instanced 通道 + UAX#14 换行 + dense_text_demo) ← 当前
+ ├─ 第二梯队: 4.X (高密度文本 Instanced 通道) ✅ 已完成
  │
- ├─ 第三梯队: 4.5 (语法糖) + L1 State 基础
+ ├─ 第三梯队: 4.5 (语法糖) ✅ 已完成
  │
- └─ 第四梯队: 4.7 (文本编辑器原型 — text_editor_demo)
-       │
-       v
-    Era II 收官 → Era III (生态/CI/CD/5.0)
+ ├─ 第四梯队: 4.7 (文本编辑器原型) ✅ 已完成
+ │
+ ├─ 第五梯队: 4.8 (文本编辑器产品化) ← 当前
+ │    ├─ S1: 选区可视化 + 系统剪贴板 ✅
+ │    ├─ S2: 搜索与替换 🔜
+ │    ├─ S3: 状态栏 + 光标行高亮 🔜
+ │    ├─ S4: 多语言语法高亮 🔜
+ │    ├─ S5: 自动缩进 + Tab 🔜
+ │    └─ S6: 集成验收 🔜
+ │
+ └─ Era II 收官 → Phase 5.0 (工程化 / CI/CD / 生态)
 ```
 
 ---
 
 ## 7. 立即可执行的下一步
 
-**Phase 4.X Step 1**：在 `src/derive/shader_compose.lua` 新增 `nebula_compose_dense_text_shader(opts)`。
+**Phase 4.8 S2**：搜索与替换功能。
 
 具体操作：
-1. 参考 `nebula_compose_shader_instanced` 的 Storage Buffer + 程序化顶点模式
-2. 着色器包含：DenseTextUniforms (16B) + DenseCharInstance Storage Buffer + SDF atlas 纹理采样
-3. Vertex shader 程序化生成 unit quad（6 顶点），从 Storage Buffer 读取 per-char pos/uv/fg/bg
-4. Fragment shader 做 bg+fg SDF alpha 混合
-5. 详见 `PLAN_PHASE4_X_DENSE_TEXT.md` Section 3.1
+1. 在 `interaction_factory.lua` 中处理 Ctrl+F / Ctrl+H 触发搜索/替换模式
+2. 新增 `SearchBarVisual`（`editable` 原语，单行，256 字节容量）
+3. App 布局改为 column：`[搜索栏(flex_basis=30, 条件显示)] + [编辑区(flex_grow=1)]`
+4. 搜索逻辑：逐行 `strstr` 匹配，结果存入静态数组 `match_positions[512]`
+5. Producer 渲染时检查当前字符是否在匹配范围内，设置高亮背景色
+6. 详见 `PLAN_PHASE4_8_EDITOR.md` S2 章节
