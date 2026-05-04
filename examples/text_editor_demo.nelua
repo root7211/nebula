@@ -12,10 +12,11 @@
 --   · S7: 集成验收
 --   · Phase 4.8-S1: 选区可视化（Shift+Arrow 选区扩展 + 蓝色背景高亮）+ 系统剪贴板（Ctrl+C/V/X/A）
 --
--- ★ Sugar Optimization:
---   · nebula_theme — 内置暗色主题（消除 8 行颜色函数）
---   · nebula_editor_visual — 自动生成 Visual record（消除 ~25 行 record + component）
---   · nebula_builtin_line_nums — 内置行号 Producer（消除 ~53 行 fill_line_nums）
+-- ★ Sugar:
+--   · nebula_visual — 自动生成 Visual record + buffer 注入 + DenseText 伴生管线
+--   · nebula_theme — 内置暗色主题
+--   · nebula_builtin_line_nums — 内置行号 Producer
+--   · nebula_app — 默认 layout（1280x800）+ 混合管线自动编排
 --
 -- Usage:
 --   ./text_editor_demo                     # 空缓冲区
@@ -30,15 +31,7 @@
 ## cinclude "<stdio.h>"
 ## cinclude "<string.h>"
 
-require "nebula_core"
-require "glfw_bindings"
-require "wgpu_bindings"
-require "renderer"
-require "app"
-require "text_runtime"
-require "nebula_cursor"
-require "nebula_arena"
-require "nebula_theme"
+require "nebula"
 
 global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
 global function snprintf(buf: cstring, size: csize, fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
@@ -46,8 +39,6 @@ global function snprintf(buf: cstring, size: csize, fmt: cstring, ...: cvarargs)
 -- =============================================================================
 -- 常量
 -- =============================================================================
-local WIN_W <comptime> = 1280
-local WIN_H <comptime> = 800
 local EDIT_COLS <comptime> = 120
 local EDIT_ROWS <comptime> = 50
 local CELL_W <comptime> = 10.0
@@ -91,11 +82,16 @@ global _editor_modified: boolean = false
 ## nebula_derive_highlighter("nelua")
 
 -- =============================================================================
--- ★ Sugar: 自动注入 buffer + 生成 Visual record + component（替代 ~30 行手写）
+-- ★ Visual 声明（nebula_visual 替代 inject_buffers + editor_visual 两步）
 -- =============================================================================
-## nebula_inject_buffers({ primitives = {"multiline_editable"}, max_text_len = 256, max_lines = 256 })
-## nebula_editor_visual("EditorBgVisual", { max_text_len = 256, max_lines = 256, component_id = 1 })
+## nebula_visual("EditorBgVisual", {
+##   primitives   = {"multiline_editable"},
+##   max_text_len = 256,
+##   max_lines    = 256,
+##   component_id = 1,
+## })
 
+-- DenseText 管线（行号 + 编辑区，手写 Producer 需显式声明）
 global LineNumDenseVisual = @record{ pos: Vec2, size: Vec2 }
 ## nebula_component("LineNumDenseVisual", { text_mode = "dense", max_chars = 1024 })
 
@@ -218,10 +214,9 @@ global function fill_edit_area(
 end
 
 -- =============================================================================
--- App 声明
+-- App 声明（省略 layout → 默认 1280x800）
 -- =============================================================================
 ## nebula_app("TextEditorApp", {
-##   layout = { direction = "row", width = 1280, height = 800 },
 ##   components = {
 ##     { name = "editor",    type = "EditorBgVisual" },
 ##     { name = "line_nums", type = "LineNumDenseVisual",
@@ -266,29 +261,15 @@ local function main(): int32
   local renderer: NebulaRenderer
   local app: TextEditorApp
 
-  if not nebula_init(&renderer, &app, "Nebula Editor", WIN_W, WIN_H) then
+  if not nebula_init(&renderer, &app, "Nebula Editor", TextEditorApp_WIN_WIDTH, TextEditorApp_WIN_HEIGHT) then
     return 1
   end
 
-  -- ★ Sugar: 使用 nebula_theme_editor_colors() 简化初始化
-  local dbg, dbc, dbw, hbg, hbc, hbw, pbg, pbc, pbw = nebula_theme_editor_colors()
-  app.editor:init(EditorBgVisual{
-    pos  = Vec2{ x = 0.0, y = 0.0 },
-    size = Vec2{ x = (@float32)(WIN_W), y = (@float32)(WIN_H) },
-    radius = 0.0,
-    default_bg_color = dbg, default_border_color = dbc, default_border_width = dbw,
-    hovered_bg_color = hbg, hovered_border_color = hbc, hovered_border_width = hbw,
-    pressed_bg_color = pbg, pressed_border_color = pbc, pressed_border_width = pbw,
-    pixel_height = 16.0, text_origin_x = 58.0, content_height = 700.0,
-  })
-
-  app.editor.cursor_row = 0
-  app.editor.cursor_col = 0
-  app.editor.line_count = 1
-  -- ★ Phase 4.8 S1: initialize selection anchor
-  app.editor.sel_anchor_row = 0
-  app.editor.sel_anchor_col = 0
-  app.editor.visual.multi_buf:init()
+  -- ★ Sugar: init_themed 替代手写 EditorBgVisual{...}（15行 → 1行）
+  app.editor:init_themed(
+    Vec2{x = 0.0, y = 0.0},
+    Vec2{x = (@float32)(TextEditorApp_WIN_WIDTH), y = (@float32)(TextEditorApp_WIN_HEIGHT)},
+    0.0)
 
   -- 加载文件
   if _editor_has_file then
