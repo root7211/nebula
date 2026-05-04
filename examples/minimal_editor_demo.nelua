@@ -1,0 +1,57 @@
+-- =============================================================================
+-- minimal_editor_demo.nelua — Nebula GUI Compiler
+--
+-- 文档愿景验证：最小编辑器
+-- 目标：~30行，验证 multiline_editable + 语法糖
+--
+-- 操作：点击窗口获取焦点后可输入文字
+-- 快捷键：Ctrl+Z 撤销，Ctrl+Y 重做，Ctrl+A 全选
+-- =============================================================================
+require "nebula"
+
+## nebula_visual("EditorVisual", {
+##   primitives   = {"multiline_editable"},
+##   max_text_len = 256,
+##   max_lines    = 256,
+##   component_id = 1,
+## })
+## nebula_app("EditorApp", {
+##   layout = { direction = "row", width = 1280, height = 800 },
+##   components = {
+##     { name = "editor", type = "EditorVisual" },
+##   },
+## })
+
+local function main(): int32
+  local renderer: NebulaRenderer
+  local app: EditorApp
+
+  if not nebula_init(&renderer, &app, "Minimal Editor", 1280, 800) then
+    return 1
+  end
+
+  -- init_themed 设置主题颜色
+  app.editor:init_themed(Vec2{x = 0.0, y = 0.0}, Vec2{x = 1280.0, y = 800.0}, 0.0)
+  -- multiline_editable 需要的额外字段
+  app.editor.visual.pixel_height = 16.0
+  app.editor.visual.text_origin_x = 10.0
+  app.editor.visual.content_height = 800.0
+  app.editor.cursor_row = 0
+  app.editor.cursor_col = 0
+  app.editor.line_count = 1
+  app.editor.visual.multi_buf:init()
+
+  local input: NebulaInputState
+  while not nebula_should_close() do
+    local dt = nebula_frame_begin(&input)
+    app.editor.visual.content_height = (@float32)(app.editor.line_count) * 18.0
+    nebula_frame_render(&renderer, &app, &input, dt, 0.09, 0.09, 0.10)
+  end
+
+  app:deinit()
+  nebula_shutdown(&renderer)
+  printf("minimal_editor: clean exit\n")
+  return 0
+end
+
+main()

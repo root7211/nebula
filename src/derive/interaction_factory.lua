@@ -545,6 +545,9 @@ NEBULA_PRIMITIVES["multiline_editable"] = {
     -- We define a local function-like approach: check _ml_has_sel, if true delete and skip default behavior
     -- ================================================================
 
+    -- ★ focused_id 守卫：只在获得焦点时才处理文本输入
+    table.insert(lines, "  if input.focused_id ~= self.component_id then return end")
+
     -- ---- 字符输入：插入到 multi_buf 当前行 ----
     -- If selection active, delete it first
     table.insert(lines, "  -- ★ multiline: char input → multi_buf current line")
