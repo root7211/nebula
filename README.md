@@ -160,7 +160,7 @@ Nebula 的设计由三条正交公理驱动（详见 [`docs/ARCHITECTURE_GRAND_P
 
 ## 愿景：30 行实现文本编辑器 ✅ 已达成
 
-`minimal_editor_demo`（~57 行）验证了文档愿景。核心框架代码仅 ~30 行，其余为 multiline_editable 手动字段赋值（`init_themed` 待修复后可消除，回到 ~30 行）：
+`minimal_editor_demo`（37 行）验证了文档愿景。框架代码仅 12 行（nebula_visual + nebula_app + init_themed），其余为运行循环和窗口初始化：
 
 ```nelua
 require "nebula"
@@ -179,7 +179,7 @@ require "nebula"
 ## })
 ```
 
-> **auto-dense 机制**：`nebula_visual` 检测到 `multiline_editable` 时自动生成伴生 DenseText 渲染管线和默认 Producer，无需手动注册。`nebula_app` 自动路由到 DenseText 管线。
+> **auto-dense 机制**：`nebula_visual` 检测到 `multiline_editable` 时自动生成伴生 DenseText 渲染管线和默认 Producer，无需手动注册。`nebula_app` 自动路由到 DenseText 管线。`init_themed` 自动初始化 multiline_editable 的附带字段（cursor、buffer、pixel_height 等）。
 
 完整示例见 `examples/minimal_editor_demo.nelua`。
 
@@ -226,7 +226,7 @@ L0 (Raw)    : nebula_annotate + nebula_derive                   ← 最初的 ra
 | button | 147 行 | 141 行 | **30 行** | 5x |
 | multiline_sugar | — | 153 行 | ~20 行 | 8x |
 | highlight_sugar | — | 386 行 | ~120 行 | 3x |
-| minimal_editor | — | — | **57 行** | — |
+| minimal_editor | — | — | **37 行** | — |
 
 ---
 
