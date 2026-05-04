@@ -160,7 +160,7 @@ Nebula 的设计由三条正交公理驱动（详见 [`docs/ARCHITECTURE_GRAND_P
 
 ## 愿景：30 行实现文本编辑器 ✅ 已达成
 
-`minimal_editor_demo`（37 行）验证了文档愿景。框架代码仅 12 行（nebula_visual + nebula_app + init_themed），其余为运行循环和窗口初始化：
+`minimal_editor_demo`（39 行）验证了文档愿景。框架代码仅 11 行（nebula_visual + nebula_app + init_themed），layout 可省略（默认 1280x800），窗口尺寸由 `App_WIN_WIDTH/WIN_HEIGHT` 常量自动推导：
 
 ```nelua
 require "nebula"
@@ -172,7 +172,6 @@ require "nebula"
 ##   component_id = 1,
 ## })
 ## nebula_app("EditorApp", {
-##   layout = { direction = "row", width = 1280, height = 800 },
 ##   components = {
 ##     { name = "editor", type = "EditorVisual" },
 ##   },
@@ -226,7 +225,7 @@ L0 (Raw)    : nebula_annotate + nebula_derive                   ← 最初的 ra
 | button | 147 行 | 141 行 | **30 行** | 5x |
 | multiline_sugar | — | 153 行 | ~20 行 | 8x |
 | highlight_sugar | — | 386 行 | ~120 行 | 3x |
-| minimal_editor | — | — | **37 行** | — |
+| minimal_editor | — | — | **39 行** | — |
 
 ---
 
