@@ -1020,6 +1020,26 @@ global ClickableState = @record{
 ##       end
 ##     end
 ##     table.insert(lines, "  })")
+##
+##     -- ★ multiline_editable: init_themed 自动初始化附带字段
+##     local has_ml = false
+##     for _, p in ipairs(reg.primitives or {}) do
+##       if p == "multiline_editable" then has_ml = true; break end
+##     end
+##     if has_ml then
+##       -- Visual 字段
+##       table.insert(lines, "  self.visual.pixel_height = 16.0")
+##       table.insert(lines, "  self.visual.text_origin_x = 10.0")
+##       table.insert(lines, "  self.visual.content_height = self.visual.size.y")
+##       -- Context 字段
+##       table.insert(lines, "  self.cursor_row = 0")
+##       table.insert(lines, "  self.cursor_col = 0")
+##       table.insert(lines, "  self.line_count = 1")
+##       -- Buffer 初始化
+##       table.insert(lines, "  self.visual.multi_buf:init()")
+##       table.insert(lines, "  self.visual.gap_buf:init()")
+##       print(("[sugar] %s: init_themed auto-initialized multiline_editable fields"):format(ctx))
+##     end
 ##     table.insert(lines, "end")
 ##     print(("[sugar] %s: generated init_themed with %d states"):format(ctx, #reg.states))
 ##   end
