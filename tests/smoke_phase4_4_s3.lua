@@ -107,11 +107,20 @@ local gen = nebula_gen_process_input({
 assert_contains("§3.1: process_input contains NebulaKey.Up", gen, "NebulaKey.Up")
 assert_contains("§3.2: process_input contains NebulaKey.Down", gen, "NebulaKey.Down")
 assert_contains("§3.3: process_input contains NebulaKey.Enter", gen, "NebulaKey.Enter")
-assert_contains("§3.4: process_input contains ShiftUp", gen, "NebulaKey.ShiftUp")
-assert_contains("§3.5: process_input contains ShiftDown", gen, "NebulaKey.ShiftDown")
+assert_contains("§3.4: process_input contains Home", gen, "NebulaKey.Home")
+assert_contains("§3.5: process_input contains End", gen, "NebulaKey.End")
 assert_contains("§3.6: process_input contains cursor_row logic", gen, "self.cursor_row")
 assert_contains("§3.7: process_input contains line_count check", gen, "self.line_count")
 assert_contains("§3.8: process_input contains cursor_col reset on Enter", gen, "self.cursor_col = 0")
+-- §3.9-§3.14: S7-fix 新增的完整键盘支持
+assert_contains("§3.9: process_input contains NebulaKey.Left", gen, "NebulaKey.Left")
+assert_contains("§3.10: process_input contains NebulaKey.Right", gen, "NebulaKey.Right")
+assert_contains("§3.11: process_input contains NebulaKey.Backspace", gen, "NebulaKey.Backspace")
+assert_contains("§3.12: process_input contains NebulaKey.Delete", gen, "NebulaKey.Delete")
+assert_contains("§3.13: Enter delegates to insert_newline", gen, "insert_newline")
+assert_contains("§3.14: Backspace merges via merge_line_up", gen, "merge_line_up")
+assert_contains("§3.15: char input inserts into multi_buf current line", gen, "insert_char")
+assert_contains("§3.16: cursor sync before insert_newline", gen, "multi_buf.cursor_row = self.cursor_row")
 
 -- §4: context_fields includes ALL fields from all primitives (6-layer chain)
 -- editable → focusable → clickable → hoverable + scrollable → multiline_editable

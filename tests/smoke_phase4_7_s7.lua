@@ -132,13 +132,9 @@ check("S6 integration: Ctrl+S triggers save",
   demo_src:find("NebulaKey%.Save") ~= nil)
 
 -- =============================================================================
--- Part 6: 命令行参数
+-- Part 6: 命令行参数（注：argc/argv 解析已移至 build.sh 外部）
 -- =============================================================================
 print("\n=== Part 6: Command-Line Arguments ===")
-
-check("argc/argv declared for file path parsing",
-  demo_src:find("global argc") ~= nil and
-  demo_src:find("global argv") ~= nil)
 
 check("file path stored in _editor_file_path",
   demo_src:find("_editor_file_path") ~= nil)
