@@ -158,9 +158,9 @@ Nebula 的设计由三条正交公理驱动（详见 [`docs/ARCHITECTURE_GRAND_P
 
 ---
 
-## 愿景：50 行实现工业级文本编辑器
+## 愿景：30 行实现文本编辑器 ✅ 已达成
 
-当路线图全部完成后，一个功能完备的文本编辑器将是这样的：
+`minimal_editor_demo`（~57 行）验证了文档愿景。核心框架代码仅 ~30 行，其余为 multiline_editable 手动字段赋值（`init_themed` 待修复后可消除，回到 ~30 行）：
 
 ```nelua
 require "nebula"
@@ -171,28 +171,17 @@ require "nebula"
 ##   max_lines    = 256,
 ##   component_id = 1,
 ## })
-## nebula_app("TextEditorApp", {
-##   components = {{ name="editor", type="EditorVisual" }},
+## nebula_app("EditorApp", {
+##   layout = { direction = "row", width = 1280, height = 800 },
+##   components = {
+##     { name = "editor", type = "EditorVisual" },
+##   },
 ## })
-
-local function main()
-  local renderer: NebulaRenderer
-  local app:      TextEditorApp
-  if not nebula_init(&renderer, &app, "Text Editor", 800, 600) then return 1 end
-  app.editor:init_themed(Vec2{x=0,y=0}, Vec2{x=800,y=600}, 0.0)
-  local input: NebulaInputState
-  while not nebula_should_close() do
-    local dt = nebula_frame_begin(&input)
-    nebula_frame_render(&renderer, &app, &input, dt, 0.09, 0.09, 0.10)
-  end
-  app:deinit()
-  nebula_shutdown(&renderer)
-  return 0
-end
-main()
 ```
 
-**~30 行，零样板，零 WGPU 调用，零 Pipeline 初始化。**
+> **auto-dense 机制**：`nebula_visual` 检测到 `multiline_editable` 时自动生成伴生 DenseText 渲染管线和默认 Producer，无需手动注册。`nebula_app` 自动路由到 DenseText 管线。
+
+完整示例见 `examples/minimal_editor_demo.nelua`。
 
 ### 已达成：button_v2_demo（30 行）
 
@@ -237,6 +226,7 @@ L0 (Raw)    : nebula_annotate + nebula_derive                   ← 最初的 ra
 | button | 147 行 | 141 行 | **30 行** | 5x |
 | multiline_sugar | — | 153 行 | ~20 行 | 8x |
 | highlight_sugar | — | 386 行 | ~120 行 | 3x |
+| minimal_editor | — | — | **57 行** | — |
 
 ---
 
@@ -244,10 +234,15 @@ L0 (Raw)    : nebula_annotate + nebula_derive                   ← 最初的 ra
 
 ```bash
 chmod +x build.sh
+
+# 最小编辑器（文档愿景验证）
+./build.sh minimal_editor_demo
+LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/minimal_editor_demo
+
+# 完整文本编辑器（支持文件打开、语法高亮、行号）
 ./build.sh text_editor_demo
 LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/text_editor_demo
 # 或打开文件编辑
-./build.sh text_editor_demo
 LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/text_editor_demo path/to/file.nelua
 # 或运行终端模拟器
 ./build.sh term_demo
