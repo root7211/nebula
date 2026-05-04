@@ -14,13 +14,14 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 进行中 | 68/68 回归测试全绿 | Phase 4.7-S7 已完成（2026-05-03）**
+**Era II 进行中 | 68/68 回归测试全绿 | Phase 4.7-S7 已完成（2026-05-03）· S7-fix 2026-05-04**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
-| **Phase 4.7-S7 文本编辑器原型** | `text_editor_demo.nelua` — S1-S6 全集成验收（CJK 编辑 + DenseText 渲染 + 行号 + 语法高亮 + Undo/Redo + File I/O + Ctrl+S 保存 + 命令行参数加载文件 + 窗口标题状态显示）+ `NebulaKey.Save` + `glfwSetWindowTitle` 绑定 + `nebula_annotate` 存储 `max_lines` 修复 + **语法糖优化**：`nebula_theme`（内置暗色主题）+ `nebula_editor_visual`（自动生成 Visual record）+ `nebula_builtin_line_nums`（内置行号 Producer）+ 68/68 回归测试全绿 | — |
+| **Phase 4.7-S7-fix multiline_editable 修复** | multiline_editable 原语完整重写——字符输入直接操作 multi_buf（绕过 editable 的 gap_buf）、Enter 调用 `insert_newline()`、Backspace 调用 `merge_line_up()`、新增 Left/Right/Home/End/Delete 完整键盘支持 + `wgpu_bindings.nelua` TextureFormat 枚举值和 BindGroupLayoutEntry 布局修正（v29） | `856f326` |
+| **Phase 4.7-S7 文本编辑器原型** | `text_editor_demo.nelua` — S1-S6 全集成验收（CJK 编辑 + DenseText 渲染 + 行号 + 语法高亮 + Undo/Redo + File I/O + Ctrl+S 保存 + 窗口标题状态显示）+ `NebulaKey.Save` + `glfwSetWindowTitle` 绑定 + `nebula_annotate` 存储 `max_lines` 修复 + **语法糖优化**：`nebula_theme`（内置暗色主题）+ `nebula_editor_visual`（自动生成 Visual record）+ `nebula_builtin_line_nums`（内置行号 Producer）+ 68/68 回归测试全绿 | — |
 | **Phase 4.7-S6 File I/O** | `load_file(path)` / `save_file(path)` 方法生成（C stdio FFI 绑定）+ CRLF 处理 + 空文件 + POSIX 换行末尾 + roundtrip 验证 + 66/66 回归测试全绿 | `91560be` |
 | **Phase 4.7-S5 Undo/Redo** | 编译期 `NebulaUndoStack` 类型生成 + `NebulaKey.Undo`/`Redo` 枚举 + Ctrl+Z/Y/Shift+Z 键映射 + `process_text_input` 全操作记录 + `nebula_inject_buffers` 自动注入 undo stack | `457fd62` |
 | **Phase 4.5-S2 混合管线自动编排** | `nebula_app()` 的 `components` 数组自动检测 Visual 的 `text_mode`，dense 管线自动路由到 `nebula_app_register_dense_text`（消除 `dense_texts` 分离声明）+ highlight_sugar_demo（全糖化语法高亮编辑器，编排样板从 ~80 行→~15 行）+ 33 条冒烟测试 | — |
