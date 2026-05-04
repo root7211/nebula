@@ -229,7 +229,7 @@ NEBULA_PRIMITIVES["editable"] = {
     }
   end,
   context_init = {},  -- 默认零初始化
-  post_process      = nil,
+  post_process      = nil,  -- ★ multiline_editable 覆盖了所有文本输入处理
   pre_derive_hook = function(reg, type_name, inject_statement, aster)
     -- 注入 NebulaBuf{N} 动态类型
     local meta = NEBULA_PRIMITIVES["editable"].global_type_meta
@@ -356,35 +356,158 @@ NEBULA_PRIMITIVES["multiline_editable"] = {
   },
   context_init = {},
   process_body = function(spec, lines)
-    -- Up arrow: move cursor to previous line
-    table.insert(lines, "  if input.key_pressed == NebulaKey.Up then")
-    table.insert(lines, "    if self.cursor_row > 0 then")
+    -- ★ multiline_editable: 直接操作 multi_buf（每行是独立的 NebulaBuf256 gap buffer）
+    -- 字符输入、Backspace、Delete、Enter、Left/Right、Home/End 全部在这里处理。
+    -- 不再依赖 editable 的 process_text_input（它只操作 gap_buf，与 multi_buf 脱节）。
+
+    -- ---- 字符输入：插入到 multi_buf 当前行 ----
+    table.insert(lines, "  -- ★ multiline: char input → multi_buf current line")
+    table.insert(lines, "  local _ml_i: uint8 = 0")
+    table.insert(lines, "  while _ml_i < input.char_count do")
+    table.insert(lines, "    local _ml_cp = input.char_input[_ml_i]")
+    table.insert(lines, "    if _ml_cp >= 0x20 and _ml_cp ~= 0x7F then")
+    table.insert(lines, "      local _ml_line = self.visual.multi_buf:get_line(self.cursor_row)")
+    -- UTF-8 encode
+    table.insert(lines, "      local _ml_buf: [4]uint8")
+    table.insert(lines, "      local _ml_len: uint8 = 0")
+    table.insert(lines, "      if _ml_cp <= 0x7F then")
+    table.insert(lines, "        _ml_buf[0] = (@uint8)(_ml_cp); _ml_len = 1")
+    table.insert(lines, "      elseif _ml_cp <= 0x7FF then")
+    table.insert(lines, "        _ml_buf[0] = (@uint8)(0xC0 | (_ml_cp >> 6))")
+    table.insert(lines, "        _ml_buf[1] = (@uint8)(0x80 | (_ml_cp & 0x3F)); _ml_len = 2")
+    table.insert(lines, "      elseif _ml_cp <= 0xFFFF then")
+    table.insert(lines, "        _ml_buf[0] = (@uint8)(0xE0 | (_ml_cp >> 12))")
+    table.insert(lines, "        _ml_buf[1] = (@uint8)(0x80 | ((_ml_cp >> 6) & 0x3F))")
+    table.insert(lines, "        _ml_buf[2] = (@uint8)(0x80 | (_ml_cp & 0x3F)); _ml_len = 3")
+    table.insert(lines, "      elseif _ml_cp <= 0x10FFFF then")
+    table.insert(lines, "        _ml_buf[0] = (@uint8)(0xF0 | (_ml_cp >> 18))")
+    table.insert(lines, "        _ml_buf[1] = (@uint8)(0x80 | ((_ml_cp >> 12) & 0x3F))")
+    table.insert(lines, "        _ml_buf[2] = (@uint8)(0x80 | ((_ml_cp >> 6) & 0x3F))")
+    table.insert(lines, "        _ml_buf[3] = (@uint8)(0x80 | (_ml_cp & 0x3F)); _ml_len = 4")
+    table.insert(lines, "      end")
+    -- Move gap cursor to cursor_col position, then insert bytes
+    table.insert(lines, "      local _ml_cur = (@uint32)(_ml_line:cursor())")
+    table.insert(lines, "      if _ml_cur < self.cursor_col then")
+    table.insert(lines, "        while _ml_line:cursor() < self.cursor_col do _ml_line:move_cursor_right() end")
+    table.insert(lines, "      elseif _ml_cur > self.cursor_col then")
+    table.insert(lines, "        while _ml_line:cursor() > self.cursor_col do _ml_line:move_cursor_left() end")
+    table.insert(lines, "      end")
+    table.insert(lines, "      local _ml_j: uint8 = 0")
+    table.insert(lines, "      while _ml_j < _ml_len do")
+    table.insert(lines, "        _ml_line:insert_char(_ml_buf[_ml_j])")
+    table.insert(lines, "        _ml_j = _ml_j + 1")
+    table.insert(lines, "      end")
+    table.insert(lines, "      self.cursor_col = self.cursor_col + _ml_len")
+    table.insert(lines, "    end")
+    table.insert(lines, "    _ml_i = _ml_i + 1")
+    table.insert(lines, "  end")
+
+    -- ---- Left arrow: move cursor left ----
+    table.insert(lines, "  if input.key_pressed == NebulaKey.Left then")
+    table.insert(lines, "    if self.cursor_col > 0 then")
+    table.insert(lines, "      self.cursor_col = self.cursor_col - 1")
+    table.insert(lines, "    elseif self.cursor_row > 0 then")
     table.insert(lines, "      self.cursor_row = self.cursor_row - 1")
+    table.insert(lines, "      self.cursor_col = (@uint32)(self.visual.multi_buf:get_line(self.cursor_row):len())")
     table.insert(lines, "    end")
     table.insert(lines, "  end")
-    -- Down arrow: move cursor to next line
-    table.insert(lines, "  if input.key_pressed == NebulaKey.Down then")
-    table.insert(lines, "    if self.cursor_row + 1 < self.line_count then")
-    table.insert(lines, "      self.cursor_row = self.cursor_row + 1")
-    table.insert(lines, "    end")
-    table.insert(lines, "  end")
-    -- Enter: increment line_count (newline)
-    table.insert(lines, "  if input.key_pressed == NebulaKey.Enter then")
-    table.insert(lines, "    if self.line_count < 32 then")
-    table.insert(lines, "      self.line_count = self.line_count + 1")
+
+    -- ---- Right arrow: move cursor right ----
+    table.insert(lines, "  if input.key_pressed == NebulaKey.Right then")
+    table.insert(lines, "    local _ml_llen = (@uint32)(self.visual.multi_buf:get_line(self.cursor_row):len())")
+    table.insert(lines, "    if self.cursor_col < _ml_llen then")
+    table.insert(lines, "      self.cursor_col = self.cursor_col + 1")
+    table.insert(lines, "    elseif self.cursor_row + 1 < self.line_count then")
     table.insert(lines, "      self.cursor_row = self.cursor_row + 1")
     table.insert(lines, "      self.cursor_col = 0")
     table.insert(lines, "    end")
     table.insert(lines, "  end")
-    -- ShiftUp/ShiftDown: extend selection while moving lines
-    table.insert(lines, "  if input.key_pressed == NebulaKey.ShiftUp then")
+
+    -- ---- Up arrow: move cursor to previous line ----
+    table.insert(lines, "  if input.key_pressed == NebulaKey.Up then")
     table.insert(lines, "    if self.cursor_row > 0 then")
     table.insert(lines, "      self.cursor_row = self.cursor_row - 1")
+    table.insert(lines, "      local _ml_llen = (@uint32)(self.visual.multi_buf:get_line(self.cursor_row):len())")
+    table.insert(lines, "      if self.cursor_col > _ml_llen then self.cursor_col = _ml_llen end")
     table.insert(lines, "    end")
     table.insert(lines, "  end")
-    table.insert(lines, "  if input.key_pressed == NebulaKey.ShiftDown then")
+
+    -- ---- Down arrow: move cursor to next line ----
+    table.insert(lines, "  if input.key_pressed == NebulaKey.Down then")
     table.insert(lines, "    if self.cursor_row + 1 < self.line_count then")
     table.insert(lines, "      self.cursor_row = self.cursor_row + 1")
+    table.insert(lines, "      local _ml_llen = (@uint32)(self.visual.multi_buf:get_line(self.cursor_row):len())")
+    table.insert(lines, "      if self.cursor_col > _ml_llen then self.cursor_col = _ml_llen end")
+    table.insert(lines, "    end")
+    table.insert(lines, "  end")
+
+    -- ---- Home: move to beginning of line ----
+    table.insert(lines, "  if input.key_pressed == NebulaKey.Home then")
+    table.insert(lines, "    self.cursor_col = 0")
+    table.insert(lines, "  end")
+
+    -- ---- End: move to end of line ----
+    table.insert(lines, "  if input.key_pressed == NebulaKey.End then")
+    table.insert(lines, "    self.cursor_col = (@uint32)(self.visual.multi_buf:get_line(self.cursor_row):len())")
+    table.insert(lines, "  end")
+
+    -- ---- Enter: delegate to MultiBuf.insert_newline ----
+    table.insert(lines, "  if input.key_pressed == NebulaKey.Enter then")
+    table.insert(lines, "    self.visual.multi_buf.cursor_row = self.cursor_row")
+    table.insert(lines, "    self.visual.multi_buf.cursor_col = self.cursor_col")
+    table.insert(lines, "    self.visual.multi_buf:insert_newline()")
+    table.insert(lines, "    self.cursor_row = self.visual.multi_buf.cursor_row")
+    table.insert(lines, "    self.cursor_col = self.visual.multi_buf.cursor_col")
+    table.insert(lines, "    self.line_count = self.visual.multi_buf.line_count")
+    table.insert(lines, "  end")
+
+    -- ---- Backspace: delete char before cursor, or merge with previous line ----
+    table.insert(lines, "  if input.key_pressed == NebulaKey.Backspace then")
+    table.insert(lines, "    if self.cursor_col > 0 then")
+    table.insert(lines, "      local _ml_line = self.visual.multi_buf:get_line(self.cursor_row)")
+    table.insert(lines, "      while _ml_line:cursor() > self.cursor_col do _ml_line:move_cursor_left() end")
+    table.insert(lines, "      while _ml_line:cursor() < self.cursor_col do _ml_line:move_cursor_right() end")
+    table.insert(lines, "      _ml_line:delete_char_before()")
+    table.insert(lines, "      self.cursor_col = self.cursor_col - 1")
+    table.insert(lines, "    elseif self.cursor_row > 0 then")
+    table.insert(lines, "      self.visual.multi_buf.cursor_row = self.cursor_row")
+    table.insert(lines, "      self.visual.multi_buf.cursor_col = self.cursor_col")
+    table.insert(lines, "      self.visual.multi_buf:merge_line_up()")
+    table.insert(lines, "      self.cursor_row = self.visual.multi_buf.cursor_row")
+    table.insert(lines, "      self.cursor_col = self.visual.multi_buf.cursor_col")
+    table.insert(lines, "      self.line_count = self.visual.multi_buf.line_count")
+    table.insert(lines, "    end")
+    table.insert(lines, "  end")
+
+    -- ---- Delete: delete char at cursor, or merge next line into current ----
+    table.insert(lines, "  if input.key_pressed == NebulaKey.Delete then")
+    table.insert(lines, "    local _ml_llen = (@uint32)(self.visual.multi_buf:get_line(self.cursor_row):len())")
+    table.insert(lines, "    if self.cursor_col < _ml_llen then")
+    table.insert(lines, "      local _ml_line = self.visual.multi_buf:get_line(self.cursor_row)")
+    table.insert(lines, "      while _ml_line:cursor() < self.cursor_col do _ml_line:move_cursor_right() end")
+    table.insert(lines, "      while _ml_line:cursor() > self.cursor_col do _ml_line:move_cursor_left() end")
+      table.insert(lines, "      _ml_line:delete_char_after()")
+    table.insert(lines, "    elseif self.cursor_row + 1 < self.line_count then")
+    -- Merge next line into current
+    table.insert(lines, "      local _ml_cur = self.visual.multi_buf:get_line(self.cursor_row)")
+    table.insert(lines, "      local _ml_next = self.visual.multi_buf:get_line(self.cursor_row + 1)")
+    table.insert(lines, "      local _ml_tmp: [256]uint8")
+    table.insert(lines, "      local _ml_n = _ml_next:flatten(&_ml_tmp[0], 255)")
+    table.insert(lines, "      local _ml_k: uint16 = 0")
+    table.insert(lines, "      while _ml_k < _ml_n do _ml_cur:insert_char(_ml_tmp[_ml_k]); _ml_k = _ml_k + 1 end")
+    -- Shift lines up
+    table.insert(lines, "      local _ml_r: uint32 = self.cursor_row + 1")
+    table.insert(lines, "      while _ml_r + 1 < self.line_count do")
+    table.insert(lines, "        local _ml_dst = self.visual.multi_buf:get_line(_ml_r)")
+    table.insert(lines, "        local _ml_src = self.visual.multi_buf:get_line(_ml_r + 1)")
+    table.insert(lines, "        _ml_dst:clear()")
+    table.insert(lines, "        local _ml_tmp2: [256]uint8")
+    table.insert(lines, "        local _ml_n2 = _ml_src:flatten(&_ml_tmp2[0], 255)")
+    table.insert(lines, "        local _ml_k2: uint16 = 0")
+    table.insert(lines, "        while _ml_k2 < _ml_n2 do _ml_dst:insert_char(_ml_tmp2[_ml_k2]); _ml_k2 = _ml_k2 + 1 end")
+    table.insert(lines, "        _ml_r = _ml_r + 1")
+    table.insert(lines, "      end")
+    table.insert(lines, "      self.line_count = self.line_count - 1")
     table.insert(lines, "    end")
     table.insert(lines, "  end")
   end,

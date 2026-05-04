@@ -217,29 +217,11 @@ local function update_window_title(cursor_row: uint32, cursor_col: uint32): void
 end
 
 -- =============================================================================
--- 命令行参数
--- =============================================================================
-global argc: int32 <cimport, nodecl>
-global argv: *[0]cstring <cimport, nodecl>
-
--- =============================================================================
 -- Main
 -- =============================================================================
 local function main(): int32
   local renderer: NebulaRenderer
   local app: TextEditorApp
-
-  ## if ccinfo.is_linux then
-  if argc > 1 then
-    local src = (@*[0]uint8)(argv[1])
-    local si: uint32 = 0
-    while src[si] ~= 0 and si < 511 do
-      _editor_file_path[si] = src[si]; si = si + 1
-    end
-    _editor_file_path[si] = 0
-    _editor_has_file = true
-  end
-  ## end
 
   if not nebula_init(&renderer, &app, "Nebula Editor", WIN_W, WIN_H) then
     return 1
