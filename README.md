@@ -14,12 +14,13 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 进行中 | 68/68 回归测试全绿 | Phase 4.7-S7 已完成（2026-05-03）· S7-fix 2026-05-04**
+**Era II 进行中 | 70/70 回归测试全绿 | Phase 4.5-S3 已完成（2026-05-04）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
+| **Phase 4.5-S3 语法糖深化** | L2 层 API：`require "nebula"`（统一入口）+ `nebula_visual()`（从 primitives 自动推导 record 字段）+ `init_themed()`（NEBULA_THEME_DEFAULTS 编译期主题表驱动默认颜色）+ `nebula_frame_begin()`（帧循环整合）+ `button_v2_demo.nelua`（30 行极限形态，原 147 行压缩 ~5x）+ 52 条冒烟测试 + 70/70 回归全绿 | `d615c5d` |
 | **Phase 4.7-S7-fix multiline_editable 修复** | multiline_editable 原语完整重写——字符输入直接操作 multi_buf（绕过 editable 的 gap_buf）、Enter 调用 `insert_newline()`、Backspace 调用 `merge_line_up()`、新增 Left/Right/Home/End/Delete 完整键盘支持 + `wgpu_bindings.nelua` TextureFormat 枚举值和 BindGroupLayoutEntry 布局修正（v29） | `856f326` |
 | **Phase 4.7-S7 文本编辑器原型** | `text_editor_demo.nelua` — S1-S6 全集成验收（CJK 编辑 + DenseText 渲染 + 行号 + 语法高亮 + Undo/Redo + File I/O + Ctrl+S 保存 + 窗口标题状态显示）+ `NebulaKey.Save` + `glfwSetWindowTitle` 绑定 + `nebula_annotate` 存储 `max_lines` 修复 + **语法糖优化**：`nebula_theme`（内置暗色主题）+ `nebula_editor_visual`（自动生成 Visual record）+ `nebula_builtin_line_nums`（内置行号 Producer）+ 68/68 回归测试全绿 | — |
 | **Phase 4.7-S6 File I/O** | `load_file(path)` / `save_file(path)` 方法生成（C stdio FFI 绑定）+ CRLF 处理 + 空文件 + POSIX 换行末尾 + roundtrip 验证 + 66/66 回归测试全绿 | `91560be` |
@@ -137,7 +138,7 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 | 4.7-S1 | CJK multiline editable | **已完成**（UTF-8 gap buffer + CJK 显示宽度 + cjk_editor_demo） | 85 |
 | 4.7-S2 | DenseText 接入 App 编排 | **已完成**（`nebula_app_register_dense_text` + Producer 模式 + dense_editor_demo） | 86 |
 | 4.7-S3 | 行号显示（独立 DenseText 列） | **已完成**（flex_grow/flex_basis + 多列 DenseText + editor_with_lines_demo） | 84 |
-| 4.5 | 注册原语语法糖 | **S1+S2 已完成**（S1: `nebula_component` + `nebula_inject_buffers` + `nebula_app` + `nebula_auto_states`；S2: 混合管线自动编排 + highlight_sugar_demo） | — |
+| 4.5 | 注册原语语法糖 | **S1+S2+S3 已完成**（S1: `nebula_component` + `nebula_inject_buffers` + `nebula_app` + `nebula_auto_states`；S2: 混合管线自动编排 + highlight_sugar_demo；S3: `nebula_visual` + `init_themed` + `nebula_frame_begin` + `require "nebula"` + button_v2_demo 30 行极限形态） | — |
 | 4.7-S4 | 语法高亮架构 | **已完成**（`highlight_factory.lua` + 编译期规则注入 + 运行时 per-char 着色 + highlight_editor_demo） | 85 |
 | 4.6 | Indirect Drawing | 规划中 | 78 |
 | 4.7 | 文本编辑器原型 | **S1-S7 已完成**（S7: text_editor_demo 全集成验收） | — |
@@ -164,33 +165,78 @@ Nebula 的设计由三条正交公理驱动（详见 [`docs/ARCHITECTURE_GRAND_P
 ```nelua
 require "nebula"
 
-##[[
-  nebula_annotate("EditorVisual", {
-    primitives = {"multiline_editable", "scrollable_y", "clipboard_aware"}
-  })
-]]
-## nebula_derive("EditorVisual")
-
-##[[
-  nebula_app_begin("TextEditorApp")
-    nebula_app_register_component("editor", "EditorVisual", { layout = { flex_grow = 1 } })
-  nebula_app_end()
-]]
-## nebula_derive_app("TextEditorApp")
+## nebula_visual("EditorVisual", {
+##   primitives   = {"multiline_editable"},
+##   max_text_len = 256,
+##   max_lines    = 256,
+##   component_id = 1,
+## })
+## nebula_app("TextEditorApp", {
+##   components = {{ name="editor", type="EditorVisual" }},
+## })
 
 local function main()
   local renderer: NebulaRenderer
   local app:      TextEditorApp
-  if not nebula_init(&renderer, &app) then return 1 end
+  if not nebula_init(&renderer, &app, "Text Editor", 800, 600) then return 1 end
+  app.editor:init_themed(Vec2{x=0,y=0}, Vec2{x=800,y=600}, 0.0)
+  local input: NebulaInputState
   while not nebula_should_close() do
-    nebula_frame_render(&renderer, &app)
+    local dt = nebula_frame_begin(&input)
+    nebula_frame_render(&renderer, &app, &input, dt, 0.09, 0.09, 0.10)
   end
+  app:deinit()
+  nebula_shutdown(&renderer)
   return 0
 end
 main()
 ```
 
-**50 行，零样板，零 WGPU 调用，零 Pipeline 初始化。**
+**~30 行，零样板，零 WGPU 调用，零 Pipeline 初始化。**
+
+### 已达成：button_v2_demo（30 行）
+
+```nelua
+require "nebula"
+
+## nebula_visual("ButtonVisual", { primitives = {"clickable"} })
+## nebula_app("ButtonApp", { components = {{ name="btn", type="ButtonVisual" }} })
+
+local function main(): int32
+  local renderer: NebulaRenderer
+  local app: ButtonApp
+  if not nebula_init(&renderer, &app, "Button V2 Demo", 800, 600) then return 1 end
+  app.btn:init_themed(Vec2{x=300,y=250}, Vec2{x=200,y=60}, 12.0)
+  local input: NebulaInputState
+  while not nebula_should_close() do
+    local dt = nebula_frame_begin(&input)
+    if app.btn.click.just_clicked then printf("clicked!\n") end
+    nebula_frame_render(&renderer, &app, &input, dt, 0.09, 0.09, 0.10)
+  end
+  app:deinit()
+  nebula_shutdown(&renderer)
+  return 0
+end
+main()
+```
+
+---
+
+## 三层 API（分层可逃逸）
+
+```
+L2 (Visual) : nebula_visual + init_themed + nebula_frame_begin  ← Phase 4.5-S3
+L1 (Sugar)  : nebula_component + nebula_app                     ← Phase 4.5 S1-S2
+L0 (Raw)    : nebula_annotate + nebula_derive                   ← 最初的 raw API
+```
+
+每层可独立使用，高层出问题时随时降到低层，不需要重写。三层可在同一项目中混用。
+
+| Demo | L0 (Raw) | L1 (Sugar) | L2 (Visual) | 压缩比 |
+|:-----|:---------|:-----------|:------------|:-------|
+| button | 147 行 | 141 行 | **30 行** | 5x |
+| multiline_sugar | — | 153 行 | ~20 行 | 8x |
+| highlight_sugar | — | 386 行 | ~120 行 | 3x |
 
 ---
 
@@ -220,8 +266,9 @@ bash tools/run_all_tests.sh
 ```
 nebula/
 ├── src/                          # 核心框架
-│   ├── nebula_core.nelua         # 框架核心模块
-│   ├── app.nelua                 # App 编排 + GLFW 事件循环
+│   ├── nebula.nelua              # ★ Phase 4.5-S3 统一入口模块（1 行 require 替代 ~10 行）
+│   ├── nebula_core.nelua         # 框架核心模块（含 nebula_visual + init_themed 生成）
+│   ├── app.nelua                 # App 编排 + GLFW 事件循环 + nebula_frame_begin
 │   ├── renderer.nelua            # WebGPU 渲染器
 │   ├── text_runtime.nelua        # 文本渲染运行时
 │   ├── gap_buffer.nelua          # 单行 Gap Buffer
@@ -264,6 +311,7 @@ nebula/
 │   ├── multiline_sugar_demo.nelua # ★ Phase 4.5 全糖化（inject_buffers + component + app）
 │   ├── highlight_sugar_demo.nelua # ★ Phase 4.5-S2 全糖化语法高亮编辑器（混合管线自动编排）
 │   ├── text_editor_demo.nelua   # ★ Phase 4.7-S7 文本编辑器原型（S1-S6 全集成验收）
+│   ├── button_v2_demo.nelua    # ★ Phase 4.5-S3 极限形态（30 行，全部 L2 API）
 │   ├── json_viewer_demo.nelua   # ★ Phase 4.X-J JSON 树形浏览器（折叠/展开 + 语法着色）
 │   ├── json_viewer/             # JSON Viewer 子模块
 │   │   ├── json_parser.nelua    # 递归下降 JSON 解析器
@@ -274,7 +322,7 @@ nebula/
 │       ├── pty_bindings.nelua   # POSIX PTY C FFI 绑定
 │       ├── ansi_parser.nelua    # ANSI/VT100 转义序列状态机
 │       └── term_buffer.nelua    # 终端单元格缓冲区
-├── tests/                        # 测试套件 (68 项)
+├── tests/                        # 测试套件 (70 项)
 ├── tools/                        # 构建与测试工具（含 font_preprocessor_cjk）
 ├── assets/                       # 字体/纹理预处理产物（含 CJK shaping 表）
 ├── vendor/                       # 第三方依赖 (wgpu-native, GLFW)
@@ -301,6 +349,7 @@ nebula/
 | [`PLAN_PHASE4_X_DENSE_TEXT.md`](docs/PLAN_PHASE4_X_DENSE_TEXT.md) | 高密度文本 + 输入系统规划（待实施） |
 | [`PLAN_PHASE4_X_JSON_VIEWER.md`](docs/PLAN_PHASE4_X_JSON_VIEWER.md) | JSON Viewer 实施方案（DenseText + 折叠 + 着色） |
 | [`PLAN_PHASE4_7_BEFORE_4_5.md`](docs/PLAN_PHASE4_7_BEFORE_4_5.md) | Phase 4.7→4.5 调序方案（先积累样本再提炼语法糖） |
+| [`PLAN_PHASE4_5_S3_SUGAR.md`](docs/PLAN_PHASE4_5_S3_SUGAR.md) | Phase 4.5-S3 语法糖深化实施方案（nebula_visual + init_themed + frame_begin） |
 | [`PLAN_ERA2_MASTER.md`](docs/PLAN_ERA2_MASTER.md) | Era II 总体实施规划 |
 | [`REPORT_PHASE4_2_2_BENCH.md`](docs/REPORT_PHASE4_2_2_BENCH.md) | Phase 4.2.2 Storage Buffer 基准测试报告 |
 | [`TEXT_EDITOR_ROADMAP.md`](docs/TEXT_EDITOR_ROADMAP.md) | 文本编辑器长期愿景 |
