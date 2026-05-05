@@ -143,6 +143,10 @@ global NebulaKey = @enum(uint8){
   Save       = 24,
   -- ★ Phase 4.8-S5: 自动缩进（Shift+Tab 反缩进）
   ShiftTab   = 25,
+  -- ★ Phase 4.8-S2: 搜索与替换
+  Find       = 26,   -- Ctrl+F
+  Replace    = 27,   -- Ctrl+H
+  FindNext   = 28,   -- Enter（搜索栏激活时） / F3
 }
 
 -- =============================================================================

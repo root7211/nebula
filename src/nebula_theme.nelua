@@ -70,6 +70,19 @@ global function nebula_theme_fg_cursor(): uint32
   return nebula_pack_rgba8(22, 22, 30, 255)
 end
 
+-- ★ Phase 4.8-S2: 搜索匹配高亮
+global function nebula_theme_bg_search_match(): uint32
+  return nebula_pack_rgba8(70, 60, 20, 255)   -- 暗黄色：其他匹配
+end
+
+global function nebula_theme_bg_search_current(): uint32
+  return nebula_pack_rgba8(120, 100, 30, 255)  -- 亮黄色：当前匹配
+end
+
+global function nebula_theme_fg_search_label(): uint32
+  return nebula_pack_rgba8(180, 160, 100, 255)  -- 搜索栏标签色
+end
+
 -- =============================================================================
 -- 编辑器 Visual 默认配色（用于 EditorBgVisual init）
 -- =============================================================================

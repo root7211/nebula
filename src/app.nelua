@@ -101,6 +101,9 @@ global function _nebula_key_callback(
     elseif key == 89 then nk = NebulaKey.Redo      -- Ctrl+Y (GLFW_KEY_Y = 89)
     -- ★ Phase 4.7-S7: Save
     elseif key == 83 then nk = NebulaKey.Save      -- Ctrl+S (GLFW_KEY_S = 83)
+    -- ★ Phase 4.8-S2: Find / Replace
+    elseif key == 70 then nk = NebulaKey.Find       -- Ctrl+F (GLFW_KEY_F = 70)
+    elseif key == 72 then nk = NebulaKey.Replace    -- Ctrl+H (GLFW_KEY_H = 72)
     end
   end
 
@@ -119,6 +122,8 @@ global function _nebula_key_callback(
   -- ★ Phase 4.4 S3: Up/Down arrow keys (multiline editing)
   elseif key == GLFW_KEY_UP    then nk = shift_down and NebulaKey.ShiftUp    or NebulaKey.Up
   elseif key == GLFW_KEY_DOWN  then nk = shift_down and NebulaKey.ShiftDown  or NebulaKey.Down
+  -- ★ Phase 4.8-S2: F3 = FindNext (non-ctrl key)
+  elseif key == 292            then nk = NebulaKey.FindNext  -- GLFW_KEY_F3 = 292
   end
   end -- close: if nk == NebulaKey.None
 

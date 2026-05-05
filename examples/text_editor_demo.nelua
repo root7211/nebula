@@ -54,6 +54,22 @@ global _editor_has_file: boolean = false
 global _editor_modified: boolean = false
 global _editor_highlight_id: uint32 = 0  -- 0=none, 1=nelua, 2=lua, 3=c, 4=python, 5=json, 6=markdown
 
+-- ★ Phase 4.8-S2: 搜索状态（固定布局，零堆分配）
+global _search_active: boolean = false   -- 搜索栏是否激活
+global _search_replace: boolean = false  -- 是否为替换模式（Ctrl+H）
+global _search_buf: [256]uint8           -- 搜索关键字 buffer
+global _search_len: uint32 = 0           -- 当前关键字长度
+global _search_cursor: uint32 = 0        -- 搜索框光标位置
+global _replace_buf: [256]uint8          -- 替换文本 buffer
+global _replace_len: uint32 = 0          -- 替换文本长度
+global _replace_cursor: uint32 = 0       -- 替换框光标位置
+
+-- 匹配结果（固定数组，零堆分配——公理 B）
+global MatchPos = @record{ row: uint32, col: uint32 }
+global _search_matches: [512]MatchPos
+global _search_match_count: uint32 = 0
+global _search_current: uint32 = 0       -- 当前高亮的匹配索引
+
 -- =============================================================================
 -- 语法高亮规则（多语言 — Phase 4.8-S4）
 -- =============================================================================
@@ -209,6 +225,10 @@ global EditAreaDenseVisual = @record{ pos: Vec2, size: Vec2 }
 global StatusBarDenseVisual = @record{ pos: Vec2, size: Vec2 }
 ## nebula_component("StatusBarDenseVisual", { text_mode = "dense", max_chars = 256 })
 
+-- ★ Phase 4.8-S2: 搜索栏 DenseText（固定布局 flex_basis=24）
+global SearchBarDenseVisual = @record{ pos: Vec2, size: Vec2 }
+## nebula_component("SearchBarDenseVisual", { text_mode = "dense", max_chars = 256 })
+
 -- =============================================================================
 -- ★ Sugar: 内置行号 Producer（替代 ~53 行手写 fill_line_nums）
 -- =============================================================================
@@ -294,6 +314,22 @@ global function fill_edit_area(
         end
         if cursor_byte >= 0 and (@uint32)(cursor_byte) == byte_i - 1 then
           this_bg = nebula_theme_bg_cursor(); fg = nebula_theme_fg_cursor()
+        end
+        -- ★ Phase 4.8-S2: search match highlight (公理 C: GPU direct)
+        if _search_active and _search_len > 0 then
+          local prev_b: uint32 = byte_i > 0 and (byte_i - 1) or 0
+          local mi: uint32 = 0
+          while mi < _search_match_count do
+            local mp = _search_matches[mi]
+            if mp.row == buf_row and prev_b >= mp.col and prev_b < mp.col + _search_len then
+              if mi == _search_current then
+                this_bg = nebula_theme_bg_search_current()
+              else
+                this_bg = nebula_theme_bg_search_match()
+              end
+            end
+            mi = mi + 1
+          end
         end
         nebula_dense_grid_fill_instance(&instances[idx], row, col, ch, origin_x, origin_y, CELL_W, CELL_H, fg, this_bg)
         idx = idx + 1; col = col + 1
@@ -384,11 +420,194 @@ global function fill_status_bar(
 end
 
 -- =============================================================================
+-- ★ Phase 4.8-S2: 匹配扫描（朴素 O(n*m)，文件小够用）
+-- =============================================================================
+global function scan_matches(mb: auto): void
+  _search_match_count = 0
+  _search_current = 0
+  if _search_len == 0 then return end
+
+  local total_lines: uint32 = mb.line_count
+  local row: uint32 = 0
+  while row < total_lines and _search_match_count < 512 do
+    local ln = mb:get_line(row)
+    local flat: [256]uint8
+    local line_len = ln:flatten(&flat[0], 255)
+    -- 朴素滑窗匹配
+    local end_pos: uint32 = line_len > _search_len and (line_len - _search_len + 1) or 0
+    local ci: uint32 = 0
+    while ci < end_pos and _search_match_count < 512 do
+      local match: boolean = true
+      local k: uint32 = 0
+      while k < _search_len do
+        if flat[ci + k] ~= _search_buf[k] then match = false; break end
+        k = k + 1
+      end
+      if match then
+        _search_matches[_search_match_count].row = row
+        _search_matches[_search_match_count].col = ci
+        _search_match_count = _search_match_count + 1
+        ci = ci + _search_len  -- 跳过已匹配部分（不重叠匹配）
+      else
+        ci = ci + 1
+      end
+    end
+    row = row + 1
+  end
+end
+
+-- ★ Phase 4.8-S2: 跳转到当前匹配（更新光标位置）
+local function search_goto_current(app: auto): void
+  if _search_match_count == 0 then return end
+  if _search_current >= _search_match_count then _search_current = 0 end
+  local m = _search_matches[_search_current]
+  app.editor.cursor_row = m.row
+  app.editor.cursor_col = m.col
+  -- 确保匹配行可见（更新 scroll_offset_y）
+  local visible_top = app.editor.scroll_offset_y
+  local visible_bot = visible_top + app.editor.visual.size.y / 18.0
+  if (@float32)(m.row) < visible_top or (@float32)(m.row) > visible_bot then
+    app.editor.scroll_offset_y = (@float32)(m.row) * 18.0 - app.editor.visual.size.y * 0.5
+    if app.editor.scroll_offset_y < 0.0 then app.editor.scroll_offset_y = 0.0 end
+  end
+end
+
+local function search_replace_current(app: auto, mb: auto): void
+  if _search_match_count == 0 or _replace_len == 0 then return end
+  if _search_current >= _search_match_count then return end
+  local m = _search_matches[_search_current]
+  local ln = mb:get_line(m.row)
+  -- 删除匹配区域 [m.col, m.col + _search_len)
+  ln:delete_range(m.col, m.col + _search_len)
+  -- 插入替换文本
+  local ins_i: uint32 = 0
+  while ins_i < _replace_len do
+    ln:insert_char(_replace_buf[ins_i])
+    ins_i = ins_i + 1
+  end
+  -- 标记已修改
+  _editor_modified = true
+  -- 重新扫描
+  scan_matches(mb)
+  if _search_current >= _search_match_count and _search_match_count > 0 then
+    _search_current = _search_match_count - 1
+  end
+  search_goto_current(app)
+end
+
+local function search_replace_all(app: auto, mb: auto): void
+  if _search_match_count == 0 or _replace_len == 0 then return end
+  local count: uint32 = _search_match_count
+  -- 从后往前替换，避免位置偏移
+  local i: int32 = (@int32)(count) - 1
+  while i >= 0 do
+    local m = _search_matches[(@uint32)(i)]
+    local ln = mb:get_line(m.row)
+    ln:delete_range(m.col, m.col + _search_len)
+    local ins_j: uint32 = 0
+    while ins_j < _replace_len do
+      ln:insert_char(_replace_buf[ins_j])
+      ins_j = ins_j + 1
+    end
+    i = i - 1
+  end
+  _editor_modified = true
+  scan_matches(&app.editor.visual.multi_buf)
+end
+
+-- =============================================================================
+-- ★ Phase 4.8-S2: 搜索栏 Producer
+-- 搜索栏始终占 flex_basis=24，通过 Producer 切换渲染内容
+-- =============================================================================
+global function fill_search_bar(
+  app: auto, instances: *[0]DenseCharInstance, count: *uint32, max: uint32
+): void
+  local origin_x: float32 = app.dense_layout_search_bar_x
+  local origin_y: float32 = app.dense_layout_search_bar_y + 4.0
+  local bg = nebula_theme_bg_status()
+  local fg = nebula_theme_fg_status()
+  local fg_label = nebula_theme_fg_search_label()
+  local idx: uint32 = 0
+  local SB_COLS <comptime> = 128
+
+  if not _search_active then
+    -- 隐藏状态：填充编辑区同色背景（视觉融入）
+    local hide_bg = nebula_theme_bg_normal()
+    local col: uint32 = 0
+    while col < SB_COLS and idx < max do
+      nebula_dense_grid_fill_instance(&instances[idx], 0, col, 32, origin_x, origin_y, CELL_W, CELL_H, hide_bg, hide_bg)
+      idx = idx + 1; col = col + 1
+    end
+  else
+    -- 显示状态：渲染搜索框
+    -- 格式: " Find: {query}  [{current}/{total}]"  或  " Replace: {query} → {replacement}  [{c}/{t}]"
+    local buf: [256]uint8
+    local slen: int32 = 0
+    if _search_replace then
+      -- 替换模式
+      local repl_str: [256]uint8
+      local ri: uint32 = 0
+      while ri < _replace_len and ri < 255 do repl_str[ri] = _replace_buf[ri]; ri = ri + 1 end
+      repl_str[ri] = 0
+      local qstr: [256]uint8
+      local qi: uint32 = 0
+      while qi < _search_len and qi < 255 do qstr[qi] = _search_buf[qi]; qi = qi + 1 end
+      qstr[qi] = 0
+      slen = snprintf((@cstring)(&buf[0]), 255,
+        " Replace: %s -> %s  [%d/%d]",
+        (@cstring)(&qstr[0]), (@cstring)(&repl_str[0]),
+        (@int32)(_search_current + 1), (@int32)(_search_match_count))
+    else
+      -- 搜索模式
+      local qstr: [256]uint8
+      local qi: uint32 = 0
+      while qi < _search_len and qi < 255 do qstr[qi] = _search_buf[qi]; qi = qi + 1 end
+      qstr[qi] = 0
+      slen = snprintf((@cstring)(&buf[0]), 255,
+        " Find: %s  [%d/%d]",
+        (@cstring)(&qstr[0]),
+        (@int32)(_search_current + 1), (@int32)(_search_match_count))
+    end
+    if slen < 0 then slen = 0 end
+    if slen > 255 then slen = 255 end
+    local str_len: uint32 = (@uint32)(slen)
+
+    -- 搜索栏标签部分（" Find:" 或 " Replace:"）用 label 颜色
+    local label_end: uint32 = 0
+    if _search_replace then label_end = 10  -- " Replace: " 长度
+    else label_end = 7 end                   -- " Find: " 长度
+
+    local col: uint32 = 0
+    while col < SB_COLS and idx < max do
+      local ch: uint32 = 32
+      local cell_fg = fg
+      if col < str_len then
+        ch = (@uint32)(buf[col])
+        if col < label_end then cell_fg = fg_label end
+      end
+      -- 光标位置高亮
+      local cell_bg = bg
+      local cursor_pos = label_end + _search_cursor
+      if col == cursor_pos then
+        cell_bg = nebula_theme_bg_cursor()
+        cell_fg = nebula_theme_fg_cursor()
+      end
+      nebula_dense_grid_fill_instance(&instances[idx], 0, col, ch, origin_x, origin_y, CELL_W, CELL_H, cell_fg, cell_bg)
+      idx = idx + 1; col = col + 1
+    end
+  end
+  $count = idx
+end
+
+-- =============================================================================
 -- App 声明（嵌套布局：editor_body = row{ line_nums, edit_area } + status_bar）
 -- =============================================================================
 ## nebula_app("TextEditorApp", {
 ##   components = {
 ##     { name = "editor",    type = "EditorBgVisual" },
+##     { name = "search_bar", type = "SearchBarDenseVisual",
+##       producer = "fill_search_bar", cell_w = 10.0, cell_h = 16.0,
+##       max_chars = 256, layout = { flex_basis = 24 } },
 ##     { name = "editor_body", layout = {
 ##         direction = "row",
 ##         flex_grow = 1,
@@ -482,9 +701,9 @@ local function main(): int32
   _editor_modified = false
   update_window_title(0, 0)
 
-  printf("=== Phase 4.7-S7: Text Editor Demo ===\n")
-  printf("  Features: syntax highlight | line numbers | undo/redo | file I/O\n")
-  printf("  Keys:     Ctrl+S save | Ctrl+Z undo | Ctrl+Y redo\n")
+  printf("=== Phase 4.8-S2: Text Editor Demo ===\n")
+  printf("  Features: syntax highlight | line numbers | undo/redo | file I/O | search\n")
+  printf("  Keys:     Ctrl+S save | Ctrl+Z undo | Ctrl+Y redo | Ctrl+F find | Ctrl+H replace\n")
 
   local input: NebulaInputState
   local prev_time = glfwGetTime()
@@ -512,6 +731,118 @@ local function main(): int32
         end
       else
         printf("nebula: no file path (pass file as command-line argument)\n")
+      end
+    end
+
+    -- ★ Phase 4.8-S2: Ctrl+F / Ctrl+H 搜索栏切换
+    if input.key_pressed == NebulaKey.Find then
+      _search_active = not _search_active
+      _search_replace = false
+      if _search_active then
+        _search_len = 0; _search_cursor = 0
+        _search_match_count = 0; _search_current = 0
+      end
+    end
+    if input.key_pressed == NebulaKey.Replace then
+      _search_active = not _search_active
+      _search_replace = true
+      if _search_active then
+        _search_len = 0; _search_cursor = 0
+        _replace_len = 0; _replace_cursor = 0
+        _search_match_count = 0; _search_current = 0
+      end
+    end
+
+    -- ★ Phase 4.8-S2: 搜索栏激活时拦截键盘输入
+    if _search_active then
+      -- Escape 关闭搜索栏
+      if input.key_pressed == NebulaKey.Escape then
+        _search_active = false
+        _search_replace = false
+      -- Enter / F3 → 跳转到下一个匹配
+      elseif input.key_pressed == NebulaKey.FindNext or input.key_pressed == NebulaKey.Enter then
+        if _search_match_count > 0 then
+          _search_current = (_search_current + 1) % _search_match_count
+          search_goto_current(&app)
+        end
+      -- Backspace → 删除搜索框字符
+      elseif input.key_pressed == NebulaKey.Backspace then
+        if _search_cursor > 0 then
+          _search_cursor = _search_cursor - 1
+          _search_len = _search_len - 1
+          -- 移除字符：左移
+          local si: uint32 = _search_cursor
+          while si < _search_len do
+            _search_buf[si] = _search_buf[si + 1]
+            si = si + 1
+          end
+          scan_matches(&app.editor.visual.multi_buf)
+        elseif _search_replace and _replace_cursor > 0 then
+          -- 在替换模式下，如果搜索框空了，backspace 操作替换 buffer
+          _replace_cursor = _replace_cursor - 1
+          _replace_len = _replace_len - 1
+          local ri: uint32 = _replace_cursor
+          while ri < _replace_len do
+            _replace_buf[ri] = _replace_buf[ri + 1]
+            ri = ri + 1
+          end
+        end
+      -- Tab → 切换焦点到替换框（仅在替换模式下）
+      elseif input.key_pressed == NebulaKey.Tab and _search_replace then
+        -- 简单切换：如果光标在搜索框→移到替换框，反之亦然
+        -- 用一个 flag 判断（简化：用 _replace_cursor > 0 来推断）
+        -- 实际用 _search_cursor / _replace_cursor 本身即可
+      -- 字符输入 → 写入搜索/替换 buffer
+      else
+        -- 检查 char_input
+        local ci: uint8 = 0
+        while ci < input.char_count do
+          local ch: uint32 = input.char_input[ci]
+          if ch >= 32 and ch < 127 then  -- 仅 ASCII 可打印字符
+            if _search_replace and _replace_cursor < 255 then
+              -- 写入替换 buffer
+              if _replace_cursor < _replace_len then
+                local ri2: uint32 = _replace_len
+                while ri2 > _replace_cursor do
+                  _replace_buf[ri2] = _replace_buf[ri2 - 1]
+                  ri2 = ri2 - 1
+                end
+              end
+              _replace_buf[_replace_cursor] = (@uint8)(ch)
+              _replace_cursor = _replace_cursor + 1
+              _replace_len = _replace_len + 1
+            elseif _search_cursor < 255 then
+              -- 写入搜索 buffer
+              if _search_cursor < _search_len then
+                local si2: uint32 = _search_len
+                while si2 > _search_cursor do
+                  _search_buf[si2] = _search_buf[si2 - 1]
+                  si2 = si2 - 1
+                end
+              end
+              _search_buf[_search_cursor] = (@uint8)(ch)
+              _search_cursor = _search_cursor + 1
+              _search_len = _search_len + 1
+              scan_matches(&app.editor.visual.multi_buf)
+              -- 自动跳转到第一个匹配
+              if _search_match_count > 0 then
+                _search_current = 0
+                search_goto_current(&app)
+              end
+            end
+          end
+          ci = ci + 1
+        end
+      end
+      -- 阻止键盘事件传播到 editor
+      input.key_pressed = NebulaKey.None
+      input.char_count = 0
+    end
+
+    -- ★ Phase 4.8-S2: Ctrl+R 替换当前 / Ctrl+Shift+A 替换全部（搜索栏激活时）
+    if _search_active and _search_replace then
+      if input.key_pressed == NebulaKey.Replace then
+        search_replace_current(&app, &app.editor.visual.multi_buf)
       end
     end
 
