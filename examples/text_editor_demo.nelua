@@ -1,6 +1,6 @@
 -- =============================================================================
 -- text_editor_demo.nelua
--- Nebula GUI Compiler — Phase 4.7-S7 + Phase 4.8-S1 + Phase 4.8-NL + Phase 4.8-S3
+-- Nebula GUI Compiler — Phase 4.7-S7 + Phase 4.8-S1 + Phase 4.8-NL + Phase 4.8-S3 + Phase 4.8-S4
 --
 -- 文本编辑器原型——Phase 4.7 收官 demo + Phase 4.8 增强：
 --   · S1: CJK multiline editable（UTF-8 aware gap buffer）
@@ -12,6 +12,7 @@
 --   · S7: 集成验收
 --   · Phase 4.8-S1: 选区可视化（Shift+Arrow 选区扩展 + 蓝色背景高亮）+ 系统剪贴板（Ctrl+C/V/X/A）
 --   · Phase 4.8-S3: 状态栏（文件名 + 行列号 + 行数 + 编码 + 行尾符）+ 光标行高亮
+--   · Phase 4.8-S4: 多语言语法高亮（nelua/lua/c/python/json/markdown + 扩展名自动检测）
 --
 -- ★ Sugar:
 --   · nebula_visual — 自动生成 Visual record + buffer 注入 + DenseText 伴生管线
@@ -51,11 +52,13 @@ local CELL_H <comptime> = 16.0
 global _editor_file_path: [512]uint8
 global _editor_has_file: boolean = false
 global _editor_modified: boolean = false
+global _editor_highlight_id: uint32 = 0  -- 0=none, 1=nelua, 2=lua, 3=c, 4=python, 5=json, 6=markdown
 
 -- =============================================================================
--- 语法高亮规则
+-- 语法高亮规则（多语言 — Phase 4.8-S4）
 -- =============================================================================
 ##[[
+  -- Nelua
   nebula_highlight_rules("nelua", {
     keywords = {
       { words = {"if", "else", "elseif", "then", "end", "for", "while",
@@ -79,8 +82,112 @@ global _editor_modified: boolean = false
     string_color       = 0xCE9178FF,
     number_color       = 0xB5CEA8FF,
   })
+
+  -- Lua
+  nebula_highlight_rules("lua", {
+    keywords = {
+      { words = {"if", "else", "elseif", "then", "end", "for", "while",
+                 "do", "repeat", "until", "return", "break", "goto", "in"},
+        color = 0xC586C0FF },
+      { words = {"local", "function", "require", "not", "and", "or"},
+        color = 0x569CD6FF },
+      { words = {"true", "false", "nil"},
+        color = 0x4EC9B0FF },
+    },
+    line_comment = "--",
+    line_comment_color = 0x6A9955FF,
+    string_color       = 0xCE9178FF,
+    number_color       = 0xB5CEA8FF,
+  })
+
+  -- C
+  nebula_highlight_rules("c", {
+    keywords = {
+      { words = {"if", "else", "for", "while", "do", "switch", "case",
+                 "default", "break", "continue", "return", "goto"},
+        color = 0xC586C0FF },
+      { words = {"struct", "enum", "union", "typedef", "extern", "static",
+                 "const", "volatile", "inline", "register", "sizeof",
+                 "include", "define", "ifdef", "ifndef", "endif", "pragma"},
+        color = 0x569CD6FF },
+      { words = {"int", "char", "float", "double", "void", "long", "short",
+                 "unsigned", "signed", "size_t", "uint8_t", "uint16_t",
+                 "uint32_t", "uint64_t", "int8_t", "int16_t", "int32_t",
+                 "int64_t", "bool", "NULL"},
+        color = 0x4EC9B0FF },
+    },
+    line_comment = "//",
+    line_comment_color = 0x6A9955FF,
+    string_color       = 0xCE9178FF,
+    number_color       = 0xB5CEA8FF,
+  })
+
+  -- Python
+  nebula_highlight_rules("python", {
+    keywords = {
+      { words = {"if", "elif", "else", "for", "while", "break", "continue",
+                 "return", "pass", "raise", "try", "except", "finally",
+                 "with", "as", "yield", "assert"},
+        color = 0xC586C0FF },
+      { words = {"def", "class", "import", "from", "lambda", "global",
+                 "nonlocal", "del", "and", "or", "not", "is", "in"},
+        color = 0x569CD6FF },
+      { words = {"True", "False", "None", "self", "cls"},
+        color = 0x4EC9B0FF },
+      { words = {"int", "float", "str", "bool", "list", "dict", "tuple",
+                 "set", "bytes", "range", "print", "len", "type",
+                 "isinstance", "super", "property", "staticmethod",
+                 "classmethod", "enumerate", "zip", "map", "filter"},
+        color = 0x4DC9A0FF },
+    },
+    line_comment = "#",
+    line_comment_color = 0x6A9955FF,
+    string_color       = 0xCE9178FF,
+    number_color       = 0xB5CEA8FF,
+  })
+
+  -- JSON (no comments, no keywords — just strings and numbers)
+  nebula_highlight_rules("json", {
+    keywords = {
+      { words = {"true", "false", "null"},
+        color = 0x4EC9B0FF },
+    },
+    string_color = 0xCE9178FF,
+    number_color = 0xB5CEA8FF,
+  })
+
+  -- Markdown (headings via # treated as comment, emphasis keywords)
+  nebula_highlight_rules("markdown", {
+    keywords = {
+      { words = {"TODO", "FIXME", "NOTE", "HACK", "XXX"},
+        color = 0xDCDCAAFF },
+    },
+    line_comment = "#",
+    line_comment_color = 0x569CD6FF,
+    string_color       = 0xCE9178FF,
+    number_color       = 0xB5CEA8FF,
+  })
 ]]
+
+-- 生成所有语言的扫描函数
 ## nebula_derive_highlighter("nelua")
+## nebula_derive_highlighter("lua")
+## nebula_derive_highlighter("c")
+## nebula_derive_highlighter("python")
+## nebula_derive_highlighter("json")
+## nebula_derive_highlighter("markdown")
+
+-- 生成运行时分发 + 扩展名检测
+##[[
+  nebula_highlight_select({
+    { name = "nelua",    exts = {"nelua"} },
+    { name = "lua",      exts = {"lua", "luau"} },
+    { name = "c",        exts = {"c", "h", "cpp", "hpp", "cc", "cxx"} },
+    { name = "python",   exts = {"py", "pyw"} },
+    { name = "json",     exts = {"json", "jsonc"} },
+    { name = "markdown", exts = {"md", "mdx", "markdown"} },
+  })
+]]
 
 -- =============================================================================
 -- ★ Visual 声明（nebula_visual 替代 inject_buffers + editor_visual 两步）
@@ -148,7 +255,7 @@ global function fill_edit_area(
       local line = mb:get_line(buf_row)
       local flat: [512]uint8
       local line_len = line:flatten(&flat[0], 511)
-      nebula_highlight_scan_nelua(&flat[0], (@uint32)(line_len), nebula_theme_fg_normal(), &hl_colors[0])
+      nebula_highlight_dispatch(_editor_highlight_id, &flat[0], (@uint32)(line_len), nebula_theme_fg_normal(), &hl_colors[0])
 
       local cursor_byte: int32 = -1
       if is_cursor_line then cursor_byte = (@int32)(editor.cursor_col) end
@@ -348,17 +455,28 @@ local function main(): int32
 
   -- 加载文件
   if _editor_has_file then
+    -- ★ Phase 4.8-S4: 根据文件扩展名自动检测语法高亮
+    local path_len: uint32 = 0
+    while _editor_file_path[path_len] ~= 0 and path_len < 511 do
+      path_len = path_len + 1
+    end
+    _editor_highlight_id = nebula_highlight_detect_ext(&_editor_file_path[0], path_len)
+
     if app.editor.visual.multi_buf:load_file((@cstring)(&_editor_file_path[0])) then
       app.editor.line_count = app.editor.visual.multi_buf.line_count
       app.editor.cursor_row = 0
       app.editor.cursor_col = 0
-      printf("nebula: loaded '%s' (%d lines)\n",
-        (@cstring)(&_editor_file_path[0]), (@int32)(app.editor.line_count))
+      printf("nebula: loaded '%s' (%d lines, highlight=%d)\n",
+        (@cstring)(&_editor_file_path[0]), (@int32)(app.editor.line_count),
+        (@int32)(_editor_highlight_id))
     else
       printf("nebula: cannot open '%s', starting empty buffer\n",
         (@cstring)(&_editor_file_path[0]))
       _editor_has_file = false
     end
+  else
+    -- 无文件时默认使用 nelua 高亮（ID=1）
+    _editor_highlight_id = 1
   end
 
   _editor_modified = false

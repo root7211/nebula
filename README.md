@@ -14,12 +14,13 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 进行中 | 72/72 回归测试全绿 | Phase 4.8-S3 已完成 | 状态栏 + 光标行高亮（2026-05-05）**
+**Era II 进行中 | 73/73 回归测试全绿 | Phase 4.8-S4 已完成 | 多语言语法高亮（2026-05-05）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
+| **Phase 4.8-S4 多语言语法高亮** | 6 种语言高亮规则（nelua/lua/c/python/json/markdown）+ `nebula_highlight_select` 编译期多语言注册 + `nebula_highlight_dispatch` 运行时分发 + `nebula_highlight_detect_ext` 文件扩展名自动检测（15 种扩展名映射）+ `_editor_highlight_id` 状态管理 + 47 条冒烟测试 + 73/73 回归全绿 | — |
 | **Phase 4.8-S3 状态栏 + 光标行高亮** | 底部状态栏（`flex_basis=24` 固定高度 DenseText 组件）——显示文件名 + 修改标记 + 行列号 + 总行数 + 编码(UTF-8) + 行尾符(LF) + `fill_status_bar` Producer + `StatusBarDenseVisual` 声明 + `nebula_theme_bg_status/fg_status/fg_status_accent` 主题色 + 光标行高亮（`fill_edit_area` 中 `is_cursor_line` → `nebula_theme_bg_cursor_line`）+ 31 条冒烟测试 + 72/72 回归全绿 | — |
 | **Phase 4.8-NL 嵌套布局支持** | `layout.container` 声明式嵌套容器实现——`nebula_app_register_layout_node` 纯布局容器注册（无 GPU 管线）+ `_build_container_node` 递归构建 + `_solve_layout` 拓扑感知挂载（`_layout_seq` 维持注册顺序）+ layout_engine 交叉轴自动拉伸修复（对齐 CSS Flexbox `align-items:stretch` 默认行为）+ `nebula_app()` sugar 识别无 type 组件为容器 + 51 条冒烟测试 + 71/71 回归全绿 | `b32547b` |
 | **Phase 4.8-S1 选区 + 剪贴板** | 选区可视化（Shift+Arrow/Home/End 扩展选区）+ 系统剪贴板（Ctrl+C/V/X/A）+ 选区覆盖删除 + 正常移动重置锚点 + Producer 选区背景渲染 + `nebula_theme_bg_selected()` + 32 条冒烟测试 + 70/70 回归全绿 | `a09ecdf` |
@@ -146,6 +147,7 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 || 4.8-S1 | 选区可视化 + 系统剪贴板 | **已完成**（Shift+Arrow/Home/End + Ctrl+C/V/X/A + 选区覆盖删除 + Producer 选区渲染） | 86 |
 || 4.8-NL | 嵌套布局支持 | **已完成**（`layout.container` 声明式嵌套容器 + ref 拓扑 + 交叉轴自动拉伸 + 51 条冒烟测试） | 88 |
 || 4.8-S3 | 状态栏 + 光标行高亮 | **已完成**（底部固定高度状态栏 + 文件名/行列号/行数/编码/行尾符 + `fill_status_bar` Producer + 光标行高亮 + 31 条冒烟测试） | 80 |
+|| 4.8-S4 | 多语言语法高亮 | **已完成**（6 语言规则 + `nebula_highlight_select` + `nebula_highlight_dispatch` + 扩展名自动检测 + 47 条冒烟测试） | 82 |
 || 4.6 | Indirect Drawing | 规划中 | 78 |
 | 4.7 | 文本编辑器原型 | **S1-S7 已完成**（S7: text_editor_demo 全集成验收） | — |
 | 5.0 | 生态与 CI/CD | 规划中 | — |

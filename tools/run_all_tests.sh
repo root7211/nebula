@@ -217,6 +217,10 @@ run_test "smoke_nested_layout (Phase 4.8-NL — 嵌套布局 container ref + 拓
 run_test "smoke_phase4_8_s3 (Phase 4.8-S3 — 状态栏 & 光标行高亮 & 布局)" \
   nelua-lua tests/smoke_phase4_8_s3.lua
 
+# ★ Phase 4.8-S4: 多语言语法高亮（6 语言规则 + 扩展名自动检测 + 分发函数）
+run_test "smoke_phase4_8_s4 (Phase 4.8-S4 — 多语言语法高亮 & 扩展名检测 & 分发)" \
+  nelua-lua tests/smoke_phase4_8_s4.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="

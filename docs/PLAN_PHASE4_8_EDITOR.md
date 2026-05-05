@@ -116,20 +116,40 @@ Phase 4.8 的目标是将其从原型推进为**可日常使用的编辑器**，
 
 ---
 
-### S4：多语言语法高亮 — 🔜
+### S4：多语言语法高亮 — ✅ 已完成
 
 **目标**：根据文件扩展名自动选择高亮规则，支持 5+ 语言。
 
-**关键设计**：
-- 新增语言规则：lua、c、python、json、markdown
-- 文件打开时根据扩展名选择 scanner 函数指针
-- 不做 multi-line 高亮（块注释 `/* */`），留给 Phase 5.0
+**交付内容**：
 
-**框架改动**：
-- `highlight_factory.lua`：允许单次编译注册多组规则，生成多个 scanner 函数
-- 新增 `nebula_highlight_select(ext)` 编译期辅助
+| 任务 | 文件 | 描述 |
+|:-----|:-----|:-----|
+| 4.1 | `src/derive/highlight_factory.lua` | 新增 `nebula_highlight_select(langs)` — 编译期多语言注册，生成 `nebula_highlight_dispatch` 运行时分发 + `nebula_highlight_detect_ext` 扩展名检测 |
+| 4.2 | `examples/text_editor_demo.nelua` | 注册 6 种语言高亮规则：nelua、lua、c、python、json、markdown |
+| 4.3 | `examples/text_editor_demo.nelua` | 生成 6 个扫描函数 + 1 个分发函数 + 1 个扩展名检测函数 |
+| 4.4 | `examples/text_editor_demo.nelua` | `_editor_highlight_id` 全局状态 + 文件加载时自动检测扩展名 |
+| 4.5 | `examples/text_editor_demo.nelua` | `fill_edit_area` 改用 `nebula_highlight_dispatch` 替代硬编码 `nebula_highlight_scan_nelua` |
+| 4.6 | `tests/smoke_phase4_8_s4.lua` | 47 项冒烟测试 |
+| 4.7 | `tools/run_all_tests.sh` | 注册新测试到回归套件 |
+| 4.8 | `tests/smoke_phase4_7_s7.lua` | 更新 S7 回归断言适配 dispatch 替代直调 |
 
-**预估代码量**：~150 行规则定义，~40 行分发逻辑
+**支持的语言 & 扩展名**：
+
+| ID | 语言 | 扩展名 | 关键字数 | 行注释 |
+|:---|:-----|:-------|:---------|:-------|
+| 1 | nelua | `.nelua` | 50 | `--` |
+| 2 | lua | `.lua`, `.luau` | 23 | `--` |
+| 3 | c | `.c`, `.h`, `.cpp`, `.hpp`, `.cc`, `.cxx` | 49 | `//` |
+| 4 | python | `.py`, `.pyw` | 57 | `#` |
+| 5 | json | `.json`, `.jsonc` | 3 | 无 |
+| 6 | markdown | `.md`, `.mdx`, `.markdown` | 5 | `#` |
+
+**框架改动**：`highlight_factory.lua` +90 行（`nebula_highlight_select` 函数）
+
+**测试结果**：
+- `smoke_phase4_8_s4.lua`：47/47 通过
+- 回归测试：73/73 全绿
+- 编译验证：text_editor_demo 编译通过
 
 ---
 
@@ -168,7 +188,7 @@ Phase 4.8 的目标是将其从原型推进为**可日常使用的编辑器**，
 | S1 | 选区可视化 + 系统剪贴板 | 小（主题 + 原语导出） | ~448 行 | 无 | ✅ 已完成 |
 | S2 | 搜索与替换 | 中（条件显示 + 布局） | ~240 行 | S1 | 🔜 |
 | S3 | 状态栏 + 光标行高亮 | 无 | ~86 行 | 无 | ✅ 已完成 |
-| S4 | 多语言语法高亮 | 小（多规则注册） | ~190 行 | 无 | 🔜 |
+| S4 | 多语言语法高亮 | 小（多规则注册 + 分发生成） | ~190 行 | 无 | ✅ 已完成 |
 | S5 | 自动缩进 + Tab | 小（原语 + 缓冲区） | ~100 行 | 无 | 🔜 |
 | S6 | 集成验收 | 无 | ~80 行 | S1-S5 | 🔜 |
 

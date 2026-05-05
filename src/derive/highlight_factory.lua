@@ -300,4 +300,115 @@ function nebula_derive_highlighter(name)
     spec.number_color and "yes" or "no"))
 end
 
+-- =============================================================================
+-- nebula_highlight_select(langs)
+--
+-- 生成运行时分发函数 nebula_highlight_dispatch()，根据 _editor_highlight_id
+-- 调用对应语言的扫描函数。同时生成 nebula_highlight_detect_ext() 根据文件扩展名
+-- 返回语言 ID。
+--
+-- 参数：
+--   langs : array of { name = string, exts = {string...} }
+--     name: 已注册的高亮规则名称（必须已调用 nebula_derive_highlighter）
+--     exts: 文件扩展名列表（不含点号，如 {"lua", "luau"}）
+--
+-- 生成的函数：
+--   global function nebula_highlight_dispatch(
+--     id: uint32, line: *[0]uint8, line_len: uint32,
+--     default_fg: uint32, out_colors: *[0]uint32): void
+--
+--   global function nebula_highlight_detect_ext(
+--     path: *[0]uint8, path_len: uint32): uint32
+--     返回: 语言 ID（0 = 无高亮，1 = 第一种语言，...）
+-- =============================================================================
+function nebula_highlight_select(langs)
+  assert(type(langs) == "table" and #langs > 0,
+    "nebula_highlight_select: langs must be non-empty array")
+
+  -- 验证所有语言已注册
+  for i, lang in ipairs(langs) do
+    assert(type(lang.name) == "string",
+      ("nebula_highlight_select: langs[%d].name must be string"):format(i))
+    assert(nebula_highlight_registry[lang.name],
+      ("nebula_highlight_select: no rules registered for '%s'"):format(lang.name))
+    assert(type(lang.exts) == "table" and #lang.exts > 0,
+      ("nebula_highlight_select: langs[%d].exts must be non-empty array"):format(i))
+  end
+
+  local lines = {}
+
+  -- ---- 生成 dispatch 函数 ----
+  table.insert(lines, "global function nebula_highlight_dispatch(")
+  table.insert(lines, "  id: uint32, line: *[0]uint8, line_len: uint32,")
+  table.insert(lines, "  default_fg: uint32, out_colors: *[0]uint32")
+  table.insert(lines, "): void")
+  for i, lang in ipairs(langs) do
+    local fn = "nebula_highlight_scan_" .. lang.name
+    if i == 1 then
+      table.insert(lines, ("  if id == %d then"):format(i))
+    else
+      table.insert(lines, ("  elseif id == %d then"):format(i))
+    end
+    table.insert(lines, ("    %s(line, line_len, default_fg, out_colors)"):format(fn))
+  end
+  table.insert(lines, "  else")
+  -- id == 0 或未知：用默认颜色填充
+  table.insert(lines, "    local _i: uint32 = 0")
+  table.insert(lines, "    while _i < line_len do")
+  table.insert(lines, "      out_colors[_i] = default_fg")
+  table.insert(lines, "      _i = _i + 1")
+  table.insert(lines, "    end")
+  table.insert(lines, "  end")
+  table.insert(lines, "end")
+
+  -- ---- 生成 detect_ext 函数 ----
+  -- 策略：从 path 末尾找最后一个 '.' 后的子串，逐字节比较
+  table.insert(lines, "")
+  table.insert(lines, "global function nebula_highlight_detect_ext(")
+  table.insert(lines, "  path: *[0]uint8, path_len: uint32")
+  table.insert(lines, "): uint32")
+  table.insert(lines, "  -- find last '.'")
+  table.insert(lines, "  local dot_pos: int32 = -1")
+  table.insert(lines, "  local _pi: int32 = (@int32)(path_len) - 1")
+  table.insert(lines, "  while _pi >= 0 do")
+  table.insert(lines, "    if path[(@uint32)(_pi)] == 46 then dot_pos = _pi; break end")
+  table.insert(lines, "    _pi = _pi - 1")
+  table.insert(lines, "  end")
+  table.insert(lines, "  if dot_pos < 0 then return 0 end")
+  table.insert(lines, "  local ext_start: uint32 = (@uint32)(dot_pos + 1)")
+  table.insert(lines, "  local ext_len: uint32 = path_len - ext_start")
+
+  -- 为每种语言的每个扩展名生成匹配分支
+  local first = true
+  for i, lang in ipairs(langs) do
+    for _, ext in ipairs(lang.exts) do
+      local prefix = first and "  if " or "  elseif "
+      first = false
+      -- 长度检查 + 逐字节匹配
+      local cond_parts = { ("ext_len == %d"):format(#ext) }
+      for j = 1, #ext do
+        table.insert(cond_parts,
+          ("path[ext_start + %d] == %d"):format(j - 1, string.byte(ext, j)))
+      end
+      table.insert(lines, ("%s%s then return %d"):format(prefix, table.concat(cond_parts, " and "), i))
+    end
+  end
+  table.insert(lines, "  end")
+  table.insert(lines, "  return 0")
+  table.insert(lines, "end")
+
+  local source = table.concat(lines, "\n")
+  local stmts = aster.parse(source, "<highlight_select>")
+  for _, s in ipairs(stmts) do
+    inject_statement(s)
+  end
+
+  -- 编译期日志
+  local ext_list = {}
+  for _, lang in ipairs(langs) do
+    table.insert(ext_list, lang.name .. "={" .. table.concat(lang.exts, ",") .. "}")
+  end
+  print(("[highlight] select: %d languages [%s]"):format(#langs, table.concat(ext_list, ", ")))
+end
+
 return VERSION

@@ -114,8 +114,8 @@ check("S4 integration: nebula_highlight_rules declared",
 check("S4 integration: nebula_derive_highlighter called",
   demo_src:find("nebula_derive_highlighter") ~= nil)
 
-check("S4 integration: nebula_highlight_scan_nelua used in producer",
-  demo_src:find("nebula_highlight_scan_nelua") ~= nil)
+check("S4 integration: syntax highlighting used in producer (dispatch or direct)",
+  demo_src:find("nebula_highlight_dispatch") ~= nil or demo_src:find("nebula_highlight_scan_nelua") ~= nil)
 
 -- S5: Undo/Redo
 check("S5 integration: undo_stack referenced",
