@@ -153,20 +153,31 @@ Phase 4.8 的目标是将其从原型推进为**可日常使用的编辑器**，
 
 ---
 
-### S5：自动缩进 + Tab 处理 — 🔜
+### S5：自动缩进 + Tab 处理 — ✅ 已完成
 
 **目标**：Enter 时保持缩进，Tab 插入空格，Shift+Tab 反缩进。
 
-**关键设计**：
-- Enter 时扫描当前行前导空格数，新行自动插入相同数量空格
-- `{` / `:` 结尾时额外增加一级缩进（4 空格）
-- Tab 键插入 4 空格（可配置 `TAB_WIDTH` 编译期常量）
+**交付内容**：
+
+| 任务 | 文件 | 描述 |
+|:-----|:-----|:-----|
+| 5.1 | `src/nebula_core.nelua` | `NebulaKey.ShiftTab = 25` 枚举值 |
+| 5.2 | `src/app.nelua` | Tab 键区分 Shift（`shift_down and NebulaKey.ShiftTab or NebulaKey.Tab`） |
+| 5.3 | `src/derive/interaction_factory.lua` | Tab 处理：插入 4 空格 + 光标前进 4 |
+| 5.4 | `src/derive/interaction_factory.lua` | ShiftTab 处理：计算前导空格（至多 4）+ `delete_range` 移除 + 光标回退 |
+| 5.5 | `src/derive/interaction_factory.lua` | Enter 自动缩进：提取当前行前导空格数 + `{`/`:` 结尾额外 +4 + 新行插入缩进 |
+| 5.6 | `tests/smoke_phase4_8_s5.lua` | 30 项冒烟测试 |
+| 5.7 | `tools/run_all_tests.sh` | 注册新测试到回归套件 |
 
 **框架改动**：
-- `interaction_factory.lua`：`multiline_editable` 增加 `NebulaKey.Tab`/`NebulaKey.ShiftTab` 处理
-- `gap_buffer_factory.lua`：新增 `insert_spaces(n)` 批量方法
+- `nebula_core.nelua`：+1 枚举值
+- `app.nelua`：+1 行 shift 检测
+- `interaction_factory.lua`：Enter 重写（+40 行 auto-indent）+ Tab（+12 行）+ ShiftTab（+18 行）
 
-**预估代码量**：~100 行
+**测试结果**：
+- `smoke_phase4_8_s5.lua`：30/30 通过
+- 回归测试：74/74 全绿
+- 编译验证：text_editor_demo 编译通过
 
 ---
 
@@ -189,7 +200,7 @@ Phase 4.8 的目标是将其从原型推进为**可日常使用的编辑器**，
 | S2 | 搜索与替换 | 中（条件显示 + 布局） | ~240 行 | S1 | 🔜 |
 | S3 | 状态栏 + 光标行高亮 | 无 | ~86 行 | 无 | ✅ 已完成 |
 | S4 | 多语言语法高亮 | 小（多规则注册 + 分发生成） | ~190 行 | 无 | ✅ 已完成 |
-| S5 | 自动缩进 + Tab | 小（原语 + 缓冲区） | ~100 行 | 无 | 🔜 |
+| S5 | 自动缩进 + Tab | 小（枚举 + 原语） | ~70 行 | 无 | ✅ 已完成 |
 | S6 | 集成验收 | 无 | ~80 行 | S1-S5 | 🔜 |
 
 S1/S3/S4/S5 互相独立，可并行开发。S2 依赖 S1（搜索高亮需要选区渲染基础设施）。S6 是最终整合。

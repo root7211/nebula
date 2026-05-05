@@ -221,6 +221,10 @@ run_test "smoke_phase4_8_s3 (Phase 4.8-S3 — 状态栏 & 光标行高亮 & 布�
 run_test "smoke_phase4_8_s4 (Phase 4.8-S4 — 多语言语法高亮 & 扩展名检测 & 分发)" \
   nelua-lua tests/smoke_phase4_8_s4.lua
 
+# ★ Phase 4.8-S5: 自动缩进 + Tab 处理（Tab 4 空格 + Shift+Tab 反缩进 + Enter 保持缩进）
+run_test "smoke_phase4_8_s5 (Phase 4.8-S5 — 自动缩进 & Tab & ShiftTab)" \
+  nelua-lua tests/smoke_phase4_8_s5.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="

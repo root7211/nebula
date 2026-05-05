@@ -109,7 +109,7 @@ global function _nebula_key_callback(
   elseif key == GLFW_KEY_DELETE    then nk = NebulaKey.Delete
   elseif key == GLFW_KEY_ENTER     then nk = NebulaKey.Enter
   elseif key == GLFW_KEY_KP_ENTER  then nk = NebulaKey.Enter
-  elseif key == GLFW_KEY_TAB       then nk = NebulaKey.Tab
+  elseif key == GLFW_KEY_TAB       then nk = shift_down and NebulaKey.ShiftTab or NebulaKey.Tab
   elseif key == GLFW_KEY_ESCAPE    then nk = NebulaKey.Escape
   -- ★ Phase 3.6.3: Shift 组合键变体——选区扩展
   elseif key == GLFW_KEY_LEFT  then nk = shift_down and NebulaKey.ShiftLeft  or NebulaKey.Left
