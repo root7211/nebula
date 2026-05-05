@@ -475,4 +475,121 @@ function nebula_highlight_pack(langs)
   print(("[highlight] pack: %d languages registered + derived + selected"):format(#langs))
 end
 
+-- =============================================================================
+-- ★ Phase 4.9.1: NEBULA_BUILTIN_LANGS + nebula_highlight_builtins
+--
+-- 内置语言包：6 种常用语言的高亮规则数据表。
+-- nebula_highlight_builtins({"nelua", "c", "python"}) 替代 ~35 行手写 pack 调用。
+--
+-- 逃逸路径：用户仍可用 nebula_highlight_pack 或 nebula_highlight_rules 覆盖。
+-- =============================================================================
+
+local NEBULA_BUILTIN_LANGS = {
+  nelua = {
+    exts = {"nelua"},
+    keywords = {
+      {words={"if","else","elseif","then","end","for","while","do",
+              "repeat","until","return","break","goto","in","switch",
+              "case","continue","defer"},                              color=0xC586C0FF},
+      {words={"local","global","function","require","record","enum",
+              "union","type"},                                         color=0x569CD6FF},
+      {words={"true","false","nil","nilptr"},                          color=0x4EC9B0FF},
+      {words={"int8","int16","int32","int64","uint8","uint16","uint32",
+              "uint64","float32","float64","boolean","cstring","cint",
+              "csize","pointer","void","auto","byte","isize","usize"}, color=0x4DC9A0FF},
+    },
+    line_comment       = "--",
+    line_comment_color = 0x6A9955FF,
+    string_color       = 0xCE9178FF,
+    number_color       = 0xB5CEA8FF,
+  },
+  lua = {
+    exts = {"lua", "luau"},
+    keywords = {
+      {words={"if","else","elseif","then","end","for","while","do",
+              "repeat","until","return","break","goto","in"},          color=0xC586C0FF},
+      {words={"local","function","require","not","and","or"},          color=0x569CD6FF},
+      {words={"true","false","nil"},                                   color=0x4EC9B0FF},
+    },
+    line_comment       = "--",
+    line_comment_color = 0x6A9955FF,
+    string_color       = 0xCE9178FF,
+    number_color       = 0xB5CEA8FF,
+  },
+  c = {
+    exts = {"c", "h", "cpp", "hpp", "cc", "cxx"},
+    keywords = {
+      {words={"if","else","for","while","do","switch","case","default",
+              "break","continue","return","goto"},                     color=0xC586C0FF},
+      {words={"struct","enum","union","typedef","extern","static",
+              "const","volatile","inline","register","sizeof","include",
+              "define","ifdef","ifndef","endif","pragma"},              color=0x569CD6FF},
+      {words={"int","char","float","double","void","long","short",
+              "unsigned","signed","size_t","uint8_t","uint16_t",
+              "uint32_t","uint64_t","int8_t","int16_t","int32_t",
+              "int64_t","bool","NULL"},                                 color=0x4EC9B0FF},
+    },
+    line_comment       = "//",
+    line_comment_color = 0x6A9955FF,
+    string_color       = 0xCE9178FF,
+    number_color       = 0xB5CEA8FF,
+  },
+  python = {
+    exts = {"py", "pyw"},
+    keywords = {
+      {words={"if","elif","else","for","while","break","continue",
+              "return","pass","raise","try","except","finally","with",
+              "as","yield","assert"},                                  color=0xC586C0FF},
+      {words={"def","class","import","from","lambda","global",
+              "nonlocal","del","and","or","not","is","in"},            color=0x569CD6FF},
+      {words={"True","False","None","self","cls"},                     color=0x4EC9B0FF},
+      {words={"int","float","str","bool","list","dict","tuple","set",
+              "bytes","range","print","len","type","isinstance","super",
+              "property","staticmethod","classmethod","enumerate",
+              "zip","map","filter"},                                   color=0x4DC9A0FF},
+    },
+    line_comment       = "#",
+    line_comment_color = 0x6A9955FF,
+    string_color       = 0xCE9178FF,
+    number_color       = 0xB5CEA8FF,
+  },
+  json = {
+    exts = {"json", "jsonc"},
+    keywords = {
+      {words={"true","false","null"},                                  color=0x4EC9B0FF},
+    },
+    string_color = 0xCE9178FF,
+    number_color = 0xB5CEA8FF,
+  },
+  markdown = {
+    exts = {"md", "mdx", "markdown"},
+    keywords = {
+      {words={"TODO","FIXME","NOTE","HACK","XXX"},                    color=0xDCDCAAFF},
+    },
+    line_comment       = "#",
+    line_comment_color = 0x569CD6FF,
+    string_color       = 0xCE9178FF,
+    number_color       = 0xB5CEA8FF,
+  },
+}
+
+function nebula_highlight_builtins(lang_names)
+  assert(type(lang_names) == "table" and #lang_names > 0,
+    "nebula_highlight_builtins: lang_names must be non-empty array")
+
+  local pack = {}
+  for _, name in ipairs(lang_names) do
+    local def = NEBULA_BUILTIN_LANGS[name]
+    if not def then
+      error("[nebula_highlight_builtins] unknown language: " .. name ..
+            "\n  available: nelua, lua, c, python, json, markdown")
+    end
+    local entry = {}
+    for k, v in pairs(def) do entry[k] = v end
+    entry.name = name
+    table.insert(pack, entry)
+  end
+  nebula_highlight_pack(pack)
+end
+
 return VERSION
