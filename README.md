@@ -14,12 +14,13 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 进行中 | 76/76 回归测试全绿 | Phase 4.8 全部完成（S1-S6 + NL） | 集成验收通过（2026-05-05）**
+**Era II 进行中 | 77/77 回归测试全绿 | Phase 4.9 已完成（5 层 Sugar，885→85 行，10.4x 压缩） | 集成验收通过（2026-05-05）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
+| **Phase 4.9 50 行终态收敛** | 5 层 Sugar 系统——L1 `nebula_highlight_pack`（多语言高亮一键注册）+ L2 `nebula_builtin_status_bar/search_bar/edit_area`（Producer 自动生成）+ L3 搜索交互内置（框架级全局变量 + `nebula_search_*` 辅助函数）+ L4 `nebula_editor_update_title` 等框架内建辅助 + L5 `nebula_editor_main`（主循环一行生成）+ `text_editor_demo_v2.nelua`（85 行，原 885 行压缩 10.4x）+ 77/77 回归全绿 | `67e16c6` |
 | **Phase 4.8-S6 集成验收** | S1-S5 + NL 全功能协同验证——110 条集成冒烟测试覆盖 9 个维度（源文件完整性/S1 选区+剪贴板/S2 搜索+替换/S3 状态栏/S4 多语言高亮/S5 自动缩进/NL 嵌套布局/架构完整性/编译产物）+ text_editor_demo 871 行完整编辑器 + 76/76 回归全绿 | `c512367` |
 | **Phase 4.8-S2 搜索与替换** | 固定布局方案（`flex_basis=24` 搜索栏始终占位，Producer 切换渲染内容）+ `Ctrl+F` 搜索 / `Ctrl+H` 替换 / `F3` 下一匹配 / `Escape` 关闭 + 朴素 O(n*m) 字符串匹配 + `MatchPos[512]` 固定数组（公理 B: 零堆分配）+ 匹配高亮（当前匹配亮黄 / 其他暗黄）+ `search_replace_current` / `search_replace_all` + 搜索栏激活时键盘事件拦截 + 53 条冒烟测试 + 75/75 回归全绿 | `c512367` |
 | **Phase 4.8-S5 自动缩进 + Tab 处理** | `NebulaKey.ShiftTab` 枚举 + Tab 插入 4 空格 + Shift+Tab 移除至多 4 前导空格（`delete_range`）+ Enter 自动保持缩进（计算前导空格）+ `{`/`:` 结尾额外增加 4 空格缩进 + 30 条冒烟测试 + 74/74 回归全绿 | — |
@@ -152,6 +153,7 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 || 4.8-S3 | 状态栏 + 光标行高亮 | **已完成**（底部固定高度状态栏 + 文件名/行列号/行数/编码/行尾符 + `fill_status_bar` Producer + 光标行高亮 + 31 条冒烟测试） | 80 |
 || 4.8-S4 | 多语言语法高亮 | **已完成**（6 语言规则 + `nebula_highlight_select` + `nebula_highlight_dispatch` + 扩展名自动检测 + 47 条冒烟测试） | 82 |
 || 4.8-S5 | 自动缩进 + Tab 处理 | **已完成**（Tab 4 空格 + Shift+Tab 反缩进 + Enter 自动保持/增加缩进 + 30 条冒烟测试） | 79 |
+| **4.9** | **50 行终态收敛** | **已完成**（5 层 Sugar：L1 highlight pack + L2 Producer 自动生成 + L3 搜索交互内置 + L4 框架辅助 + L5 主循环生成，885→85 行，10.4x 压缩） | **88** |
 || 4.6 | Indirect Drawing | 规划中 | 78 |
 | 4.7 | 文本编辑器原型 | **S1-S7 已完成**（S7: text_editor_demo 全集成验收） | — |
 | 5.0 | 生态与 CI/CD | 规划中 | — |
@@ -238,6 +240,7 @@ L0 (Raw)    : nebula_annotate + nebula_derive                   ← 最初的 ra
 | multiline_sugar | — | 153 行 | ~20 行 | 8x |
 | highlight_sugar | — | 386 行 | ~120 行 | 3x |
 | minimal_editor | — | — | **39 行** | — |
+| text_editor | — | 885 行 | **85 行** | **10.4x** |
 
 ---
 
@@ -317,6 +320,7 @@ nebula/
 │   ├── multiline_sugar_demo.nelua # ★ Phase 4.5 全糖化（inject_buffers + component + app）
 │   ├── highlight_sugar_demo.nelua # ★ Phase 4.5-S2 全糖化语法高亮编辑器（混合管线自动编排）
 │   ├── text_editor_demo.nelua   # ★ Phase 4.7-S7 文本编辑器原型（S1-S6 全集成验收）
+│   ├── text_editor_demo_v2.nelua # ★ Phase 4.9 终态收敛（85 行，5 层 Sugar，10.4x 压缩）
 │   ├── button_v2_demo.nelua    # ★ Phase 4.5-S3 极限形态（30 行，全部 L2 API）
 │   ├── json_viewer_demo.nelua   # ★ Phase 4.X-J JSON 树形浏览器（折叠/展开 + 语法着色）
 │   ├── json_viewer/             # JSON Viewer 子模块
@@ -328,7 +332,7 @@ nebula/
 │       ├── pty_bindings.nelua   # POSIX PTY C FFI 绑定
 │       ├── ansi_parser.nelua    # ANSI/VT100 转义序列状态机
 │       └── term_buffer.nelua    # 终端单元格缓冲区
-├── tests/                        # 测试套件 (71 项回归全绿)
+├── tests/                        # 测试套件 (77 项回归全绿)
 ├── tools/                        # 构建与测试工具（含 font_preprocessor_cjk）
 ├── assets/                       # 字体/纹理预处理产物（含 CJK shaping 表）
 ├── vendor/                       # 第三方依赖 (wgpu-native, GLFW)
@@ -356,6 +360,8 @@ nebula/
 | [`PLAN_PHASE4_X_JSON_VIEWER.md`](docs/PLAN_PHASE4_X_JSON_VIEWER.md) | JSON Viewer 实施方案（DenseText + 折叠 + 着色） |
 | [`PLAN_PHASE4_7_BEFORE_4_5.md`](docs/PLAN_PHASE4_7_BEFORE_4_5.md) | Phase 4.7→4.5 调序方案（先积累样本再提炼语法糖） |
 || [`PLAN_PHASE4_5_S3_SUGAR.md`](docs/PLAN_PHASE4_5_S3_SUGAR.md) | Phase 4.5-S3 语法糖深化实施方案（nebula_visual + init_themed + frame_begin） |
+| [`PLAN_PHASE4_8_EDITOR.md`](docs/PLAN_PHASE4_8_EDITOR.md) | Phase 4.8 编辑器功能规划 |
+| [`PLAN_PHASE4_9_FIFTY_LINES.md`](docs/PLAN_PHASE4_9_FIFTY_LINES.md) | ★ Phase 4.9 — 50 行终态收敛方案（5 层 Sugar 架构 + 公理合规性分析） |
 || [`PLAN_NESTED_LAYOUT.md`](docs/PLAN_NESTED_LAYOUT.md) | ★ 嵌套布局实施方案（layout.container 声明式嵌套容器，公理合规性分析） |
 || [`PLAN_ERA2_MASTER.md`](docs/PLAN_ERA2_MASTER.md) | Era II 总体实施规划 |
 | [`REPORT_PHASE4_2_2_BENCH.md`](docs/REPORT_PHASE4_2_2_BENCH.md) | Phase 4.2.2 Storage Buffer 基准测试报告 |
