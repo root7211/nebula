@@ -1,8 +1,8 @@
 # Nebula Era II 后半段实施总计划
 
 **创建日期**：2026-05-01
-**最后更新**：2026-05-04
-**基准状态**：70/70 回归测试全绿 | D-4.1-C PASSED | Phase 4.8-S1 已完成
+**最后更新**：2026-05-05
+**基准状态**：70/70 回归测试全绿 | D-4.1-C PASSED | Phase 4.8-S1 已完成 | 嵌套布局方案已设计
 
 ---
 
@@ -22,8 +22,9 @@
 | 交互原语行为验证 | ✅ | 40 条运行时行为断言 + BUG-4/5/6 回归守护（commit `c424005`） |
 | 4.5 S1-S3 | ✅ | 语法糖优化（inject_buffers / editor_visual / builtin_line_nums） |
 | 4.7 S1-S7 | ✅ | 文本编辑器原型（语法高亮 / 行号 / Undo/Redo / File I/O） |
-| 4.8-S1 | ✅ | 选区可视化 + 系统剪贴板（Shift+Arrow / Ctrl+C/V/X/A） |
-| wgpu 绑定修复 | ✅ | `WGPUBindGroupLayoutEntry.bindingArraySize` 字段对齐修复 |
+|| 4.8-S1 | ✅ | 选区可视化 + 系统剪贴板（Shift+Arrow / Ctrl+C/V/X/A） |
+|| 4.8-NL | 📝 方案已设计 | 嵌套布局支持（layout.container 声明式嵌套容器，PLAN_NESTED_LAYOUT.md） |
+|| wgpu 绑定修复 | ✅ | `WGPUBindGroupLayoutEntry.bindingArraySize` 字段对齐修复 |
 
 ---
 
@@ -197,8 +198,9 @@
  │
  ├─ 第五梯队: 4.8 (文本编辑器产品化) ← 当前
  │    ├─ S1: 选区可视化 + 系统剪贴板 ✅
+ │    ├─ NL: 嵌套布局支持（layout.container）📝 方案已设计
  │    ├─ S2: 搜索与替换 🔜
- │    ├─ S3: 状态栏 + 光标行高亮 🔜
+ │    ├─ S3: 状态栏 + 光标行高亮 🔜（依赖 NL）
  │    ├─ S4: 多语言语法高亮 🔜
  │    ├─ S5: 自动缩进 + Tab 🔜
  │    └─ S6: 集成验收 🔜
@@ -210,12 +212,16 @@
 
 ## 7. 立即可执行的下一步
 
-**Phase 4.8 S2**：搜索与替换功能。
+**Phase 4.8-NL**：嵌套布局支持（前置任务，解锁 S2/S3 的复杂布局需求）。
+
+**方案文档**：[`PLAN_NESTED_LAYOUT.md`](PLAN_NESTED_LAYOUT.md)
 
 具体操作：
-1. 在 `interaction_factory.lua` 中处理 Ctrl+F / Ctrl+H 触发搜索/替换模式
-2. 新增 `SearchBarVisual`（`editable` 原语，单行，256 字节容量）
-3. App 布局改为 column：`[搜索栏(flex_basis=30, 条件显示)] + [编辑区(flex_grow=1)]`
-4. 搜索逻辑：逐行 `strstr` 匹配，结果存入静态数组 `match_positions[512]`
-5. Producer 渲染时检查当前字符是否在匹配范围内，设置高亮背景色
-6. 详见 `PLAN_PHASE4_8_EDITOR.md` S2 章节
+1. `app_factory.lua`：新增 `nebula_app_register_layout_node()` + `_build_container_node()` + 改造 `_solve_layout`（平铺→拓扑感知）
+2. `nebula_core.nelua`：`nebula_app()` 中对无 `type` 组件的容器识别和注册
+3. 冒烟测试 `smoke_nested_layout.lua`
+4. 回归测试 71/71 全绿
+5. `text_editor_demo.nelua` 重构为嵌套布局（editor_body=row{line_nums, edit_area} + status_bar）
+6. 详见 `PLAN_NESTED_LAYOUT.md`
+
+**后续**：S2（搜索替换）和 S3（状态栏）可在嵌套布局基础上直接实现。
