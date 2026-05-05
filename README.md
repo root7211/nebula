@@ -14,12 +14,14 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 完成 | 77/77 回归测试全绿 | Phase 4.9.1 已完成（886→19 行，46.6x 压缩） | 文本编辑器 demo 收敛至终态（2026-05-06）**
+**Era II 完成 | 77/77 回归测试全绿 | Phase 4.9.1 已完成（886→19 行，46.6x 压缩） | 文本编辑器 demo 收敛至终态 | Terminal Emulator v2 规划中（2026-05-06）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
+| **Phase 4.9.1 终态收尾** | 7 项 sugar 改进全落地——`dense=N` 自动生成 DenseText + `builtin` 自动绑定 Producer + layout 字段提升 + children/row 简写 + cell 默认值 + `auto_editor_name` 推断 + editor_main 默认参数 + `text_editor_demo_v3.nelua`（19 行，原 886 行压缩 46.6x）+ 77/77 回归全绿 | `77973d0` |
+| **Terminal Emulator v2 方案** | `docs/PLAN_TERM_DEMO_V2.md` — sugar 化终端模拟器设计（489→55 行，8.9x），验证 nebula_app/dense/terminal_main 体系的通用性，新增 `nebula_terminal_main` 终端专用主循环模板 | `3bd1722` |
 | **Phase 4.9 50 行终态收敛** | 5 层 Sugar 系统——L1 `nebula_highlight_pack`（多语言高亮一键注册）+ L2 `nebula_builtin_status_bar/search_bar/edit_area`（Producer 自动生成）+ L3 搜索交互内置（框架级全局变量 + `nebula_search_*` 辅助函数）+ L4 `nebula_editor_update_title` 等框架内建辅助 + L5 `nebula_editor_main`（主循环一行生成）+ `text_editor_demo_v2.nelua`（85 行，原 885 行压缩 10.4x）+ 77/77 回归全绿 | `67e16c6` |
 | **Phase 4.8-S6 集成验收** | S1-S5 + NL 全功能协同验证——110 条集成冒烟测试覆盖 9 个维度（源文件完整性/S1 选区+剪贴板/S2 搜索+替换/S3 状态栏/S4 多语言高亮/S5 自动缩进/NL 嵌套布局/架构完整性/编译产物）+ text_editor_demo 871 行完整编辑器 + 76/76 回归全绿 | `c512367` |
 | **Phase 4.8-S2 搜索与替换** | 固定布局方案（`flex_basis=24` 搜索栏始终占位，Producer 切换渲染内容）+ `Ctrl+F` 搜索 / `Ctrl+H` 替换 / `F3` 下一匹配 / `Escape` 关闭 + 朴素 O(n*m) 字符串匹配 + `MatchPos[512]` 固定数组（公理 B: 零堆分配）+ 匹配高亮（当前匹配亮黄 / 其他暗黄）+ `search_replace_current` / `search_replace_all` + 搜索栏激活时键盘事件拦截 + 53 条冒烟测试 + 75/75 回归全绿 | `c512367` |
@@ -154,6 +156,8 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 || 4.8-S4 | 多语言语法高亮 | **已完成**（6 语言规则 + `nebula_highlight_select` + `nebula_highlight_dispatch` + 扩展名自动检测 + 47 条冒烟测试） | 82 |
 || 4.8-S5 | 自动缩进 + Tab 处理 | **已完成**（Tab 4 空格 + Shift+Tab 反缩进 + Enter 自动保持/增加缩进 + 30 条冒烟测试） | 79 |
 | **4.9** | **50 行终态收敛** | **已完成**（5 层 Sugar：L1 highlight pack + L2 Producer 自动生成 + L3 搜索交互内置 + L4 框架辅助 + L5 主循环生成，885→85 行，10.4x 压缩） | **88** |
+| **4.9.1** | **语法打磨终态** | **已完成**（7 项改进：dense=N + builtin 绑定 + layout 提升 + children/row + cell 默认值 + auto_editor_name + editor_main 默认，886→19 行，46.6x 压缩） | **90** |
+| 4.X-T2 | Terminal Emulator v2 | **规划中**（sugar 化终端模拟器，`nebula_terminal_main` 模板，489→55 行，验证 sugar 通用性） | 80 |
 || 4.6 | Indirect Drawing | 规划中 | 78 |
 | 4.7 | 文本编辑器原型 | **S1-S7 已完成**（S7: text_editor_demo 全集成验收） | — |
 | 5.0 | 生态与 CI/CD | 规划中 | — |
@@ -172,9 +176,36 @@ Nebula 的设计由三条正交公理驱动（详见 [`docs/ARCHITECTURE_GRAND_P
 
 ---
 
-## 愿景：30 行实现文本编辑器 ✅ 已达成
+## 愿景：19 行实现完整文本编辑器 ✅ 已达成
 
-`minimal_editor_demo`（39 行）验证了文档愿景。框架代码仅 11 行（nebula_visual + nebula_app + init_themed），layout 可省略（默认 1280x800），窗口尺寸由 `App_WIN_WIDTH/WIN_HEIGHT` 常量自动推导：
+`text_editor_demo_v3`（19 行）验证了终极形态——完整的文本编辑器（语法高亮 + 选区 + 搜索替换 + 行号 + 状态栏 + Undo/Redo + File I/O + 自动缩进），原 886 行压缩 46.6x：
+
+```nelua
+require "nebula"
+## cinclude "<stdio.h>" -- snprintf for title update
+## nebula_highlight_builtins({"nelua", "lua", "c", "python", "json", "markdown"})
+## nebula_visual("EditorBgVisual", {
+##   primitives = {"multiline_editable"}, max_text_len = 256, max_lines = 256, component_id = 1,
+## })
+## nebula_app("TextEditorApp", {
+##   components = {
+##     { name = "editor",      type = "EditorBgVisual" },
+##     { name = "search_bar",  dense = 256, builtin = "search_bar", flex_basis = 24 },
+##     { name = "editor_body", row = true, flex_grow = 1,
+##       children = { "line_nums", "edit_area" } },
+##     { name = "line_nums",   dense = 250, builtin = "line_nums", flex_basis = 50 },
+##     { name = "edit_area",   dense = 6000, builtin = "edit_area", flex_grow = 1 },
+##     { name = "status_bar",  dense = 200, builtin = "status_bar", flex_basis = 24 },
+##   },
+## })
+## nebula_editor_main("TextEditorApp")
+```
+
+> **Sugar 能力**：`dense=N` 自动生成 DenseText record + component | `builtin="line_nums"` 自动绑定 Producer | layout 字段提升（flex_basis 直接写顶层）+ children/row 简写 | `auto_editor_name` 从 multiline_editable primitive 自动推断 | `nebula_editor_main` 默认参数覆盖
+
+### 最小编辑器（minimal_editor_demo，39 行）
+
+`minimal_editor_demo` 验证了文档愿景。框架代码仅 11 行：
 
 ```nelua
 require "nebula"
@@ -240,7 +271,8 @@ L0 (Raw)    : nebula_annotate + nebula_derive                   ← 最初的 ra
 | multiline_sugar | — | 153 行 | ~20 行 | 8x |
 | highlight_sugar | — | 386 行 | ~120 行 | 3x |
 | minimal_editor | — | — | **39 行** | — |
-| text_editor | — | 885 行 | **85 行** | **10.4x** |
+| text_editor | — | 885 行 | **19 行** | **46.6x** |
+| terminal (v1→v2) | 489 行 | — | **~55 行** | **8.9x** |
 
 ---
 
@@ -252,6 +284,10 @@ chmod +x build.sh
 # 最小编辑器（文档愿景验证）
 ./build.sh minimal_editor_demo
 LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/minimal_editor_demo
+
+# 完整文本编辑器 v3（19 行终态）
+./build.sh text_editor_demo_v3
+LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/text_editor_demo_v3
 
 # 完整文本编辑器（支持文件打开、语法高亮、行号）
 ./build.sh text_editor_demo
@@ -321,6 +357,7 @@ nebula/
 │   ├── highlight_sugar_demo.nelua # ★ Phase 4.5-S2 全糖化语法高亮编辑器（混合管线自动编排）
 │   ├── text_editor_demo.nelua   # ★ Phase 4.7-S7 文本编辑器原型（S1-S6 全集成验收）
 │   ├── text_editor_demo_v2.nelua # ★ Phase 4.9 终态收敛（85 行，5 层 Sugar，10.4x 压缩）
+│   ├── text_editor_demo_v3.nelua # ★ Phase 4.9.1 终态（19 行，46.6x 压缩，全部 sugar 内联）
 │   ├── button_v2_demo.nelua    # ★ Phase 4.5-S3 极限形态（30 行，全部 L2 API）
 │   ├── json_viewer_demo.nelua   # ★ Phase 4.X-J JSON 树形浏览器（折叠/展开 + 语法着色）
 │   ├── json_viewer/             # JSON Viewer 子模块
@@ -342,6 +379,8 @@ nebula/
 ---
 
 ## 文档索引
+| [`PLAN_PHASE4_9_1_SYNTAX.md`](docs/PLAN_PHASE4_9_1_SYNTAX.md) | ★ Phase 4.9.1 — 语法打磨终态（886→19 行，46.6x） |
+| [`PLAN_TERM_DEMO_V2.md`](docs/PLAN_TERM_DEMO_V2.md) | ★ Terminal Emulator v2 — sugar 化终端模拟器方案（489→55 行） |
 
 | 文档 | 内容 |
 | :--- | :--- |
