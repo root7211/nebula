@@ -2804,8 +2804,7 @@ global ClickableState = @record{
 ##     editor_name,
 ##     editor_name, editor_name,
 ##     editor_name, editor_name,
-##     editor_name, editor_name,
-##     editor_name, editor_name, tostring(cell_h),
+##     editor_name, editor_name, editor_name, tostring(cell_h),
 ##     editor_name, editor_name
 ##   )
 ##

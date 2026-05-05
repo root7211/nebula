@@ -468,6 +468,11 @@ end
 -- ★ Phase 4.9 L4: 框架内建辅助函数
 -- =============================================================================
 
+-- snprintf/printf: <cimport> 声明放在 app.nelua 内部，避免依赖 nebula.nelua 的声明顺序
+-- （nebula.nelua 先 require "app" 再声明 snprintf，导致 app.nelua 编译时 snprintf 未定义）
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+global function snprintf(buf: cstring, size: csize, fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+
 -- 搜索状态类型和全局变量（框架级声明，供 L2/L3 Sugar 生成的代码引用）
 -- 使用编译期守卫避免与手动声明冲突（如 text_editor_demo v1）
 ## if not NEBULA_EDITOR_GLOBALS_DEFINED then
@@ -489,7 +494,6 @@ global _editor_file_path: [512]uint8
 global _editor_has_file: boolean = false
 global _editor_modified: boolean = false
 global _editor_highlight_id: uint32 = 0
-## end
 
 -- nebula_editor_update_title — 更新窗口标题（从文件路径提取文件名）
 global function nebula_editor_update_title(cursor_row: uint32, cursor_col: uint32): void
@@ -601,6 +605,7 @@ global function nebula_search_replace_all(editor: auto, mb: auto): void
   _editor_modified = true
   nebula_search_scan(mb)
 end
+## end
 
 -- =============================================================================
 -- ★ Phase 4.2.1: nebula_main_loop — 跨平台主循环宏
