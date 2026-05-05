@@ -1,28 +1,19 @@
--- text_editor_demo_v3.nelua — Phase 4.9.1: ~28 行文本编辑器
--- 功能等价: 多语言高亮 + 选区/剪贴板 + 搜索替换 + 行号/状态栏 + Undo/Redo + File I/O + 自动缩进
-## cinclude "<stdio.h>"
-## cinclude "<string.h>"
-
+-- text_editor_demo_v3.nelua — 22 行终态 (31.6x vs 886行 v1)
 require "nebula"
-
--- ★ L1: 多语言语法高亮（6 语言内置，一行搞定）
+## cinclude "<stdio.h>" -- snprintf for title update
 ## nebula_highlight_builtins({"nelua", "lua", "c", "python", "json", "markdown"})
-
--- ★ L2: App 声明（dense/builtin/layout sugar）
 ## nebula_visual("EditorBgVisual", {
 ##   primitives = {"multiline_editable"}, max_text_len = 256, max_lines = 256, component_id = 1,
 ## })
 ## nebula_app("TextEditorApp", {
 ##   components = {
 ##     { name = "editor",      type = "EditorBgVisual" },
-##     { name = "search_bar",  dense = 256, builtin = "search_bar", editor = "editor", flex_basis = 24 },
+##     { name = "search_bar",  dense = 256, builtin = "search_bar", flex_basis = 24 },
 ##     { name = "editor_body", row = true, flex_grow = 1,
 ##       children = { "line_nums", "edit_area" } },
-##     { name = "line_nums",   dense = 250, builtin = "line_nums", editor = "editor", flex_basis = 50 },
-##     { name = "edit_area",   dense = 6000, builtin = "edit_area", editor = "editor", flex_grow = 1 },
-##     { name = "status_bar",  dense = 200, builtin = "status_bar", editor = "editor", flex_basis = 24 },
+##     { name = "line_nums",   dense = 250, builtin = "line_nums", flex_basis = 50 },
+##     { name = "edit_area",   dense = 6000, builtin = "edit_area", flex_grow = 1 },
+##     { name = "status_bar",  dense = 200, builtin = "status_bar", flex_basis = 24 },
 ##   },
 ## })
-
--- ★ L5: 主循环（默认: editor="editor", title="Nebula Editor", cell_h=16.0）
 ## nebula_editor_main("TextEditorApp")

@@ -2167,6 +2167,22 @@ global ClickableState = @record{
 ##   -- 开始 App 注册
 ##   nebula_app_begin(app_name, { arena_size = spec.arena_size })
 ##   -- ★ Phase 4.5 S2: 注册组件（混合管线自动编排）
+##   -- ★ Phase 4.9.1: 自动推断 editor 组件名（第一个含 multiline_editable primitive 的组件）
+##   local auto_editor_name = nil
+##   for _, c in ipairs(spec.components or {}) do
+##     if c.type then
+##       local reg = nebula_registry[c.type]
+##       if reg and reg.primitives then
+##         for _, p in ipairs(reg.primitives) do
+##           if p == "multiline_editable" then
+##             auto_editor_name = c.name
+##             break
+##           end
+##         end
+##       end
+##     end
+##     if auto_editor_name then break end
+##   end
 ##   -- ★ Phase 4.9.1: layout 字段提升 + children/row 简写
 ##   -- 在组件注册前，将顶层 layout 字段归入 c.layout，并展开 children/row 语法糖
 ##   for _, c in ipairs(spec.components or {}) do
@@ -2218,7 +2234,7 @@ global ClickableState = @record{
 ##       opts.cols = c.cols
 ##       local bname = c.builtin
 ##       -- editor_name: 引用 app record 中的编辑器组件字段名（builtin Producer 内部用 app.<editor_name>）
-##       local edname = c.editor or c.name
+##       local edname = c.editor or auto_editor_name or c.name
 ##       if bname == "line_nums" then
 ##         assert(c.rows or spec.layout, "builtin=line_nums: needs rows= or spec.layout.height")
 ##         opts.rows = opts.rows or (spec.layout.height and math.floor(spec.layout.height / opts.cell_h) or 50)
