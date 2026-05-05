@@ -1,6 +1,6 @@
 -- =============================================================================
 -- text_editor_demo.nelua
--- Nebula GUI Compiler — Phase 4.7-S7 + Phase 4.8-S1
+-- Nebula GUI Compiler — Phase 4.7-S7 + Phase 4.8-S1 + Phase 4.8-NL
 --
 -- 文本编辑器原型——Phase 4.7 收官 demo + Phase 4.8 S1 选区可视化 + 系统剪贴板：
 --   · S1: CJK multiline editable（UTF-8 aware gap buffer）
@@ -16,7 +16,7 @@
 --   · nebula_visual — 自动生成 Visual record + buffer 注入 + DenseText 伴生管线
 --   · nebula_theme — 内置暗色主题
 --   · nebula_builtin_line_nums — 内置行号 Producer
---   · nebula_app — 默认 layout（1280x800）+ 混合管线自动编排
+--   · nebula_app — 默认 layout（1280x800）+ 混合管线自动编排 + 嵌套布局
 --
 -- Usage:
 --   ./text_editor_demo                     # 空缓冲区
@@ -214,11 +214,20 @@ global function fill_edit_area(
 end
 
 -- =============================================================================
--- App 声明（省略 layout → 默认 1280x800）
+-- App 声明（嵌套布局：editor_body = row{ line_nums, edit_area }）
 -- =============================================================================
 ## nebula_app("TextEditorApp", {
 ##   components = {
 ##     { name = "editor",    type = "EditorBgVisual" },
+##     { name = "editor_body", layout = {
+##         direction = "row",
+##         flex_grow = 1,
+##         container = {
+##           { ref = "line_nums" },
+##           { ref = "edit_area" },
+##         },
+##       },
+##     },
 ##     { name = "line_nums", type = "LineNumDenseVisual",
 ##       producer = "nebula_fill_line_nums_editor", cell_w = 10.0, cell_h = 16.0,
 ##       max_chars = 250, layout = { flex_basis = 50 } },
