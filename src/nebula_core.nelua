@@ -2311,6 +2311,511 @@ global ClickableState = @record{
 ##   nebula_derive_app(app_name)
 ## end
 ##
+## -- ★ Phase 4.9 L2: nebula_builtin_status_bar(editor_name, opts)
+## --
+## -- 生成内置状态栏 Producer 函数。
+## -- Usage:
+## --   ## nebula_builtin_status_bar("editor", { cell_w=10.0, cell_h=16.0, cols=128 })
+## --   -- 生成: global function nebula_fill_status_bar_editor(app, instances, count, max)
+## --
+## function nebula_builtin_status_bar(editor_name, opts)
+##   opts = opts or {}
+##   local cell_w = opts.cell_w or 10.0
+##   local cell_h = opts.cell_h or 16.0
+##   local cols   = opts.cols   or 128
+##   local fname  = "nebula_fill_status_bar_" .. editor_name
+##   local layout_x = "app.dense_layout_status_bar_x"
+##   local layout_y = "app.dense_layout_status_bar_y"
+##
+##   local src = ([[global function %s(
+##   app: auto, instances: *[0]DenseCharInstance, count: *uint32, max: uint32
+## ): void
+##   local editor = &app.%s
+##   local origin_x: float32 = %s
+##   local origin_y: float32 = %s + 4.0
+##   local bg = nebula_theme_bg_status()
+##   local fg = nebula_theme_fg_status()
+##   local idx: uint32 = 0
+##   local STATUS_COLS: uint32 = %d
+##   local buf: [256]uint8
+##   local row_1 = (@int32)(editor.cursor_row + 1)
+##   local col_1 = (@int32)(editor.cursor_col + 1)
+##   local lines = (@int32)(editor.visual.multi_buf.line_count)
+##   local mod_str: cstring = _editor_modified and " [+]" or ""
+##   local file_str: cstring
+##   if _editor_has_file then
+##     local last_slash: int32 = -1
+##     local fi: uint32 = 0
+##     while _editor_file_path[fi] ~= 0 and fi < 511 do
+##       if _editor_file_path[fi] == 47 then last_slash = (@int32)(fi) end
+##       fi = fi + 1
+##     end
+##     local start: uint32 = last_slash >= 0 and (@uint32)(last_slash + 1) or 0
+##     file_str = (@cstring)(&_editor_file_path[start])
+##   else
+##     file_str = "[untitled]"
+##   end
+##   local slen = snprintf((@cstring)(&buf[0]), 255,
+##     " %%s%%s  |  Ln %%d, Col %%d  |  %%d lines  |  UTF-8  |  LF",
+##     file_str, mod_str, row_1, col_1, lines)
+##   if slen < 0 then slen = 0 end
+##   if slen > 255 then slen = 255 end
+##   local str_len: uint32 = (@uint32)(slen)
+##   local col: uint32 = 0
+##   while col < STATUS_COLS and idx < max do
+##     local ch: uint32 = 32
+##     if col < str_len then ch = (@uint32)(buf[col]) end
+##     nebula_dense_grid_fill_instance(&instances[idx], 0, col, ch, origin_x, origin_y, %s, %s, fg, bg)
+##     idx = idx + 1; col = col + 1
+##   end
+##   $count = idx
+## end]]):format(fname, editor_name, layout_x, layout_y, cols,
+##              tostring(cell_w), tostring(cell_h))
+##
+##   local ast = aster.parse(src, "<nebula_builtin_status_bar:" .. editor_name .. ">")
+##   for _, stat in ipairs(ast) do
+##     inject_statement(stat)
+##   end
+##   print(("[sugar] nebula_builtin_status_bar: %s (cols=%d)"):format(fname, cols))
+## end
+##
+## -- ★ Phase 4.9 L2: nebula_builtin_search_bar(editor_name, opts)
+## --
+## -- 生成内置搜索栏 Producer 函数。
+## -- Usage:
+## --   ## nebula_builtin_search_bar("editor", { cell_w=10.0, cell_h=16.0, cols=128 })
+## --   -- 生成: global function nebula_fill_search_bar_editor(app, instances, count, max)
+## --
+## function nebula_builtin_search_bar(editor_name, opts)
+##   opts = opts or {}
+##   local cell_w = opts.cell_w or 10.0
+##   local cell_h = opts.cell_h or 16.0
+##   local cols   = opts.cols   or 128
+##   local fname  = "nebula_fill_search_bar_" .. editor_name
+##   local layout_x = "app.dense_layout_search_bar_x"
+##   local layout_y = "app.dense_layout_search_bar_y"
+##
+##   local src = ([[global function %s(
+##   app: auto, instances: *[0]DenseCharInstance, count: *uint32, max: uint32
+## ): void
+##   local origin_x: float32 = %s
+##   local origin_y: float32 = %s + 4.0
+##   local bg = nebula_theme_bg_status()
+##   local fg = nebula_theme_fg_status()
+##   local fg_label = nebula_theme_fg_search_label()
+##   local idx: uint32 = 0
+##   local SB_COLS: uint32 = %d
+##   if not _search_active then
+##     local hide_bg = nebula_theme_bg_normal()
+##     local col: uint32 = 0
+##     while col < SB_COLS and idx < max do
+##       nebula_dense_grid_fill_instance(&instances[idx], 0, col, 32, origin_x, origin_y, %s, %s, hide_bg, hide_bg)
+##       idx = idx + 1; col = col + 1
+##     end
+##   else
+##     local buf: [256]uint8
+##     local slen: int32 = 0
+##     if _search_replace then
+##       local repl_str: [256]uint8
+##       local ri: uint32 = 0
+##       while ri < _replace_len and ri < 255 do repl_str[ri] = _replace_buf[ri]; ri = ri + 1 end
+##       repl_str[ri] = 0
+##       local qstr: [256]uint8
+##       local qi: uint32 = 0
+##       while qi < _search_len and qi < 255 do qstr[qi] = _search_buf[qi]; qi = qi + 1 end
+##       qstr[qi] = 0
+##       slen = snprintf((@cstring)(&buf[0]), 255,
+##         " Replace: %%s -> %%s  [%%d/%%d]",
+##         (@cstring)(&qstr[0]), (@cstring)(&repl_str[0]),
+##         (@int32)(_search_current + 1), (@int32)(_search_match_count))
+##     else
+##       local qstr: [256]uint8
+##       local qi: uint32 = 0
+##       while qi < _search_len and qi < 255 do qstr[qi] = _search_buf[qi]; qi = qi + 1 end
+##       qstr[qi] = 0
+##       slen = snprintf((@cstring)(&buf[0]), 255,
+##         " Find: %%s  [%%d/%%d]",
+##         (@cstring)(&qstr[0]),
+##         (@int32)(_search_current + 1), (@int32)(_search_match_count))
+##     end
+##     if slen < 0 then slen = 0 end
+##     if slen > 255 then slen = 255 end
+##     local str_len: uint32 = (@uint32)(slen)
+##     local label_end: uint32 = 0
+##     if _search_replace then label_end = 10
+##     else label_end = 7 end
+##     local col: uint32 = 0
+##     while col < SB_COLS and idx < max do
+##       local ch: uint32 = 32
+##       local cell_fg = fg
+##       if col < str_len then
+##         ch = (@uint32)(buf[col])
+##         if col < label_end then cell_fg = fg_label end
+##       end
+##       local cell_bg = bg
+##       local cursor_pos = label_end + _search_cursor
+##       if col == cursor_pos then
+##         cell_bg = nebula_theme_bg_cursor()
+##         cell_fg = nebula_theme_fg_cursor()
+##       end
+##       nebula_dense_grid_fill_instance(&instances[idx], 0, col, ch, origin_x, origin_y, %s, %s, cell_fg, cell_bg)
+##       idx = idx + 1; col = col + 1
+##     end
+##   end
+##   $count = idx
+## end]]):format(fname, layout_x, layout_y, cols,
+##              tostring(cell_w), tostring(cell_h),
+##              tostring(cell_w), tostring(cell_h))
+##
+##   local ast = aster.parse(src, "<nebula_builtin_search_bar:" .. editor_name .. ">")
+##   for _, stat in ipairs(ast) do
+##     inject_statement(stat)
+##   end
+##   print(("[sugar] nebula_builtin_search_bar: %s (cols=%d)"):format(fname, cols))
+## end
+##
+## -- ★ Phase 4.9 L2: nebula_builtin_edit_area(editor_name, opts)
+## --
+## -- 生成完整的编辑区 Producer（带语法高亮 + 选区 + 搜索匹配高亮 + 光标行高亮）。
+## --
+## function nebula_builtin_edit_area(editor_name, opts)
+##   opts = opts or {}
+##   local cell_w = opts.cell_w or 10.0
+##   local cell_h = opts.cell_h or 16.0
+##   local cols   = opts.cols   or 120
+##   local rows   = opts.rows   or 50
+##   local fname  = "nebula_fill_edit_area_" .. editor_name
+##   local layout_x = "app.dense_layout_edit_area_x"
+##   local layout_y = "app.dense_layout_edit_area_y"
+##
+##   local src = ([[global function %s(
+##   app: auto, instances: *[0]DenseCharInstance, count: *uint32, max: uint32
+## ): void
+##   local editor = &app.%s
+##   local mb = &editor.visual.multi_buf
+##   local origin_x: float32 = %s
+##   local origin_y: float32 = %s + 4.0
+##   local idx: uint32 = 0
+##   local scroll_row: uint32 = (@uint32)(editor.scroll_offset_y / (%s + 2.0))
+##   local visible_rows: uint32 = %d
+##   local hl_colors: [512]uint32
+##   local EDIT_COLS: uint32 = %d
+##   -- selection bounds
+##   local sel_active: boolean = (editor.sel_anchor_row ~= editor.cursor_row) or (editor.sel_anchor_col ~= editor.cursor_col)
+##   local sel_sr: uint32 = 0
+##   local sel_sc: uint32 = 0
+##   local sel_er: uint32 = 0
+##   local sel_ec: uint32 = 0
+##   if sel_active then
+##     if editor.sel_anchor_row < editor.cursor_row or (editor.sel_anchor_row == editor.cursor_row and editor.sel_anchor_col < editor.cursor_col) then
+##       sel_sr = editor.sel_anchor_row; sel_sc = editor.sel_anchor_col
+##       sel_er = editor.cursor_row; sel_ec = editor.cursor_col
+##     else
+##       sel_sr = editor.cursor_row; sel_sc = editor.cursor_col
+##       sel_er = editor.sel_anchor_row; sel_ec = editor.sel_anchor_col
+##     end
+##   end
+##   local row: uint32 = 0
+##   while row < visible_rows and idx < max do
+##     local buf_row = row + scroll_row
+##     local is_cursor_line = (buf_row == editor.cursor_row)
+##     local bg = is_cursor_line and nebula_theme_bg_cursor_line() or nebula_theme_bg_normal()
+##     if buf_row < mb.line_count then
+##       local line = mb:get_line(buf_row)
+##       local flat: [512]uint8
+##       local line_len = line:flatten(&flat[0], 511)
+##       nebula_highlight_dispatch(_editor_highlight_id, &flat[0], (@uint32)(line_len), nebula_theme_fg_normal(), &hl_colors[0])
+##       local cursor_byte: int32 = -1
+##       if is_cursor_line then cursor_byte = (@int32)(editor.cursor_col) end
+##       local byte_i: uint32 = 0
+##       local col: uint32 = 0
+##       while col < EDIT_COLS and idx < max do
+##         local ch: uint32 = 32
+##         local fg = nebula_theme_fg_normal()
+##         local this_bg = bg
+##         if byte_i < line_len then
+##           ch = (@uint32)(flat[byte_i])
+##           fg = hl_colors[byte_i]
+##           if ch >= 0xC0 and ch <= 0xDF then ch = 0x3F; byte_i = byte_i + 1
+##           elseif ch >= 0xE0 and ch <= 0xEF then ch = 0x3F; byte_i = byte_i + 2
+##           elseif ch >= 0xF0 then ch = 0x3F; byte_i = byte_i + 3 end
+##           byte_i = byte_i + 1
+##         end
+##         if sel_active then
+##           local in_sel: boolean = false
+##           if buf_row > sel_sr and buf_row < sel_er then
+##             in_sel = true
+##           elseif buf_row == sel_sr and buf_row == sel_er then
+##             local prev_byte = byte_i > 0 and (byte_i - 1) or 0
+##             if prev_byte >= sel_sc and prev_byte < sel_ec then in_sel = true end
+##           elseif buf_row == sel_sr then
+##             local prev_byte = byte_i > 0 and (byte_i - 1) or 0
+##             if prev_byte >= sel_sc then in_sel = true end
+##           elseif buf_row == sel_er then
+##             local prev_byte = byte_i > 0 and (byte_i - 1) or 0
+##             if prev_byte < sel_ec then in_sel = true end
+##           end
+##           if in_sel then this_bg = nebula_theme_bg_selected() end
+##         end
+##         if cursor_byte >= 0 and (@uint32)(cursor_byte) == byte_i - 1 then
+##           this_bg = nebula_theme_bg_cursor(); fg = nebula_theme_fg_cursor()
+##         end
+##         if _search_active and _search_len > 0 then
+##           local prev_b: uint32 = byte_i > 0 and (byte_i - 1) or 0
+##           local mi: uint32 = 0
+##           while mi < _search_match_count do
+##             local mp = _search_matches[mi]
+##             if mp.row == buf_row and prev_b >= mp.col and prev_b < mp.col + _search_len then
+##               if mi == _search_current then
+##                 this_bg = nebula_theme_bg_search_current()
+##               else
+##                 this_bg = nebula_theme_bg_search_match()
+##               end
+##             end
+##             mi = mi + 1
+##           end
+##         end
+##         nebula_dense_grid_fill_instance(&instances[idx], row, col, ch, origin_x, origin_y, %s, %s, fg, this_bg)
+##         idx = idx + 1; col = col + 1
+##       end
+##       while col < EDIT_COLS and idx < max do
+##         local this_bg = bg
+##         if sel_active then
+##           if buf_row > sel_sr and buf_row < sel_er then
+##             this_bg = nebula_theme_bg_selected()
+##           elseif buf_row == sel_sr and buf_row ~= sel_er and byte_i >= sel_sc then
+##             this_bg = nebula_theme_bg_selected()
+##           end
+##         end
+##         if cursor_byte >= 0 and byte_i == line_len and col == byte_i then this_bg = nebula_theme_bg_cursor() end
+##         nebula_dense_grid_fill_instance(&instances[idx], row, col, 32, origin_x, origin_y, %s, %s, nebula_theme_fg_normal(), this_bg)
+##         idx = idx + 1; col = col + 1
+##       end
+##     else
+##       local col: uint32 = 0
+##       while col < EDIT_COLS and idx < max do
+##         nebula_dense_grid_fill_instance(&instances[idx], row, col, 32, origin_x, origin_y, %s, %s, nebula_theme_fg_normal(), nebula_theme_bg_normal())
+##         idx = idx + 1; col = col + 1
+##       end
+##     end
+##     row = row + 1
+##   end
+##   $count = idx
+## end]]):format(fname, editor_name, layout_x, layout_y,
+##              tostring(cell_h), rows, cols,
+##              tostring(cell_w), tostring(cell_h),
+##              tostring(cell_w), tostring(cell_h),
+##              tostring(cell_w), tostring(cell_h))
+##
+##   local ast = aster.parse(src, "<nebula_builtin_edit_area:" .. editor_name .. ">")
+##   for _, stat in ipairs(ast) do
+##     inject_statement(stat)
+##   end
+##   print(("[sugar] nebula_builtin_edit_area: %s (cols=%d, rows=%d)"):format(fname, cols, rows))
+## end
+##
+## -- ★ Phase 4.9 L5: nebula_editor_main(app_type, opts)
+## --
+## -- 生成完整的 main() 函数：init + 文件加载 + 主循环（含交互处理）+ deinit。
+## --
+## -- Usage:
+## --   ## nebula_editor_main("TextEditorApp", {
+## --     editor = "editor",
+## --     title = "Nebula Editor",
+## --     cell_h = 16.0,
+## --   })
+## --
+## function nebula_editor_main(app_type, opts)
+##   opts = opts or {}
+##   local editor_name = opts.editor or "editor"
+##   local title       = opts.title  or "Nebula Editor"
+##   local cell_h      = opts.cell_h or 16.0
+##   local win_w_const = app_type .. "_WIN_WIDTH"
+##   local win_h_const = app_type .. "_WIN_HEIGHT"
+##
+##   local src = ([[local function main(): int32
+##   local renderer: NebulaRenderer
+##   local app: %s
+##   if not nebula_init(&renderer, &app, "%s", %s, %s) then
+##     return 1
+##   end
+##   app.%s:init_themed(
+##     Vec2{x = 0.0, y = 0.0},
+##     Vec2{x = (@float32)(%s), y = (@float32)(%s)},
+##     0.0)
+##   -- 修正 editor 背景为 editor_body 布局坐标（编译期常量）
+##   app.%s.visual.pos  = Vec2{x = 0.0, y = 24.0}
+##   app.%s.visual.size = Vec2{x = (@float32)(%s), y = (@float32)(%s) - 24.0 - 24.0}
+##   -- 加载文件
+##   if _editor_has_file then
+##     local path_len: uint32 = 0
+##     while _editor_file_path[path_len] ~= 0 and path_len < 511 do
+##       path_len = path_len + 1
+##     end
+##     _editor_highlight_id = nebula_highlight_detect_ext(&_editor_file_path[0], path_len)
+##     if app.%s.visual.multi_buf:load_file((@cstring)(&_editor_file_path[0])) then
+##       app.%s.line_count = app.%s.visual.multi_buf.line_count
+##       app.%s.cursor_row = 0
+##       app.%s.cursor_col = 0
+##       printf("nebula: loaded file (highlight=%%d)\n", (@int32)(_editor_highlight_id))
+##     else
+##       printf("nebula: cannot open file, starting empty buffer\n")
+##       _editor_has_file = false
+##     end
+##   else
+##     _editor_highlight_id = 1
+##   end
+##   _editor_modified = false
+##   nebula_editor_update_title(0, 0)
+##   printf("=== Nebula Text Editor ===\n")
+##   printf("  Ctrl+S save | Ctrl+Z undo | Ctrl+Y redo | Ctrl+F find | Ctrl+H replace\n")
+##   local input: NebulaInputState
+##   local prev_time = glfwGetTime()
+##   local prev_undo_cursor: uint32 = 0
+##   local title_timer: float32 = 0.0
+##   while not nebula_should_close() do
+##     nebula_poll_events()
+##     local now = glfwGetTime()
+##     local dt  = (@float32)(now - prev_time)
+##     prev_time = now
+##     nebula_collect_input(_nebula_window, &input, dt)
+##     -- Ctrl+S 保存
+##     if input.key_pressed == NebulaKey.Save then
+##       if _editor_has_file then
+##         if app.%s.visual.multi_buf:save_file((@cstring)(&_editor_file_path[0])) then
+##           _editor_modified = false
+##           prev_undo_cursor = app.%s.undo_stack.cursor
+##           printf("nebula: saved\n")
+##           nebula_editor_update_title(app.%s.cursor_row, app.%s.cursor_col)
+##         end
+##       else
+##         printf("nebula: no file path\n")
+##       end
+##     end
+##     -- Ctrl+F / Ctrl+H 搜索栏切换
+##     if input.key_pressed == NebulaKey.Find then
+##       _search_active = not _search_active
+##       _search_replace = false
+##       if _search_active then
+##         _search_len = 0; _search_cursor = 0
+##         _search_match_count = 0; _search_current = 0
+##       end
+##     end
+##     if input.key_pressed == NebulaKey.Replace then
+##       _search_active = not _search_active
+##       _search_replace = true
+##       if _search_active then
+##         _search_len = 0; _search_cursor = 0
+##         _replace_len = 0; _replace_cursor = 0
+##         _search_match_count = 0; _search_current = 0
+##       end
+##     end
+##     -- 搜索栏键盘处理
+##     if _search_active then
+##       if input.key_pressed == NebulaKey.Escape then
+##         _search_active = false; _search_replace = false
+##       elseif input.key_pressed == NebulaKey.FindNext or input.key_pressed == NebulaKey.Enter then
+##         if _search_match_count > 0 then
+##           _search_current = (_search_current + 1) %% _search_match_count
+##           nebula_search_goto_current(&app.%s)
+##         end
+##       elseif input.key_pressed == NebulaKey.Backspace then
+##         if _search_cursor > 0 then
+##           _search_cursor = _search_cursor - 1
+##           _search_len = _search_len - 1
+##           local si: uint32 = _search_cursor
+##           while si < _search_len do
+##             _search_buf[si] = _search_buf[si + 1]
+##             si = si + 1
+##           end
+##           nebula_search_scan(&app.%s.visual.multi_buf)
+##         end
+##       else
+##         local ci: uint8 = 0
+##         while ci < input.char_count do
+##           local ch: uint32 = input.char_input[ci]
+##           if ch >= 32 and ch < 127 then
+##             if _search_replace and _replace_cursor < 255 then
+##               if _replace_cursor < _replace_len then
+##                 local ri2: uint32 = _replace_len
+##                 while ri2 > _replace_cursor do
+##                   _replace_buf[ri2] = _replace_buf[ri2 - 1]
+##                   ri2 = ri2 - 1
+##                 end
+##               end
+##               _replace_buf[_replace_cursor] = (@uint8)(ch)
+##               _replace_cursor = _replace_cursor + 1
+##               _replace_len = _replace_len + 1
+##             elseif _search_cursor < 255 then
+##               if _search_cursor < _search_len then
+##                 local si2: uint32 = _search_len
+##                 while si2 > _search_cursor do
+##                   _search_buf[si2] = _search_buf[si2 - 1]
+##                   si2 = si2 - 1
+##                 end
+##               end
+##               _search_buf[_search_cursor] = (@uint8)(ch)
+##               _search_cursor = _search_cursor + 1
+##               _search_len = _search_len + 1
+##               nebula_search_scan(&app.%s.visual.multi_buf)
+##               if _search_match_count > 0 then
+##                 _search_current = 0
+##                 nebula_search_goto_current(&app.%s)
+##               end
+##             end
+##           end
+##           ci = ci + 1
+##         end
+##       end
+##       if _search_active and _search_replace then
+##         if input.key_pressed == NebulaKey.Replace then
+##           nebula_search_replace_current(&app.%s, &app.%s.visual.multi_buf)
+##         end
+##       end
+##       input.key_pressed = NebulaKey.None
+##       input.char_count = 0
+##     end
+##     -- 修改检测
+##     if app.%s.undo_stack.cursor ~= prev_undo_cursor then
+##       _editor_modified = true
+##     end
+##     app.%s.visual.content_height = (@float32)(app.%s.line_count) * (%s + 2.0)
+##     title_timer = title_timer + dt
+##     if title_timer > 0.2 then
+##       title_timer = 0.0
+##       nebula_editor_update_title(app.%s.cursor_row, app.%s.cursor_col)
+##     end
+##     nebula_frame_render(&renderer, &app, &input, dt, 0.04, 0.04, 0.06)
+##   end
+##   app:deinit()
+##   nebula_shutdown(&renderer)
+##   printf("nebula: text editor clean exit\n")
+##   return 0
+## end
+## main()]]):format(
+##     app_type, title, win_w_const, win_h_const,
+##     editor_name,
+##     win_w_const, win_h_const,
+##     editor_name,
+##     editor_name, win_w_const, win_h_const,
+##     editor_name, editor_name, editor_name, editor_name, editor_name,
+##     editor_name, editor_name, editor_name, editor_name,
+##     editor_name,
+##     editor_name,
+##     editor_name, editor_name,
+##     editor_name, editor_name,
+##     editor_name, editor_name,
+##     editor_name, editor_name, tostring(cell_h),
+##     editor_name, editor_name
+##   )
+##
+##   local ast = aster.parse(src, "<nebula_editor_main:" .. app_type .. ">")
+##   for _, stat in ipairs(ast) do
+##     inject_statement(stat)
+##   end
+##   print(("[sugar] nebula_editor_main: %s (editor=%s, title=%s)"):format(
+##     app_type, editor_name, title))
+## end
 
 -- =============================================================================
 -- 数学工具函数（运行时，完全内联）

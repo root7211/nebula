@@ -42,6 +42,7 @@
 ## cinclude "<stdio.h>"
 ## cinclude "<string.h>"
 
+## NEBULA_EDITOR_GLOBALS_DEFINED = true  -- v1 自行声明全局变量，跳过框架默认声明
 require "nebula"
 
 global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end

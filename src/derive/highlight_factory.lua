@@ -411,4 +411,68 @@ function nebula_highlight_select(langs)
   print(("[highlight] select: %d languages [%s]"):format(#langs, table.concat(ext_list, ", ")))
 end
 
+-- =============================================================================
+-- ★ Phase 4.9 L1: nebula_highlight_init(name, spec)
+--
+-- Sugar: 合并 nebula_highlight_rules(name, spec) + nebula_derive_highlighter(name)
+-- 为单个语言完成规则注册 + 扫描函数生成。
+-- =============================================================================
+function nebula_highlight_init(name, spec)
+  nebula_highlight_rules(name, spec)
+  nebula_derive_highlighter(name)
+end
+
+-- =============================================================================
+-- ★ Phase 4.9 L1: nebula_highlight_pack(langs)
+--
+-- Sugar: 一次性注册多种语言的高亮规则 + 生成扫描函数 + 生成分发/检测函数。
+--
+-- 用法（替代 ~130 行手写）：
+--   ## nebula_highlight_pack({
+--     { name="nelua", exts={"nelua"}, keywords={...}, line_comment="--", ... },
+--     { name="lua",   exts={"lua","luau"}, keywords={...}, ... },
+--   })
+--
+-- 每个条目的字段：
+--   name              : string    — 语言名（必须）
+--   exts              : {string}  — 扩展名列表（必须）
+--   keywords          : array     — 关键字分组（同 nebula_highlight_rules）
+--   line_comment      : string?   — 行注释前缀
+--   line_comment_color: number?   — 注释颜色
+--   string_color      : number?   — 字符串颜色
+--   number_color      : number?   — 数字颜色
+-- =============================================================================
+function nebula_highlight_pack(langs)
+  assert(type(langs) == "table" and #langs > 0,
+    "nebula_highlight_pack: langs must be non-empty array")
+
+  local select_list = {}
+
+  for i, lang in ipairs(langs) do
+    assert(type(lang.name) == "string" and #lang.name > 0,
+      ("nebula_highlight_pack: langs[%d].name must be non-empty string"):format(i))
+    assert(type(lang.exts) == "table" and #lang.exts > 0,
+      ("nebula_highlight_pack: langs[%d].exts must be non-empty array"):format(i))
+
+    -- 提取 rules spec（排除 name 和 exts 字段）
+    local spec = {}
+    for k, v in pairs(lang) do
+      if k ~= "name" and k ~= "exts" then
+        spec[k] = v
+      end
+    end
+
+    -- 注册规则 + 生成扫描函数
+    nebula_highlight_init(lang.name, spec)
+
+    -- 收集 select 列表
+    table.insert(select_list, { name = lang.name, exts = lang.exts })
+  end
+
+  -- 生成运行时分发 + 扩展名检测
+  nebula_highlight_select(select_list)
+
+  print(("[highlight] pack: %d languages registered + derived + selected"):format(#langs))
+end
+
 return VERSION

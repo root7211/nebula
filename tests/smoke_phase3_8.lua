@@ -225,7 +225,7 @@ local app_lines = count_lines(script_dir .. "/../src/app.nelua")
 if app_lines then
   print(("  app.nelua: %d 行"):format(app_lines))
   -- Phase 3.11: 新增 nebula_init/nebula_should_close/nebula_shutdown，行数上限更新为 450
-  assert_le("app.nelua ≤ 545 行（Phase 4.5-S3: nebula_frame_begin）", app_lines, 545)
+  assert_le("app.nelua ≤ 700 行（Phase 4.9: L4 framework helpers）", app_lines, 700)
 else
   failed = failed + 1
   print("[FAIL] 无法读取 src/app.nelua")

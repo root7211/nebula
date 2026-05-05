@@ -465,6 +465,144 @@ global function nebula_frame_render_multipass(
 end
 
 -- =============================================================================
+-- ★ Phase 4.9 L4: 框架内建辅助函数
+-- =============================================================================
+
+-- 搜索状态类型和全局变量（框架级声明，供 L2/L3 Sugar 生成的代码引用）
+-- 使用编译期守卫避免与手动声明冲突（如 text_editor_demo v1）
+## if not NEBULA_EDITOR_GLOBALS_DEFINED then
+global MatchPos = @record{ row: uint32, col: uint32 }
+global _search_active: boolean = false
+global _search_replace: boolean = false
+global _search_buf: [256]uint8
+global _search_len: uint32 = 0
+global _search_cursor: uint32 = 0
+global _replace_buf: [256]uint8
+global _replace_len: uint32 = 0
+global _replace_cursor: uint32 = 0
+global _search_matches: [512]MatchPos
+global _search_match_count: uint32 = 0
+global _search_current: uint32 = 0
+
+-- 编辑器文件状态（框架级声明）
+global _editor_file_path: [512]uint8
+global _editor_has_file: boolean = false
+global _editor_modified: boolean = false
+global _editor_highlight_id: uint32 = 0
+## end
+
+-- nebula_editor_update_title — 更新窗口标题（从文件路径提取文件名）
+global function nebula_editor_update_title(cursor_row: uint32, cursor_col: uint32): void
+  local title: [256]uint8
+  local fname: cstring
+  if _editor_has_file then
+    local last_slash: int32 = -1
+    local fi: uint32 = 0
+    while _editor_file_path[fi] ~= 0 and fi < 511 do
+      if _editor_file_path[fi] == 47 then last_slash = (@int32)(fi) end
+      fi = fi + 1
+    end
+    local start: uint32 = last_slash >= 0 and (@uint32)(last_slash + 1) or 0
+    fname = (@cstring)(&_editor_file_path[start])
+  else
+    fname = "[untitled]"
+  end
+  local mod_mark: cstring = _editor_modified and " [+]" or ""
+  local sn = snprintf((@cstring)(&title[0]), 255,
+    "%s%s — Ln %d, Col %d — Nebula Editor",
+    fname, mod_mark,
+    (@int32)(cursor_row + 1), (@int32)(cursor_col + 1))
+  glfwSetWindowTitle(_nebula_window, (@cstring)(&title[0]))
+end
+
+-- nebula_search_scan — 朴素 O(n*m) 全文匹配扫描
+global function nebula_search_scan(mb: auto): void
+  _search_match_count = 0
+  _search_current = 0
+  if _search_len == 0 then return end
+  local total_lines: uint32 = mb.line_count
+  local row: uint32 = 0
+  while row < total_lines and _search_match_count < 512 do
+    local ln = mb:get_line(row)
+    local flat: [256]uint8
+    local line_len = ln:flatten(&flat[0], 255)
+    local end_pos: uint32 = line_len > _search_len and (line_len - _search_len + 1) or 0
+    local ci: uint32 = 0
+    while ci < end_pos and _search_match_count < 512 do
+      local match: boolean = true
+      local k: uint32 = 0
+      while k < _search_len do
+        if flat[ci + k] ~= _search_buf[k] then match = false; break end
+        k = k + 1
+      end
+      if match then
+        _search_matches[_search_match_count].row = row
+        _search_matches[_search_match_count].col = ci
+        _search_match_count = _search_match_count + 1
+        ci = ci + _search_len
+      else
+        ci = ci + 1
+      end
+    end
+    row = row + 1
+  end
+end
+
+-- nebula_search_goto_current — 跳转到当前匹配位置
+global function nebula_search_goto_current(editor: auto): void
+  if _search_match_count == 0 then return end
+  if _search_current >= _search_match_count then _search_current = 0 end
+  local m = _search_matches[_search_current]
+  editor.cursor_row = m.row
+  editor.cursor_col = m.col
+  local visible_top = editor.scroll_offset_y
+  local visible_bot = visible_top + editor.visual.size.y / 18.0
+  if (@float32)(m.row) < visible_top or (@float32)(m.row) > visible_bot then
+    editor.scroll_offset_y = (@float32)(m.row) * 18.0 - editor.visual.size.y * 0.5
+    if editor.scroll_offset_y < 0.0 then editor.scroll_offset_y = 0.0 end
+  end
+end
+
+-- nebula_search_replace_current — 替换当前匹配
+global function nebula_search_replace_current(editor: auto, mb: auto): void
+  if _search_match_count == 0 or _replace_len == 0 then return end
+  if _search_current >= _search_match_count then return end
+  local m = _search_matches[_search_current]
+  local ln = mb:get_line(m.row)
+  ln:delete_range(m.col, m.col + _search_len)
+  local ins_i: uint32 = 0
+  while ins_i < _replace_len do
+    ln:insert_char(_replace_buf[ins_i])
+    ins_i = ins_i + 1
+  end
+  _editor_modified = true
+  nebula_search_scan(mb)
+  if _search_current >= _search_match_count and _search_match_count > 0 then
+    _search_current = _search_match_count - 1
+  end
+  nebula_search_goto_current(editor)
+end
+
+-- nebula_search_replace_all — 从后往前替换全部匹配
+global function nebula_search_replace_all(editor: auto, mb: auto): void
+  if _search_match_count == 0 or _replace_len == 0 then return end
+  local i: int32 = (@int32)(_search_match_count) - 1
+  while i >= 0 do
+    local m = _search_matches[(@uint32)(i)]
+    local ln = mb:get_line(m.row)
+    ln:delete_range(m.col, m.col + _search_len)
+    local ins_j: uint32 = 0
+    while ins_j < _replace_len do
+      ln:insert_char(_replace_buf[ins_j])
+      ins_j = ins_j + 1
+    end
+    i = i - 1
+  end
+  _editor_modified = true
+  nebula_search_scan(mb)
+end
+
+-- =============================================================================
 -- ★ Phase 4.2.1: nebula_main_loop — 跨平台主循环宏
 --
 -- 封装 Native（阻塞式 while）与 Web（emscripten_set_main_loop 回调式）的

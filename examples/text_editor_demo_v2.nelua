@@ -1,0 +1,85 @@
+-- text_editor_demo_v2.nelua — Phase 4.9: ~90 行文本编辑器（vs 885 行 v1）
+-- 功能等价: 多语言高亮 + 选区/剪贴板 + 搜索替换 + 行号/状态栏 + Undo/Redo + File I/O + 自动缩进
+## cinclude "<stdio.h>"
+## cinclude "<string.h>"
+
+require "nebula"
+
+-- ★ L1: 多语言语法高亮（6 语言 + 分发 + 扩展名检测，一行搞定）
+##[[ nebula_highlight_pack({
+  { name="nelua", exts={"nelua"},
+    keywords={
+      {words={"if","else","elseif","then","end","for","while","do","repeat","until","return","break","goto","in","switch","case","continue","defer"}, color=0xC586C0FF},
+      {words={"local","global","function","require","record","enum","union","type"}, color=0x569CD6FF},
+      {words={"true","false","nil","nilptr"}, color=0x4EC9B0FF},
+      {words={"int8","int16","int32","int64","uint8","uint16","uint32","uint64","float32","float64","boolean","cstring","cint","csize","pointer","void","auto","byte","isize","usize"}, color=0x4DC9A0FF},
+    }, line_comment="--", line_comment_color=0x6A9955FF, string_color=0xCE9178FF, number_color=0xB5CEA8FF },
+  { name="lua", exts={"lua","luau"},
+    keywords={
+      {words={"if","else","elseif","then","end","for","while","do","repeat","until","return","break","goto","in"}, color=0xC586C0FF},
+      {words={"local","function","require","not","and","or"}, color=0x569CD6FF},
+      {words={"true","false","nil"}, color=0x4EC9B0FF},
+    }, line_comment="--", line_comment_color=0x6A9955FF, string_color=0xCE9178FF, number_color=0xB5CEA8FF },
+  { name="c", exts={"c","h","cpp","hpp","cc","cxx"},
+    keywords={
+      {words={"if","else","for","while","do","switch","case","default","break","continue","return","goto"}, color=0xC586C0FF},
+      {words={"struct","enum","union","typedef","extern","static","const","volatile","inline","register","sizeof","include","define","ifdef","ifndef","endif","pragma"}, color=0x569CD6FF},
+      {words={"int","char","float","double","void","long","short","unsigned","signed","size_t","uint8_t","uint16_t","uint32_t","uint64_t","int8_t","int16_t","int32_t","int64_t","bool","NULL"}, color=0x4EC9B0FF},
+    }, line_comment="//", line_comment_color=0x6A9955FF, string_color=0xCE9178FF, number_color=0xB5CEA8FF },
+  { name="python", exts={"py","pyw"},
+    keywords={
+      {words={"if","elif","else","for","while","break","continue","return","pass","raise","try","except","finally","with","as","yield","assert"}, color=0xC586C0FF},
+      {words={"def","class","import","from","lambda","global","nonlocal","del","and","or","not","is","in"}, color=0x569CD6FF},
+      {words={"True","False","None","self","cls"}, color=0x4EC9B0FF},
+      {words={"int","float","str","bool","list","dict","tuple","set","bytes","range","print","len","type","isinstance","super","property","staticmethod","classmethod","enumerate","zip","map","filter"}, color=0x4DC9A0FF},
+    }, line_comment="#", line_comment_color=0x6A9955FF, string_color=0xCE9178FF, number_color=0xB5CEA8FF },
+  { name="json", exts={"json","jsonc"},
+    keywords={ {words={"true","false","null"}, color=0x4EC9B0FF} },
+    string_color=0xCE9178FF, number_color=0xB5CEA8FF },
+  { name="markdown", exts={"md","mdx","markdown"},
+    keywords={ {words={"TODO","FIXME","NOTE","HACK","XXX"}, color=0xDCDCAAFF} },
+    line_comment="#", line_comment_color=0x569CD6FF, string_color=0xCE9178FF, number_color=0xB5CEA8FF },
+}) ]]
+
+-- ★ Visual + DenseText 管线
+## nebula_visual("EditorBgVisual", {
+##   primitives = {"multiline_editable"}, max_text_len = 256, max_lines = 256, component_id = 1,
+## })
+global LineNumDenseVisual = @record{ pos: Vec2, size: Vec2 }
+## nebula_component("LineNumDenseVisual", { text_mode = "dense", max_chars = 1024 })
+global EditAreaDenseVisual = @record{ pos: Vec2, size: Vec2 }
+## nebula_component("EditAreaDenseVisual", { text_mode = "dense", max_chars = 8192 })
+global StatusBarDenseVisual = @record{ pos: Vec2, size: Vec2 }
+## nebula_component("StatusBarDenseVisual", { text_mode = "dense", max_chars = 256 })
+global SearchBarDenseVisual = @record{ pos: Vec2, size: Vec2 }
+## nebula_component("SearchBarDenseVisual", { text_mode = "dense", max_chars = 256 })
+
+-- ★ L2: 内置 Producer（替代 ~300 行手写 fill_* 函数）
+## nebula_builtin_line_nums("editor", { cell_w = 10.0, cell_h = 16.0, rows = 50 })
+## nebula_builtin_status_bar("editor", { cell_w = 10.0, cell_h = 16.0, cols = 128 })
+## nebula_builtin_search_bar("editor", { cell_w = 10.0, cell_h = 16.0, cols = 128 })
+## nebula_builtin_edit_area("editor",  { cell_w = 10.0, cell_h = 16.0, cols = 120, rows = 50 })
+
+-- ★ App 声明（嵌套布局 + 混合管线自动编排）
+## nebula_app("TextEditorApp", {
+##   components = {
+##     { name = "editor",     type = "EditorBgVisual" },
+##     { name = "search_bar", type = "SearchBarDenseVisual",
+##       producer = "nebula_fill_search_bar_editor", cell_w = 10.0, cell_h = 16.0,
+##       max_chars = 256, layout = { flex_basis = 24 } },
+##     { name = "editor_body", layout = { direction = "row", flex_grow = 1,
+##         container = { { ref = "line_nums" }, { ref = "edit_area" } } } },
+##     { name = "line_nums",  type = "LineNumDenseVisual",
+##       producer = "nebula_fill_line_nums_editor", cell_w = 10.0, cell_h = 16.0,
+##       max_chars = 250, layout = { flex_basis = 50 } },
+##     { name = "edit_area",  type = "EditAreaDenseVisual",
+##       producer = "nebula_fill_edit_area_editor", cell_w = 10.0, cell_h = 16.0,
+##       max_chars = 6000, layout = { flex_grow = 1 } },
+##     { name = "status_bar", type = "StatusBarDenseVisual",
+##       producer = "nebula_fill_status_bar_editor", cell_w = 10.0, cell_h = 16.0,
+##       max_chars = 200, layout = { flex_basis = 24 } },
+##   },
+## })
+
+-- ★ L5: 主循环（init + file load + event loop + deinit）一行生成
+## nebula_editor_main("TextEditorApp", { editor = "editor", title = "Nebula Editor", cell_h = 16.0 })
