@@ -14,14 +14,14 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 进行中 | 70/70 回归测试全绿 | Phase 4.8-S1 已完成 | 嵌套布局方案已设计（2026-05-05）**
+**Era II 进行中 | 71/71 回归测试全绿 | Phase 4.8-NL 已完成 | 嵌套布局支持已实现（2026-05-05）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
+| **Phase 4.8-NL 嵌套布局支持** | `layout.container` 声明式嵌套容器实现——`nebula_app_register_layout_node` 纯布局容器注册（无 GPU 管线）+ `_build_container_node` 递归构建 + `_solve_layout` 拓扑感知挂载（`_layout_seq` 维持注册顺序）+ layout_engine 交叉轴自动拉伸修复（对齐 CSS Flexbox `align-items:stretch` 默认行为）+ `nebula_app()` sugar 识别无 type 组件为容器 + 51 条冒烟测试 + 71/71 回归全绿 | `b32547b` |
 | **Phase 4.8-S1 选区 + 剪贴板** | 选区可视化（Shift+Arrow/Home/End 扩展选区）+ 系统剪贴板（Ctrl+C/V/X/A）+ 选区覆盖删除 + 正常移动重置锚点 + Producer 选区背景渲染 + `nebula_theme_bg_selected()` + 32 条冒烟测试 + 70/70 回归全绿 | `a09ecdf` |
-| **嵌套布局方案设计** | `docs/PLAN_NESTED_LAYOUT.md` — `layout.container` 声明式嵌套容器（ref 引用拓扑），解决 text_editor_demo 的 line_nums+edit_area 并排 + status_bar 底部布局问题。公理 A/B/C + P2/P4/P5 全合规，100% 向后兼容 | — |
 | **Phase 4.5-S3 语法糖深化** | L2 层 API：`require "nebula"`（统一入口）+ `nebula_visual()`（从 primitives 自动推导 record 字段）+ `init_themed()`（NEBULA_THEME_DEFAULTS 编译期主题表驱动默认颜色）+ `nebula_frame_begin()`（帧循环整合）+ `button_v2_demo.nelua`（30 行极限形态，原 147 行压缩 ~5x）+ 52 条冒烟测试 + 70/70 回归全绿 | `d615c5d` |
 | **Phase 4.7-S7-fix multiline_editable 修复** | multiline_editable 原语完整重写——字符输入直接操作 multi_buf（绕过 editable 的 gap_buf）、Enter 调用 `insert_newline()`、Backspace 调用 `merge_line_up()`、新增 Left/Right/Home/End/Delete 完整键盘支持 + `wgpu_bindings.nelua` TextureFormat 枚举值和 BindGroupLayoutEntry 布局修正（v29） | `856f326` |
 | **Phase 4.7-S7 文本编辑器原型** | `text_editor_demo.nelua` — S1-S6 全集成验收（CJK 编辑 + DenseText 渲染 + 行号 + 语法高亮 + Undo/Redo + File I/O + Ctrl+S 保存 + 窗口标题状态显示）+ `NebulaKey.Save` + `glfwSetWindowTitle` 绑定 + `nebula_annotate` 存储 `max_lines` 修复 + **语法糖优化**：`nebula_theme`（内置暗色主题）+ `nebula_editor_visual`（自动生成 Visual record）+ `nebula_builtin_line_nums`（内置行号 Producer）+ 68/68 回归测试全绿 | — |
@@ -143,7 +143,7 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 | 4.5 | 注册原语语法糖 | **S1+S2+S3 已完成**（S1: `nebula_component` + `nebula_inject_buffers` + `nebula_app` + `nebula_auto_states`；S2: 混合管线自动编排 + highlight_sugar_demo；S3: `nebula_visual` + `init_themed` + `nebula_frame_begin` + `require "nebula"` + button_v2_demo 30 行极限形态） | — |
 || 4.7-S4 | 语法高亮架构 | **已完成**（`highlight_factory.lua` + 编译期规则注入 + 运行时 per-char 着色 + highlight_editor_demo） | 85 |
 || 4.8-S1 | 选区可视化 + 系统剪贴板 | **已完成**（Shift+Arrow/Home/End + Ctrl+C/V/X/A + 选区覆盖删除 + Producer 选区渲染） | 86 |
-|| 4.8-NL | 嵌套布局支持 | **方案已设计**（`layout.container` 声明式嵌套容器，解决编辑器并排布局问题） | 88 |
+|| 4.8-NL | 嵌套布局支持 | **已完成**（`layout.container` 声明式嵌套容器 + ref 拓扑 + 交叉轴自动拉伸 + 51 条冒烟测试） | 88 |
 || 4.6 | Indirect Drawing | 规划中 | 78 |
 | 4.7 | 文本编辑器原型 | **S1-S7 已完成**（S7: text_editor_demo 全集成验收） | — |
 | 5.0 | 生态与 CI/CD | 规划中 | — |
@@ -320,7 +320,7 @@ nebula/
 │       ├── pty_bindings.nelua   # POSIX PTY C FFI 绑定
 │       ├── ansi_parser.nelua    # ANSI/VT100 转义序列状态机
 │       └── term_buffer.nelua    # 终端单元格缓冲区
-├── tests/                        # 测试套件 (71+ 项，含嵌套布局待加)
+├── tests/                        # 测试套件 (71 项回归全绿)
 ├── tools/                        # 构建与测试工具（含 font_preprocessor_cjk）
 ├── assets/                       # 字体/纹理预处理产物（含 CJK shaping 表）
 ├── vendor/                       # 第三方依赖 (wgpu-native, GLFW)

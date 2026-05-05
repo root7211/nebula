@@ -2,7 +2,7 @@
 
 **创建日期**：2026-05-01
 **最后更新**：2026-05-05
-**基准状态**：70/70 回归测试全绿 | D-4.1-C PASSED | Phase 4.8-S1 已完成 | 嵌套布局方案已设计
+**基准状态**：71/71 回归测试全绿 | D-4.1-C PASSED | Phase 4.8-NL 已完成 | 嵌套布局支持已实现
 
 ---
 
@@ -23,7 +23,7 @@
 | 4.5 S1-S3 | ✅ | 语法糖优化（inject_buffers / editor_visual / builtin_line_nums） |
 | 4.7 S1-S7 | ✅ | 文本编辑器原型（语法高亮 / 行号 / Undo/Redo / File I/O） |
 || 4.8-S1 | ✅ | 选区可视化 + 系统剪贴板（Shift+Arrow / Ctrl+C/V/X/A） |
-|| 4.8-NL | 📝 方案已设计 | 嵌套布局支持（layout.container 声明式嵌套容器，PLAN_NESTED_LAYOUT.md） |
+|| 4.8-NL | ✅ | 嵌套布局支持（`layout.container` 声明式嵌套容器 + ref 拓扑 + 交叉轴自动拉伸 + 51 条冒烟测试，commit `b32547b`） |
 || wgpu 绑定修复 | ✅ | `WGPUBindGroupLayoutEntry.bindingArraySize` 字段对齐修复 |
 
 ---
