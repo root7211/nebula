@@ -1,5 +1,5 @@
 -- =============================================================================
--- derive/app_factory.lua — Nebula GUI Compiler Phase 4.7-S3
+-- derive/app_factory.lua — Nebula GUI Compiler Phase 4.8-NL
 --
 -- 编译期显式编排工厂（App Factory）
 -- 生成 <App> record + init + update + draw
@@ -16,19 +16,16 @@
 --     · mode = "bound"   — 绑定到 editable 组件（原有行为）
 -- ★ Phase 4.7-S2 新增：
 --   · nebula_app_register_dense_text — DenseText 管线接入 App 编排
---     · App record 注入 DenseTextPipeline + SDF 字体 atlas + Instance 缓冲区
---     · App:init 自动初始化 DenseText 管线 + 加载/绑定 SDF atlas
---     · App:draw 调用 Producer 函数填充 DenseCharInstance → upload → draw
---     · App:deinit 释放 DenseText 管线 GPU 资源
 -- ★ Phase 4.7-S3 新增：
---   · nebula_app_register_dense_text 扩展：opts.layout 字段携带布局约束
 --   · DenseText 组件参与 Flexbox 布局解算（行号栏 + 编辑区并排）
---   · layout_engine 扩展：flex_grow + flex_basis（固定宽度列 + 弹性列）
 -- ★ Phase 3.11 新增（原语 7：Layout-App 桥接）：
 --   · nebula_app_set_root_layout(app_name, spec) — 声明根节点布局约束
 --   · nebula_app_register_component 扩展：opts.layout 字段携带布局约束
---   · nebula_app_end 自动调用 layout_engine 解算坐标，注入 gen_app_init
---   · 生成的 <App>:init 自动注入编译期常量 pos/size，消除手写魔法数字
+-- ★ Phase 4.8-NL 新增：
+--   · nebula_app_register_layout_node — 纯布局容器注册（无 GPU 管线）
+--   · layout.container ref 拓扑：组件通过 ref 引用表达嵌套容器关系
+--   · _build_container_node — 递归构建容器节点
+--   · _solve_layout 改造：从平铺挂载→拓扑感知挂载
 -- =============================================================================
 
 -- 全局应用注册表（导出为全局，供测试和 nebula_derive_app 访问）
@@ -68,6 +65,8 @@ function nebula_app_begin(app_name, opts)
     texts       = {},  -- ★ Phase 3.9: 文本组件列表：{name, visual_type, base, mode, bound_to, placeholder, mask_password, updater}
     dense_texts = {},  -- ★ Phase 4.7-S2: DenseText 组件列表：{name, visual_type, base, max_chars, cell_w, cell_h, producer}
     shadows     = {},  -- ★ Phase 3.10.5: 阴影组件列表：{name, visual_type, base, blur_radius}
+    layout_nodes = {}, -- ★ Phase 4.8-NL: 纯布局容器列表：{name, layout}
+    _layout_order = 0, -- ★ Phase 4.8-NL: 布局注册顺序计数器
     -- 按 visual_type 分组，用于生成共享 Pipeline
     type_groups = {},  -- {visual_type -> {pipeline_name, base, members=[{name, is_slot}]}}
     -- ★ Phase 3.8: FrameArena 配置
@@ -134,6 +133,8 @@ function nebula_app_register_component(name, visual_type, opts)
     -- ★ BUG-3 fix: 从 nebula_registry 查询该 visual_type 声明的 primitives，
     -- 使 Phase 4.3 process_body 公理校验能正确触发
     prims        = (nebula_registry and nebula_registry[visual_type] and nebula_registry[visual_type].primitives) or {},
+    -- ★ Phase 4.8-NL: 布局注册顺序
+    _layout_seq  = opts.layout and (function() reg._layout_order = reg._layout_order + 1; return reg._layout_order end)() or nil,
   })
 
   -- 更新 type_groups
@@ -323,6 +324,32 @@ function nebula_app_register_dense_text(name, visual_type, opts)
     cell_h      = opts.cell_h or 16.0,
     producer    = opts.producer,
     layout      = opts.layout or nil,  -- ★ Phase 4.7-S3: 布局约束
+    -- ★ Phase 4.8-NL: 布局注册顺序
+    _layout_seq = opts.layout and (function() reg._layout_order = reg._layout_order + 1; return reg._layout_order end)() or nil,
+  })
+end
+
+-- ★ Phase 4.8-NL: 注册一个纯布局容器节点（无 GPU 管线）
+--
+-- 容器节点仅参与布局解算，不产生任何 GPU 资源。
+-- 通过 layout.container ref 数组声明子节点拓扑。
+--
+-- name   : string  — 容器名（如 "editor_body"）
+-- layout : table   — 布局约束 + container ref 数组
+--   direction  : "row" | "column"
+--   flex_grow  : number
+--   flex_basis : number
+--   container  : { {ref="child1"}, {ref="child2"}, ... }
+function nebula_app_register_layout_node(name, layout)
+  assert(_current_app, "nebula_app_register_layout_node: must be called between nebula_app_begin and nebula_app_end")
+  assert(layout, ("nebula_app_register_layout_node: '%s' requires layout"):format(name))
+  assert(layout.container, ("nebula_app_register_layout_node: '%s' requires layout.container"):format(name))
+  local reg = nebula_app_registry[_current_app]
+  reg._layout_order = reg._layout_order + 1
+  table.insert(reg.layout_nodes, {
+    name       = name,
+    layout     = layout,
+    _layout_seq = reg._layout_order,
   })
 end
 
@@ -352,6 +379,38 @@ local function _build_layout_node(name, layout_spec)
   return nebula_layout_node(spec)
 end
 
+-- ★ Phase 4.8-NL: 递归构建容器节点
+-- 容器节点通过 layout.container 的 ref 字段引用子组件。
+-- 被引用的子组件如果自身也有 container 字段，则递归构建嵌套容器。
+local function _build_container_node(name, layout_spec, comp_map)
+  local spec = {
+    name       = name,
+    direction  = layout_spec.direction,
+    justify    = layout_spec.justify,
+    align      = layout_spec.align,
+    padding    = layout_spec.padding,
+    gap        = layout_spec.gap,
+    width      = layout_spec.width,
+    height     = layout_spec.height,
+    flex_grow  = layout_spec.flex_grow,
+    flex_basis = layout_spec.flex_basis,
+    children   = {},
+  }
+  for _, child_ref in ipairs(layout_spec.container) do
+    local ref_name = child_ref.ref
+    local child_comp = comp_map[ref_name]
+    assert(child_comp, ("_build_container_node: container '%s' ref '%s' not found"):format(name, ref_name))
+    if child_comp.layout and child_comp.layout.container then
+      -- 嵌套容器
+      table.insert(spec.children, _build_container_node(ref_name, child_comp.layout, comp_map))
+    else
+      -- 普通叶子节点
+      table.insert(spec.children, _build_layout_node(ref_name, child_comp.layout))
+    end
+  end
+  return nebula_layout_node(spec)
+end
+
 -- ★ Phase 3.12: 内部辅助函数 — 在 nebula_app_end 时执行布局解算（升级为分段系数推导）
 -- 如果 reg.root_layout 存在，则构建布局树并解算，将结果存入 reg.layout_results。
 -- ★ Phase 3.12 升级：额外调用 nebula_layout_derive_segments 推导分段系数，
@@ -376,16 +435,44 @@ local function _solve_layout(reg)
     children  = {},
   }
 
-  -- 将所有有 layout 字段的组件添加为子节点
+  -- ★ Phase 4.8-NL: 构建组件索引 + 拓扑感知挂载
+  -- 收集所有参与布局的节点
+  local comp_map = {}
   for _, comp in ipairs(reg.components) do
-    if comp.layout then
-      table.insert(root_spec.children, _build_layout_node(comp.name, comp.layout))
+    if comp.layout then comp_map[comp.name] = comp end
+  end
+  for _, dt in ipairs(reg.dense_texts) do
+    if dt.layout then comp_map[dt.name] = dt end
+  end
+  for _, ln in ipairs(reg.layout_nodes or {}) do
+    comp_map[ln.name] = ln
+  end
+
+  -- 标记被 container ref 引用的节点（不直接挂载到 root）
+  local used_as_child = {}
+  for _, item in pairs(comp_map) do
+    if item.layout and item.layout.container then
+      for _, child_ref in ipairs(item.layout.container) do
+        used_as_child[child_ref.ref] = true
+      end
     end
   end
-  -- ★ Phase 4.7-S3: DenseText 组件参与布局
-  for _, dt in ipairs(reg.dense_texts) do
-    if dt.layout then
-      table.insert(root_spec.children, _build_layout_node(dt.name, dt.layout))
+
+  -- 挂载到 root（排除被容器引用的节点）
+  -- ★ Phase 4.8-NL: 按 _layout_seq 维持原始注册顺序
+  local mount_list = {}
+  for name, item in pairs(comp_map) do
+    if not used_as_child[name] then
+      table.insert(mount_list, { name = name, item = item, seq = item._layout_seq or 0 })
+    end
+  end
+  table.sort(mount_list, function(a, b) return a.seq < b.seq end)
+  for _, entry in ipairs(mount_list) do
+    local item = entry.item
+    if item.layout and item.layout.container then
+      table.insert(root_spec.children, _build_container_node(entry.name, item.layout, comp_map))
+    else
+      table.insert(root_spec.children, _build_layout_node(entry.name, item.layout))
     end
   end
 
@@ -1248,4 +1335,4 @@ function nebula_app_generate(app_name)
   return source
 end
 
-return "nebula_app_factory_v0.9_phase4.7-s3"
+return "nebula_app_factory_v0.10_phase4.8-nl"

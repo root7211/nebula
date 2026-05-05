@@ -249,7 +249,16 @@ local function layout_node(node, parent_x, parent_y, avail_w, avail_h)
 
     -- ★ Phase 4.7-S3: 交叉轴自动拉伸——当子节点无显式交叉尺寸时，
     -- 默认拉伸到可用空间（与 CSS Flexbox align-items:stretch 默认行为一致）
-    if child_cross_size <= 0 and cross_avail > 0 then
+    -- ★ Phase 4.8-NL: 扩展条件——除了 child_cross_size <= 0 外，
+    -- 当子节点无显式交叉尺寸且 _outer 值来自内容测量（非用户指定）时也拉伸。
+    -- 这确保嵌套容器的交叉轴正确填满父容器。
+    local child_has_explicit_cross
+    if is_row then
+      child_has_explicit_cross = (child.height ~= nil)
+    else
+      child_has_explicit_cross = (child.width ~= nil)
+    end
+    if not child_has_explicit_cross and cross_avail > 0 then
       child_cross_size = cross_avail
     end
 
@@ -616,4 +625,4 @@ function nebula_layout_derive_segments(root_spec, base_w, base_h)
 end
 
 -- 返回模块标识
-return "nebula_layout_engine_v0.3_phase4.7-s3"
+return "nebula_layout_engine_v0.4_phase4.8-nl"

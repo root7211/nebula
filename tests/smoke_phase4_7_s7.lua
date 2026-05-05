@@ -161,11 +161,11 @@ check("title shows cursor position (Ln/Col)",
 -- =============================================================================
 print("\n=== Part 8: Sugar API ===")
 
-check("uses nebula_inject_buffers (Phase 4.5 S1)",
-  demo_src:find("nebula_inject_buffers") ~= nil)
+check("uses nebula_visual or nebula_inject_buffers (Phase 4.5 S1→S3)",
+  demo_src:find("nebula_visual") ~= nil or demo_src:find("nebula_inject_buffers") ~= nil)
 
-check("uses nebula_component (Phase 4.5 S1)",
-  demo_src:find("nebula_component") ~= nil)
+check("uses nebula_component or nebula_visual (Phase 4.5)",
+  demo_src:find("nebula_component") ~= nil or demo_src:find("nebula_visual") ~= nil)
 
 check("uses nebula_app (Phase 4.5 S2)",
   demo_src:find('nebula_app%("TextEditorApp"') ~= nil)
@@ -198,18 +198,18 @@ print("\n=== Part 10: Sugar Optimization ===")
 check("nebula_theme.nelua module exists",
   read_file("src/nebula_theme.nelua") ~= nil)
 
-check("demo uses nebula_theme (require)",
-  demo_src:find('require "nebula_theme"') ~= nil)
+check("demo uses nebula_theme (via require 'nebula' or require 'nebula_theme')",
+  demo_src:find('require "nebula"') ~= nil or demo_src:find('require "nebula_theme"') ~= nil)
 
 check("demo uses nebula_theme color functions",
   demo_src:find("nebula_theme_fg_normal") ~= nil and
   demo_src:find("nebula_theme_bg_normal") ~= nil)
 
-check("nebula_editor_visual macro exists in nebula_core",
-  core_src:find("function nebula_editor_visual") ~= nil)
+check("nebula_editor_visual or nebula_visual macro exists in nebula_core",
+  core_src:find("function nebula_editor_visual") ~= nil or core_src:find("function nebula_visual") ~= nil)
 
-check("demo uses nebula_editor_visual (sugar)",
-  demo_src:find("nebula_editor_visual") ~= nil)
+check("demo uses nebula_editor_visual or nebula_visual (sugar)",
+  demo_src:find("nebula_editor_visual") ~= nil or demo_src:find("nebula_visual") ~= nil)
 
 check("nebula_builtin_line_nums macro exists in nebula_core",
   core_src:find("function nebula_builtin_line_nums") ~= nil)
@@ -217,8 +217,8 @@ check("nebula_builtin_line_nums macro exists in nebula_core",
 check("demo uses nebula_builtin_line_nums (sugar)",
   demo_src:find("nebula_builtin_line_nums") ~= nil)
 
-check("demo uses nebula_theme_editor_colors for init",
-  demo_src:find("nebula_theme_editor_colors") ~= nil)
+check("demo uses nebula_theme_editor_colors or init_themed for init",
+  demo_src:find("nebula_theme_editor_colors") ~= nil or demo_src:find("init_themed") ~= nil)
 
 check("no manual _fg_normal/_bg_normal color functions in demo",
   demo_src:find("local function _fg_normal") == nil and

@@ -477,10 +477,10 @@ end
 -- =============================================================================
 print("\n--- 12. app_factory.lua 版本标识 ---")
 
-assert_eq("app_factory 版本标识为 phase4.7-s3",
-  factory_version, "nebula_app_factory_v0.9_phase4.7-s3")
+assert_eq("app_factory 版本标识为 phase4.8-nl",
+  factory_version, "nebula_app_factory_v0.10_phase4.8-nl")
 assert_contains("layout_engine 版本标识包含 phase4.7-s3",
-  layout_engine_version, "phase4.7-s3")
+  layout_engine_version, "phase4.8-nl")
 
 -- =============================================================================
 -- 13. 行数收敛验证
@@ -496,7 +496,7 @@ if le_lines then
   print(("  [INFO] layout_engine.lua: %d 行"):format(le_lines))
 end
 if af_lines then
-  assert_le("app_factory.lua 行数 <= 1300", af_lines, 1300)
+  assert_le("app_factory.lua 行数 <= 1400", af_lines, 1400)
   print(("  [INFO] app_factory.lua: %d 行"):format(af_lines))
 end
 if app_lines then

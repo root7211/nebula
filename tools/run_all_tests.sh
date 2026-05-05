@@ -209,6 +209,10 @@ run_test "smoke_phase4_7_s7 (Phase 4.7-S7 — Text Editor prototype & S1-S6 inte
 run_test "smoke_phase4_5_s3 (Phase 4.5-S3 — 语法糖深化: nebula_visual + init_themed + nebula_frame_begin)" \
   nelua-lua tests/smoke_phase4_5_s3.lua
 
+# ★ Phase 4.8-NL: 嵌套布局支持（layout.container + ref 拓扑 + 容器节点）
+run_test "smoke_nested_layout (Phase 4.8-NL — 嵌套布局 container ref + 拓扑感知解算)" \
+  nelua-lua tests/smoke_nested_layout.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="

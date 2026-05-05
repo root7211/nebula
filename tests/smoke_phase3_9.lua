@@ -327,7 +327,7 @@ local factory_lines = count_lines(script_dir .. "/../src/derive/app_factory.lua"
 if factory_lines then
   print(("  app_factory.lua: %d 行"):format(factory_lines))
   -- Phase 3.11 新增布局解算逻辑，上限更新为 900
-  assert_le("app_factory.lua ≤ 1300 行（Phase 4.7-S3 新增 DenseText 编排）", factory_lines, 1300)
+  assert_le("app_factory.lua ≤ 1400 行（Phase 4.8-NL 新增嵌套布局支持）", factory_lines, 1400)
 else
   failed = failed + 1
   print("[FAIL] 无法读取 src/derive/app_factory.lua")

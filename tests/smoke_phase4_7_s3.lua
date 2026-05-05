@@ -42,10 +42,10 @@ local factory_ver = dofile(factory_path)
 -- 1. 模块版本验证
 -- =============================================================================
 check("layout_engine version >= v0.3 (Phase 4.7-S3)",
-  layout_ver and layout_ver:find("v0.3") ~= nil)
+  layout_ver and layout_ver and (layout_ver:find("v0.3") ~= nil or layout_ver:find("v0.4") ~= nil))
 
 check("app_factory version >= v0.9 (Phase 4.7-S3)",
-  factory_ver and factory_ver:find("v0.9") ~= nil)
+  factory_ver and factory_ver and (factory_ver:find("v0.9") ~= nil or factory_ver:find("v0.10") ~= nil))
 
 -- =============================================================================
 -- 2. flex_basis: 固定宽度列

@@ -598,13 +598,13 @@ global ClickableState = @record{
 ## 
 ## -- ★ Phase 3.1: 加载编译期布局引擎模块
 ## local layout_engine_mod = require "derive.layout_engine"
-## assert(layout_engine_mod == "nebula_layout_engine_v0.3_phase4.7-s3",
-##   "nebula: failed to load derive/layout_engine.lua")  -- ★ Phase 4.7-S3 升级
+## assert(layout_engine_mod == "nebula_layout_engine_v0.4_phase4.8-nl",
+##   "nebula: failed to load derive/layout_engine.lua")  -- ★ Phase 4.8-NL 升级
 ##
 ## -- ★ Phase 3.5.2: 加载应用编排工厂模块
 ## local app_factory_mod = require "derive.app_factory"
-## assert(app_factory_mod == "nebula_app_factory_v0.9_phase4.7-s3",
-##   "nebula: failed to load derive/app_factory.lua")  -- ★ Phase 4.7-S3 升级
+## assert(app_factory_mod == "nebula_app_factory_v0.10_phase4.8-nl",
+##   "nebula: failed to load derive/app_factory.lua")  -- ★ Phase 4.8-NL 升级
 ## 
 ## -- ★ Phase 4.0: 加载公理校验器模块
 ## local axiom_validator_mod = require "derive.axiom_validator"
@@ -2159,6 +2159,12 @@ global ClickableState = @record{
 ##   nebula_app_begin(app_name, { arena_size = spec.arena_size })
 ##   -- ★ Phase 4.5 S2: 注册组件（混合管线自动编排）
 ##   for _, c in ipairs(spec.components or {}) do
+##     if not c.type then
+##       -- ★ Phase 4.8-NL: 纯布局容器——无 type 字段，必须有 layout.container
+##       assert(c.layout and c.layout.container,
+##         ("nebula_app: component '%s' has no type and no layout.container"):format(c.name))
+##       nebula_app_register_layout_node(c.name, c.layout)
+##     else
 ##     -- 查询 Visual 的 text_mode 以决定注册路径
 ##     local reg = nebula_registry[c.type]
 ##     local text_mode = reg and reg.text_mode or nil
@@ -2201,6 +2207,7 @@ global ClickableState = @record{
 ##           dense_name, c.name, producer_name))
 ##       end
 ##     end
+##   end  -- ★ Phase 4.8-NL: close if not c.type / else
 ##   end
 ##   -- 注册动态插槽
 ##   for _, s in ipairs(spec.slots or {}) do
