@@ -2155,6 +2155,9 @@ global ClickableState = @record{
 ## --   shadows     : table[]? — 阴影组件 [{name, type, blur_radius?}]
 ## function nebula_app(app_name, spec)
 ##   spec = spec or {}
+##   -- ★ Phase 4.9.1: app 级 cell 默认值
+##   local app_cell_w = (spec.cell and spec.cell.w) or 10.0
+##   local app_cell_h = (spec.cell and spec.cell.h) or 16.0
 ##   -- ★ 默认 layout：省略时自动使用 1280x800，消除布局样板
 ##   if not spec.layout then
 ##     spec.layout = { direction = "column", width = 1280, height = 800 }
@@ -2164,6 +2167,83 @@ global ClickableState = @record{
 ##   -- 开始 App 注册
 ##   nebula_app_begin(app_name, { arena_size = spec.arena_size })
 ##   -- ★ Phase 4.5 S2: 注册组件（混合管线自动编排）
+##   -- ★ Phase 4.9.1: layout 字段提升 + children/row 简写
+##   -- 在组件注册前，将顶层 layout 字段归入 c.layout，并展开 children/row 语法糖
+##   for _, c in ipairs(spec.components or {}) do
+##     -- children 简写: { "line_nums", "edit_area" } → container = { {ref="line_nums"}, {ref="edit_area"} }
+##     if c.children then
+##       c.layout = c.layout or {}
+##       c.layout.container = {}
+##       for _, child_name in ipairs(c.children) do
+##         table.insert(c.layout.container, { ref = child_name })
+##       end
+##       c.children = nil
+##     end
+##     -- row 简写: row = true → direction = "row"
+##     if c.row then
+##       c.layout = c.layout or {}
+##       c.layout.direction = "row"
+##       c.row = nil
+##     end
+##     -- layout 字段提升: flex_basis, flex_grow, direction, justify, align 等从顶层归入 c.layout
+##     local layout_keys = { "flex_basis", "flex_grow", "direction", "justify", "align" }
+##     for _, key in ipairs(layout_keys) do
+##       if c[key] ~= nil then
+##         c.layout = c.layout or {}
+##         c.layout[key] = c[key]
+##         c[key] = nil
+##       end
+##     end
+##     -- ★ Phase 4.9.1: dense = N — 自动生成 DenseText Visual record + component 注册
+##     if c.dense and not c.type then
+##       local dense_type = app_name .. "_" .. c.name .. "_DenseVisual"
+##       -- 生成 record 声明（如果尚未存在）
+##       if not nebula_registry[dense_type] then
+##         local rec_src = ("global %s = @record{ pos: Vec2, size: Vec2 }\n"):format(dense_type)
+##         local rec_ast = aster.parse(rec_src, "<dense-auto:" .. dense_type .. ">")
+##         for _, stat in ipairs(rec_ast) do inject_statement(stat) end
+##         nebula_component(dense_type, { text_mode = "dense", max_chars = c.dense })
+##         print(("[sugar] nebula_app: auto-generated DenseText '%s' (max_chars=%d)"):format(dense_type, c.dense))
+##       end
+##       c.type = dense_type
+##       c.max_chars = c.max_chars or c.dense
+##       c.dense = nil
+##     end
+##     -- ★ Phase 4.9.1: builtin = "line_nums" — 自动绑定内置 Producer
+##     if c.builtin then
+##       local opts = {}
+##       opts.cell_w = c.cell_w or app_cell_w
+##       opts.cell_h = c.cell_h or app_cell_h
+##       opts.rows = c.rows
+##       opts.cols = c.cols
+##       local bname = c.builtin
+##       -- editor_name: 引用 app record 中的编辑器组件字段名（builtin Producer 内部用 app.<editor_name>）
+##       local edname = c.editor or c.name
+##       if bname == "line_nums" then
+##         assert(c.rows or spec.layout, "builtin=line_nums: needs rows= or spec.layout.height")
+##         opts.rows = opts.rows or (spec.layout.height and math.floor(spec.layout.height / opts.cell_h) or 50)
+##         nebula_builtin_line_nums(edname, opts)
+##         c.producer = "nebula_fill_line_nums_" .. edname
+##       elseif bname == "status_bar" then
+##         opts.cols = opts.cols or (spec.layout and spec.layout.width and math.floor(spec.layout.width / opts.cell_w) or 128)
+##         nebula_builtin_status_bar(edname, opts)
+##         c.producer = "nebula_fill_status_bar_" .. edname
+##       elseif bname == "search_bar" then
+##         opts.cols = opts.cols or (spec.layout and spec.layout.width and math.floor(spec.layout.width / opts.cell_w) or 128)
+##         nebula_builtin_search_bar(edname, opts)
+##         c.producer = "nebula_fill_search_bar_" .. edname
+##       elseif bname == "edit_area" then
+##         assert(c.rows or spec.layout, "builtin=edit_area: needs rows= or spec.layout.height")
+##         opts.rows = opts.rows or (spec.layout.height and math.floor(spec.layout.height / opts.cell_h) or 50)
+##         opts.cols = opts.cols or (spec.layout and spec.layout.width and math.floor(spec.layout.width / opts.cell_w) or 128)
+##         nebula_builtin_edit_area(edname, opts)
+##         c.producer = "nebula_fill_edit_area_" .. edname
+##       else
+##         assert(false, ("unknown builtin '%s'"):format(bname))
+##       end
+##       c.builtin = nil
+##     end
+##   end
 ##   for _, c in ipairs(spec.components or {}) do
 ##     if not c.type then
 ##       -- ★ Phase 4.8-NL: 纯布局容器——无 type 字段，必须有 layout.container
@@ -2179,8 +2259,8 @@ global ClickableState = @record{
 ##       assert(c.producer, ("nebula_app: component '%s' (type=%s, text_mode=dense) requires producer"):format(c.name, c.type))
 ##       nebula_app_register_dense_text(c.name, c.type, {
 ##         max_chars = c.max_chars,
-##         cell_w    = c.cell_w,
-##         cell_h    = c.cell_h,
+##         cell_w    = c.cell_w or app_cell_w,
+##         cell_h    = c.cell_h or app_cell_h,
 ##         producer  = c.producer,
 ##         layout    = c.layout,
 ##       })
@@ -2200,13 +2280,13 @@ global ClickableState = @record{
 ##           dense_name    = dense_name,
 ##           producer_name = producer_name,
 ##           max_chars     = ad.max_chars,
-##           cell_w        = c.cell_w or 10.0,
-##           cell_h        = c.cell_h or 16.0,
+##           cell_w        = c.cell_w or app_cell_w,
+##           cell_h        = c.cell_h or app_cell_h,
 ##         }
 ##         nebula_app_register_dense_text(dense_name, ad.dense_name, {
 ##           max_chars = ad.max_chars,
-##           cell_w    = c.cell_w or 10.0,
-##           cell_h    = c.cell_h or 10.0,
+##           cell_w    = c.cell_w or app_cell_w,
+##           cell_h    = c.cell_h or app_cell_h,
 ##           producer  = producer_name,
 ##         })
 ##         print(("[sugar] nebula_app: auto-dense \"%s\" for \"%s\" (producer=\"%s\")"):format(
@@ -2236,8 +2316,8 @@ global ClickableState = @record{
 ##   for _, d in ipairs(spec.dense_texts or {}) do
 ##     nebula_app_register_dense_text(d.name, d.type, {
 ##       max_chars = d.max_chars,
-##       cell_w    = d.cell_w,
-##       cell_h    = d.cell_h,
+##       cell_w    = d.cell_w or app_cell_w,
+##       cell_h    = d.cell_h or app_cell_h,
 ##       producer  = d.producer,
 ##       layout    = d.layout,
 ##     })
