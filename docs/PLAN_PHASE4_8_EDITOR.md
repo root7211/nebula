@@ -72,17 +72,138 @@ Phase 4.8 的目标是将其从原型推进为**可日常使用的编辑器**，
 
 **目标**：Ctrl+F 打开搜索栏，Ctrl+H 打开替换栏，高亮全部匹配。
 
-**关键设计**：
-- 搜索栏用 `editable` 原语（单行，256 字节容量）
-- App 布局改为 column：`[搜索栏(flex_basis=30, 条件显示)] + [编辑区(flex_grow=1)]`
-- 匹配结果用固定数组 `[512]MatchPos` 存储（公理 B：零堆分配）
-- 不做正则——先做精确字符串匹配
+#### 方案选型
 
-**框架改动**：
-- `app_factory.lua`：支持组件条件隐藏（`visible` 状态驱动 draw skip）
-- `layout_engine.lua`：支持 `display = "none"` 时从布局中移除
+**原方案（已弃用）**：框架层条件隐藏（`visible` 状态 + `display="none"` 布局移除）。
+**弃用原因**：Nebula 布局在 S1 编译期解算为固定坐标，运行时动态移除组件需要重新解算布局，违反公理 A（阶段封闭性——后一阶段不得执行前一阶段的操作）。
 
-**预估代码量**：~200 行新增，~40 行框架修改
+**采用方案：固定布局 + Producer 控制可见性**
+
+搜索栏始终占 `flex_basis=24` 布局空间，通过 Producer 控制渲染内容：
+
+| 状态 | 搜索栏渲染 | 键盘路由 |
+|:-----|:-----------|:---------|
+| 隐藏（`_search_active == false`） | Producer 填充编辑区同色背景（视觉融入） | 正常路由到 multiline_editable |
+| 显示（`_search_active == true`） | 渲染搜索框内容 + 匹配计数 | 拦截 char_input 写入搜索 buffer |
+
+**公理合规性**：
+
+- **公理 A**：搜索栏是编译期声明的 DenseText 组件，布局在 S1 解算，运行时仅切换 Producer 输出内容，不重新解算布局
+- **公理 B**：搜索 buffer `[256]uint8` + 匹配结果 `[512]MatchPos` 均为 L1 持久栈数据，零堆分配
+- **公理 C**：匹配高亮通过 `DenseCharInstance.bg_color` 直接映射到 GPU
+
+#### 关键设计
+
+**1. 数据结构**
+
+```
+-- 搜索状态（全局，L1 持久）
+global _search_active: boolean = false
+global _search_buf: [256]uint8           -- 搜索关键字 buffer
+global _search_len: uint32 = 0           -- 当前关键字长度
+global _search_cursor: uint32 = 0        -- 搜索框光标位置
+
+-- 匹配结果（固定数组，零堆分配）
+global MatchPos = @record{ row: uint32, col: uint32 }
+global _search_matches: [512]MatchPos
+global _search_match_count: uint32 = 0
+global _search_current: uint32 = 0       -- 当前高亮的匹配索引
+```
+
+**2. 键盘路由**
+
+```
+NebulaKey.Find    = 26    -- Ctrl+F
+NebulaKey.FindNext = 27   -- Enter（搜索栏激活时）/ F3
+
+主循环中：
+  if input.key_pressed == NebulaKey.Find then
+    _search_active = not _search_active   -- 切换搜索栏
+  end
+
+  if _search_active then
+    -- 拦截 char_input → 写入 _search_buf
+    -- Escape → 关闭搜索栏
+    -- Enter → 跳转到下一个匹配
+    -- Backspace → 删除搜索框字符
+    -- 每次 _search_buf 变化 → 重新扫描 multi_buf 填充 _search_matches
+  else
+    -- 正常路由到 multiline_editable（框架自动处理）
+  end
+```
+
+**3. 匹配扫描**
+
+```
+function scan_matches(mb, search_buf, search_len, matches, max_matches) → count
+  -- 遍历 multi_buf 的每一行
+  -- 对每行 flatten 后做朴素字符串匹配（O(n*m)，文件小够用）
+  -- 结果写入 matches[] 数组
+  -- 返回匹配数量
+```
+
+**4. 匹配高亮**
+
+在 `fill_edit_area` Producer 中，对每个字节检查是否命中匹配范围：
+
+```
+-- 对当前行检查所有匹配
+for each match in _search_matches where match.row == buf_row:
+  if byte_i >= match.col and byte_i < match.col + _search_len:
+    this_bg = nebula_theme_bg_search_match()
+  if match == _search_matches[_search_current]:
+    this_bg = nebula_theme_bg_search_current()   -- 当前匹配用更亮的颜色
+```
+
+**5. 搜索栏 Producer**
+
+```
+function fill_search_bar(app, instances, count, max):
+  if not _search_active then
+    -- 填充编辑区同色背景（视觉融入）
+    fill all cells with bg=nebula_theme_bg_normal()
+  else
+    -- 渲染: "Find: {_search_buf}  ({current}/{total})"
+    -- 背景用 nebula_theme_bg_status()
+    -- 光标位置用 nebula_theme_bg_cursor()
+  end
+```
+
+**6. 布局**
+
+```lua
+nebula_app("TextEditorApp", {
+  components = {
+    { name = "editor", type = "EditorBgVisual" },
+    { name = "search_bar", type = "SearchBarDenseVisual",
+      producer = "fill_search_bar", cell_w = 10.0, cell_h = 16.0,
+      max_chars = 200, layout = { flex_basis = 24 } },
+    { name = "editor_body", layout = {
+        direction = "row", flex_grow = 1,
+        container = {
+          { ref = "line_nums" },
+          { ref = "edit_area" },
+        },
+      },
+    },
+    -- ... line_nums, edit_area, status_bar 不变
+  },
+})
+```
+
+#### 修改文件清单
+
+| 文件 | 修改内容 | 行数估计 |
+|:-----|:---------|:---------|
+| `src/nebula_core.nelua` | +`NebulaKey.Find = 26`, `NebulaKey.FindNext = 27` | +3 行 |
+| `src/app.nelua` | Ctrl+F / F3 键映射 | +4 行 |
+| `src/nebula_theme.nelua` | +`nebula_theme_bg_search_match()`, `nebula_theme_bg_search_current()` | +8 行 |
+| `examples/text_editor_demo.nelua` | 搜索状态 + 搜索 buffer + MatchPos + scan_matches + fill_search_bar Producer + 键盘路由 + fill_edit_area 匹配高亮 + 布局调整 | +180 行 |
+| `tests/smoke_phase4_8_s2.lua` | 冒烟测试 | +60 行 |
+
+**框架改动**：仅 `nebula_core.nelua`（+2 枚举值）和 `app.nelua`（+4 行键映射），无 `app_factory` / `layout_engine` 改动。
+
+**预估总代码量**：~255 行新增
 
 ---
 
@@ -197,7 +318,7 @@ Phase 4.8 的目标是将其从原型推进为**可日常使用的编辑器**，
 | Step | 内容 | 框架改动 | 新增代码 | 依赖 | 状态 |
 |:-----|:-----|:---------|:---------|:-----|:-----|
 | S1 | 选区可视化 + 系统剪贴板 | 小（主题 + 原语导出） | ~448 行 | 无 | ✅ 已完成 |
-| S2 | 搜索与替换 | 中（条件显示 + 布局） | ~240 行 | S1 | 🔜 |
+| S2 | 搜索与替换 | 小（枚举 + 键映射） | ~255 行 | S1 | 🔜 |
 | S3 | 状态栏 + 光标行高亮 | 无 | ~86 行 | 无 | ✅ 已完成 |
 | S4 | 多语言语法高亮 | 小（多规则注册 + 分发生成） | ~190 行 | 无 | ✅ 已完成 |
 | S5 | 自动缩进 + Tab | 小（枚举 + 原语） | ~70 行 | 无 | ✅ 已完成 |
