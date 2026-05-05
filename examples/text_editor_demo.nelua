@@ -676,10 +676,15 @@ local function main(): int32
   end
 
   -- ★ Sugar: init_themed 替代手写 EditorBgVisual{...}（15行 → 1行）
+  -- 注意：pos/size 设为全屏，但延迟注入会覆盖为 editor_body 的布局坐标
   app.editor:init_themed(
     Vec2{x = 0.0, y = 0.0},
     Vec2{x = (@float32)(TextEditorApp_WIN_WIDTH), y = (@float32)(TextEditorApp_WIN_HEIGHT)},
     0.0)
+  -- ★ Phase 4.8-S2: 修正 editor 背景为 editor_body 的布局坐标（编译期常量）
+  -- editor_body: pos=(0,24) size=(1280,752) — 与 layout_engine 输出一致
+  app.editor.visual.pos  = Vec2{x = 0.0, y = 24.0}
+  app.editor.visual.size = Vec2{x = (@float32)(TextEditorApp_WIN_WIDTH), y = (@float32)(TextEditorApp_WIN_HEIGHT) - 24.0 - 24.0}
 
   -- 加载文件
   if _editor_has_file then
