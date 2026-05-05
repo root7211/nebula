@@ -229,6 +229,10 @@ run_test "smoke_phase4_8_s5 (Phase 4.8-S5 — 自动缩进 & Tab & ShiftTab)" \
 run_test "smoke_phase4_8_s2 (Phase 4.8-S2 — 搜索与替换)" \
   nelua-lua tests/smoke_phase4_8_s2.lua
 
+# ★ Phase 4.8-S6: 集成验收（S1-S5 + NL 全功能协同验证）
+run_test "smoke_phase4_8_s6 (Phase 4.8-S6 — 集成验收)" \
+  nelua-lua tests/smoke_phase4_8_s6.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="

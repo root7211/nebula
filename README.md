@@ -14,12 +14,14 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 进行中 | 74/74 回归测试全绿 | Phase 4.8-S5 已完成 | 自动缩进 + Tab 处理（2026-05-05）**
+**Era II 进行中 | 76/76 回归测试全绿 | Phase 4.8 全部完成（S1-S6 + NL） | 集成验收通过（2026-05-05）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
+| **Phase 4.8-S6 集成验收** | S1-S5 + NL 全功能协同验证——110 条集成冒烟测试覆盖 9 个维度（源文件完整性/S1 选区+剪贴板/S2 搜索+替换/S3 状态栏/S4 多语言高亮/S5 自动缩进/NL 嵌套布局/架构完整性/编译产物）+ text_editor_demo 871 行完整编辑器 + 76/76 回归全绿 | `c512367` |
+| **Phase 4.8-S2 搜索与替换** | 固定布局方案（`flex_basis=24` 搜索栏始终占位，Producer 切换渲染内容）+ `Ctrl+F` 搜索 / `Ctrl+H` 替换 / `F3` 下一匹配 / `Escape` 关闭 + 朴素 O(n*m) 字符串匹配 + `MatchPos[512]` 固定数组（公理 B: 零堆分配）+ 匹配高亮（当前匹配亮黄 / 其他暗黄）+ `search_replace_current` / `search_replace_all` + 搜索栏激活时键盘事件拦截 + 53 条冒烟测试 + 75/75 回归全绿 | `c512367` |
 | **Phase 4.8-S5 自动缩进 + Tab 处理** | `NebulaKey.ShiftTab` 枚举 + Tab 插入 4 空格 + Shift+Tab 移除至多 4 前导空格（`delete_range`）+ Enter 自动保持缩进（计算前导空格）+ `{`/`:` 结尾额外增加 4 空格缩进 + 30 条冒烟测试 + 74/74 回归全绿 | — |
 | **Phase 4.8-S4 多语言语法高亮** | 6 种语言高亮规则（nelua/lua/c/python/json/markdown）+ `nebula_highlight_select` 编译期多语言注册 + `nebula_highlight_dispatch` 运行时分发 + `nebula_highlight_detect_ext` 文件扩展名自动检测（15 种扩展名映射）+ `_editor_highlight_id` 状态管理 + 47 条冒烟测试 + 73/73 回归全绿 | — |
 | **Phase 4.8-S3 状态栏 + 光标行高亮** | 底部状态栏（`flex_basis=24` 固定高度 DenseText 组件）——显示文件名 + 修改标记 + 行列号 + 总行数 + 编码(UTF-8) + 行尾符(LF) + `fill_status_bar` Producer + `StatusBarDenseVisual` 声明 + `nebula_theme_bg_status/fg_status/fg_status_accent` 主题色 + 光标行高亮（`fill_edit_area` 中 `is_cursor_line` → `nebula_theme_bg_cursor_line`）+ 31 条冒烟测试 + 72/72 回归全绿 | — |

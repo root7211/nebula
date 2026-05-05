@@ -1,6 +1,6 @@
 -- =============================================================================
 -- text_editor_demo.nelua
--- Nebula GUI Compiler — Phase 4.7-S7 + Phase 4.8-S1 + Phase 4.8-NL + Phase 4.8-S3 + Phase 4.8-S4
+-- Nebula GUI Compiler — Phase 4.8-S6 集成验收
 --
 -- 文本编辑器原型——Phase 4.7 收官 demo + Phase 4.8 增强：
 --   · S1: CJK multiline editable（UTF-8 aware gap buffer）
@@ -11,8 +11,11 @@
 --   · S6: File I/O（load_file / save_file）
 --   · S7: 集成验收
 --   · Phase 4.8-S1: 选区可视化（Shift+Arrow 选区扩展 + 蓝色背景高亮）+ 系统剪贴板（Ctrl+C/V/X/A）
+--   · Phase 4.8-S2: 搜索与替换（Ctrl+F 搜索 / Ctrl+H 替换 / F3 下一个匹配 / 固定布局 Producer 方案）
 --   · Phase 4.8-S3: 状态栏（文件名 + 行列号 + 行数 + 编码 + 行尾符）+ 光标行高亮
 --   · Phase 4.8-S4: 多语言语法高亮（nelua/lua/c/python/json/markdown + 扩展名自动检测）
+--   · Phase 4.8-S5: 自动缩进（Tab 4 空格 / Shift+Tab 反缩进 / Enter 保持缩进）
+--   · Phase 4.8-NL: 嵌套布局（editor_body = row{ line_nums, edit_area } + status_bar + search_bar）
 --
 -- ★ Sugar:
 --   · nebula_visual — 自动生成 Visual record + buffer 注入 + DenseText 伴生管线
@@ -29,6 +32,12 @@
 --   Ctrl+Z          撤销
 --   Ctrl+Y/Shift+Z  重做
 --   Ctrl+C/V/X/A    复制/粘贴/剪切/全选
+--   Ctrl+F          搜索
+--   Ctrl+H          搜索与替换
+--   F3 / Enter      下一个匹配
+--   Escape          关闭搜索栏
+--   Tab             插入 4 空格（编辑区） / 切换搜索/替换框（搜索栏）
+--   Shift+Tab       反缩进
 -- =============================================================================
 ## cinclude "<stdio.h>"
 ## cinclude "<string.h>"
