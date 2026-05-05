@@ -39,32 +39,31 @@
 
 ```nelua
 require "nebula"
-
+## cinclude "<stdio.h>" -- snprintf for title update
 ## nebula_highlight_builtins({"nelua", "lua", "c", "python", "json", "markdown"})
-
-## nebula_visual("EditorBg", {
-##   primitives = {"multiline_editable"},
-##   max_text_len = 256, max_lines = 256, component_id = 1,
+## nebula_visual("EditorBgVisual", {
+##   primitives = {"multiline_editable"}, max_text_len = 256, max_lines = 256, component_id = 1,
 ## })
-
-## nebula_app("TextEditor", {
-##   title = "Nebula Editor",
-##   cell  = { w = 10.0, h = 16.0 },
+## nebula_app("TextEditorApp", {
 ##   components = {
-##     { name = "editor",      type = "EditorBg" },
-##     { name = "search_bar",  dense = 256,  builtin = "search_bar",  flex_basis = 24 },
+##     { name = "editor",      type = "EditorBgVisual" },
+##     { name = "search_bar",  dense = 256, builtin = "search_bar", flex_basis = 24 },
 ##     { name = "editor_body", row = true, flex_grow = 1,
 ##       children = { "line_nums", "edit_area" } },
-##     { name = "line_nums",   dense = 250,  builtin = "line_nums",   flex_basis = 50 },
-##     { name = "edit_area",   dense = 6000, builtin = "edit_area",   flex_grow = 1 },
-##     { name = "status_bar",  dense = 200,  builtin = "status_bar",  flex_basis = 24 },
+##     { name = "line_nums",   dense = 250, builtin = "line_nums", flex_basis = 50 },
+##     { name = "edit_area",   dense = 6000, builtin = "edit_area", flex_grow = 1 },
+##     { name = "status_bar",  dense = 200, builtin = "status_bar", flex_basis = 24 },
 ##   },
 ## })
-
-## nebula_editor_main("TextEditor", { editor = "editor" })
+## nebula_editor_main("TextEditorApp")
 ```
 
-**85 行 → 22 行，压缩 3.9x（累计从 v1 的 885 行压缩 40x）。**
+**85 行 → 19 行，压缩 4.5x（累计从 v1 的 886 行压缩 46.6x）。**
+
+注：方案原目标 22 行，实际达成 19 行。额外收益来自：
+- `editor = "editor"` 被 `auto_editor_name` 自动推断消除（-4处）
+- `cinclude` 合并为单行注释（-1行）
+- `title`/`cell_h` 已由 `nebula_editor_main` 默认值覆盖
 
 ---
 
