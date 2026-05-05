@@ -213,6 +213,10 @@ run_test "smoke_phase4_5_s3 (Phase 4.5-S3 — 语法糖深化: nebula_visual + i
 run_test "smoke_nested_layout (Phase 4.8-NL — 嵌套布局 container ref + 拓扑感知解算)" \
   nelua-lua tests/smoke_nested_layout.lua
 
+# ★ Phase 4.8-S3: 状态栏 + 光标行高亮（StatusBarDenseVisual + fill_status_bar + 布局验证）
+run_test "smoke_phase4_8_s3 (Phase 4.8-S3 — 状态栏 & 光标行高亮 & 布局)" \
+  nelua-lua tests/smoke_phase4_8_s3.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="

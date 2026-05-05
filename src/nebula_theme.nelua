@@ -44,6 +44,19 @@ global function nebula_theme_bg_selected(): uint32
   return nebula_pack_rgba8(38, 79, 120, 255)
 end
 
+-- 状态栏
+global function nebula_theme_bg_status(): uint32
+  return nebula_pack_rgba8(30, 30, 42, 255)
+end
+
+global function nebula_theme_fg_status(): uint32
+  return nebula_pack_rgba8(160, 160, 180, 255)
+end
+
+global function nebula_theme_fg_status_accent(): uint32
+  return nebula_pack_rgba8(100, 180, 255, 255)
+end
+
 -- 光标行 / 光标
 global function nebula_theme_bg_cursor_line(): uint32
   return nebula_pack_rgba8(35, 35, 50, 255)

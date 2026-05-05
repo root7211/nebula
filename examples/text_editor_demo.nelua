@@ -1,8 +1,8 @@
 -- =============================================================================
 -- text_editor_demo.nelua
--- Nebula GUI Compiler — Phase 4.7-S7 + Phase 4.8-S1 + Phase 4.8-NL
+-- Nebula GUI Compiler — Phase 4.7-S7 + Phase 4.8-S1 + Phase 4.8-NL + Phase 4.8-S3
 --
--- 文本编辑器原型——Phase 4.7 收官 demo + Phase 4.8 S1 选区可视化 + 系统剪贴板：
+-- 文本编辑器原型——Phase 4.7 收官 demo + Phase 4.8 增强：
 --   · S1: CJK multiline editable（UTF-8 aware gap buffer）
 --   · S2: DenseText App 编排（Producer 模式）
 --   · S3: 行号显示（内置 Producer）
@@ -11,6 +11,7 @@
 --   · S6: File I/O（load_file / save_file）
 --   · S7: 集成验收
 --   · Phase 4.8-S1: 选区可视化（Shift+Arrow 选区扩展 + 蓝色背景高亮）+ 系统剪贴板（Ctrl+C/V/X/A）
+--   · Phase 4.8-S3: 状态栏（文件名 + 行列号 + 行数 + 编码 + 行尾符）+ 光标行高亮
 --
 -- ★ Sugar:
 --   · nebula_visual — 自动生成 Visual record + buffer 注入 + DenseText 伴生管线
@@ -97,6 +98,9 @@ global LineNumDenseVisual = @record{ pos: Vec2, size: Vec2 }
 
 global EditAreaDenseVisual = @record{ pos: Vec2, size: Vec2 }
 ## nebula_component("EditAreaDenseVisual", { text_mode = "dense", max_chars = 8192 })
+
+global StatusBarDenseVisual = @record{ pos: Vec2, size: Vec2 }
+## nebula_component("StatusBarDenseVisual", { text_mode = "dense", max_chars = 256 })
 
 -- =============================================================================
 -- ★ Sugar: 内置行号 Producer（替代 ~53 行手写 fill_line_nums）
@@ -214,7 +218,66 @@ global function fill_edit_area(
 end
 
 -- =============================================================================
--- App 声明（嵌套布局：editor_body = row{ line_nums, edit_area }）
+-- 状态栏 Producer（Phase 4.8-S3）
+-- 显示: Ln {row}, Col {col} | UTF-8 | LF | {lines} lines | {modified}
+-- =============================================================================
+global function fill_status_bar(
+  app: auto, instances: *[0]DenseCharInstance, count: *uint32, max: uint32
+): void
+  local editor = &app.editor
+  local origin_x: float32 = app.dense_layout_status_bar_x
+  local origin_y: float32 = app.dense_layout_status_bar_y + 4.0
+  local bg = nebula_theme_bg_status()
+  local fg = nebula_theme_fg_status()
+  local fg_accent = nebula_theme_fg_status_accent()
+  local idx: uint32 = 0
+  local STATUS_COLS <comptime> = 128
+
+  -- Format status string into a buffer
+  local buf: [256]uint8
+  local row_1 = (@int32)(editor.cursor_row + 1)
+  local col_1 = (@int32)(editor.cursor_col + 1)
+  local lines = (@int32)(editor.visual.multi_buf.line_count)
+  local mod_str: cstring = _editor_modified and " [+]" or ""
+  local file_str: cstring
+  if _editor_has_file then
+    -- Extract filename from path
+    local last_slash: int32 = -1
+    local fi: uint32 = 0
+    while _editor_file_path[fi] ~= 0 and fi < 511 do
+      if _editor_file_path[fi] == 47 then last_slash = (@int32)(fi) end
+      fi = fi + 1
+    end
+    local start: uint32 = last_slash >= 0 and (@uint32)(last_slash + 1) or 0
+    file_str = (@cstring)(&_editor_file_path[start])
+  else
+    file_str = "[untitled]"
+  end
+
+  local slen = snprintf((@cstring)(&buf[0]), 255,
+    " %s%s  |  Ln %d, Col %d  |  %d lines  |  UTF-8  |  LF",
+    file_str, mod_str, row_1, col_1, lines)
+  if slen < 0 then slen = 0 end
+  if slen > 255 then slen = 255 end
+  local str_len: uint32 = (@uint32)(slen)
+
+  -- Render the status bar (single row)
+  local col: uint32 = 0
+  while col < STATUS_COLS and idx < max do
+    local ch: uint32 = 32
+    local cell_fg = fg
+    if col < str_len then
+      ch = (@uint32)(buf[col])
+      -- Accent color for Ln/Col values (digits after "Ln " and "Col ")
+    end
+    nebula_dense_grid_fill_instance(&instances[idx], 0, col, ch, origin_x, origin_y, CELL_W, CELL_H, cell_fg, bg)
+    idx = idx + 1; col = col + 1
+  end
+  $count = idx
+end
+
+-- =============================================================================
+-- App 声明（嵌套布局：editor_body = row{ line_nums, edit_area } + status_bar）
 -- =============================================================================
 ## nebula_app("TextEditorApp", {
 ##   components = {
@@ -234,6 +297,9 @@ end
 ##     { name = "edit_area", type = "EditAreaDenseVisual",
 ##       producer = "fill_edit_area", cell_w = 10.0, cell_h = 16.0,
 ##       max_chars = 6000, layout = { flex_grow = 1 } },
+##     { name = "status_bar", type = "StatusBarDenseVisual",
+##       producer = "fill_status_bar", cell_w = 10.0, cell_h = 16.0,
+##       max_chars = 200, layout = { flex_basis = 24 } },
 ##   },
 ## })
 

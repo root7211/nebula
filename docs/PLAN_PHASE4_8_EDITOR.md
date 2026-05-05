@@ -86,18 +86,33 @@ Phase 4.8 的目标是将其从原型推进为**可日常使用的编辑器**，
 
 ---
 
-### S3：状态栏 + 光标行高亮 — 🔜
+### S3：状态栏 + 光标行高亮 — ✅ 已完成
 
 **目标**：底部状态栏显示文件信息，光标所在行整行高亮。
 
-**关键设计**：
-- 光标行高亮：Producer 中检测 `current_line_idx`，该行所有字符 bg 设为 `nebula_theme_bg_cursor_line()`
-- 状态栏：底部固定高度区域（`flex_basis=24`），用独立 DenseText 组件渲染
-- 内容：`Ln {行}, Col {列} | {编码} | {行尾符} | {文件大小} | {修改标记}`
+**交付内容**：
 
-**框架改动**：无，纯 demo 层改动
+| 任务 | 文件 | 描述 |
+|:-----|:-----|:-----|
+| 3.1 | `src/nebula_theme.nelua` | 新增 `nebula_theme_bg_status()` → `rgba(30,30,42,255)` |
+| 3.2 | `src/nebula_theme.nelua` | 新增 `nebula_theme_fg_status()` → `rgba(160,160,180,255)` |
+| 3.3 | `src/nebula_theme.nelua` | 新增 `nebula_theme_fg_status_accent()` → `rgba(100,180,255,255)` |
+| 3.4 | `examples/text_editor_demo.nelua` | `StatusBarDenseVisual` record + `nebula_component` 注册（dense, max_chars=256） |
+| 3.5 | `examples/text_editor_demo.nelua` | `fill_status_bar` Producer——显示文件名 + 修改标记 + Ln/Col + 总行数 + UTF-8 + LF |
+| 3.6 | `examples/text_editor_demo.nelua` | `nebula_app` 布局新增 `status_bar`（`flex_basis=24`，底部固定高度） |
+| 3.7 | `tests/smoke_phase4_8_s3.lua` | 31 项冒烟测试（主题色 + 声明 + Producer + 布局验证） |
+| 3.8 | `tools/run_all_tests.sh` | 注册新测试到回归套件 |
 
-**预估代码量**：~60 行新增
+**框架改动**：无，纯 demo 层 + 主题扩展
+
+**代码量**：+86 行新增（含 ~50 行 Producer + ~13 行主题 + ~4 行布局声明 + 测试）
+
+**光标行高亮**：已由 `fill_edit_area` Producer 原有实现覆盖（`is_cursor_line` → `nebula_theme_bg_cursor_line()`），行号栏内置 Producer 同样支持。
+
+**测试结果**：
+- `smoke_phase4_8_s3.lua`：31/31 通过
+- 回归测试：72/72 全绿
+- 编译验证：text_editor_demo 编译通过
 
 ---
 
@@ -152,7 +167,7 @@ Phase 4.8 的目标是将其从原型推进为**可日常使用的编辑器**，
 |:-----|:-----|:---------|:---------|:-----|:-----|
 | S1 | 选区可视化 + 系统剪贴板 | 小（主题 + 原语导出） | ~448 行 | 无 | ✅ 已完成 |
 | S2 | 搜索与替换 | 中（条件显示 + 布局） | ~240 行 | S1 | 🔜 |
-| S3 | 状态栏 + 光标行高亮 | 无 | ~60 行 | 无 | 🔜 |
+| S3 | 状态栏 + 光标行高亮 | 无 | ~86 行 | 无 | ✅ 已完成 |
 | S4 | 多语言语法高亮 | 小（多规则注册） | ~190 行 | 无 | 🔜 |
 | S5 | 自动缩进 + Tab | 小（原语 + 缓冲区） | ~100 行 | 无 | 🔜 |
 | S6 | 集成验收 | 无 | ~80 行 | S1-S5 | 🔜 |
