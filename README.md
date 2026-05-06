@@ -14,14 +14,15 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 完成 | 77/77 回归测试全绿 | Phase 4.9.1 已完成（886→19 行，46.6x 压缩） | 文本编辑器 demo 收敛至终态 | Terminal Emulator v2 规划中（2026-05-06）**
+**Era II 完成 | 77/77 回归测试全绿 | Phase 4.6 已完成（三端 demo 统一 sugar） | Term v2: 489→16 行 (30.6x)（2026-05-06）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
 | **Phase 4.9.1 终态收尾** | 7 项 sugar 改进全落地——`dense=N` 自动生成 DenseText + `builtin` 自动绑定 Producer + layout 字段提升 + children/row 简写 + cell 默认值 + `auto_editor_name` 推断 + editor_main 默认参数 + `text_editor_demo_v3.nelua`（19 行，原 886 行压缩 46.6x）+ 77/77 回归全绿 | `77973d0` |
-| **Terminal Emulator v2 方案** | `docs/PLAN_TERM_DEMO_V2.md` — sugar 化终端模拟器设计（489→55 行，8.9x），验证 nebula_app/dense/terminal_main 体系的通用性，新增 `nebula_terminal_main` 终端专用主循环模板 | `3bd1722` |
+| **Phase 4.6 语法统一化** | `nebula_main()` 泛用生成器（S1）+ builtin 隐含默认 dense（S2）+ nebula_app spec 缓存消除参数重复（S3）+ term_demo_v2: 489→16 行 (30.6x) + button_v2_demo: 147→18 行 (8.2x) + 77/77 回归全绿 | `849cec7` |
+| ~~Terminal v2 方案~~ | `docs/PLAN_TERM_DEMO_V2.md` — sugar 化终端模拟器设计（489→55 行，8.9x），验证 nebula_app/dense/terminal_main 体系的通用性，新增 `nebula_terminal_main` 终端专用主循环模板 | `3bd1722` |
 | **Phase 4.9 50 行终态收敛** | 5 层 Sugar 系统——L1 `nebula_highlight_pack`（多语言高亮一键注册）+ L2 `nebula_builtin_status_bar/search_bar/edit_area`（Producer 自动生成）+ L3 搜索交互内置（框架级全局变量 + `nebula_search_*` 辅助函数）+ L4 `nebula_editor_update_title` 等框架内建辅助 + L5 `nebula_editor_main`（主循环一行生成）+ `text_editor_demo_v2.nelua`（85 行，原 885 行压缩 10.4x）+ 77/77 回归全绿 | `67e16c6` |
 | **Phase 4.8-S6 集成验收** | S1-S5 + NL 全功能协同验证——110 条集成冒烟测试覆盖 9 个维度（源文件完整性/S1 选区+剪贴板/S2 搜索+替换/S3 状态栏/S4 多语言高亮/S5 自动缩进/NL 嵌套布局/架构完整性/编译产物）+ text_editor_demo 871 行完整编辑器 + 76/76 回归全绿 | `c512367` |
 | **Phase 4.8-S2 搜索与替换** | 固定布局方案（`flex_basis=24` 搜索栏始终占位，Producer 切换渲染内容）+ `Ctrl+F` 搜索 / `Ctrl+H` 替换 / `F3` 下一匹配 / `Escape` 关闭 + 朴素 O(n*m) 字符串匹配 + `MatchPos[512]` 固定数组（公理 B: 零堆分配）+ 匹配高亮（当前匹配亮黄 / 其他暗黄）+ `search_replace_current` / `search_replace_all` + 搜索栏激活时键盘事件拦截 + 53 条冒烟测试 + 75/75 回归全绿 | `c512367` |
@@ -157,8 +158,9 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 || 4.8-S5 | 自动缩进 + Tab 处理 | **已完成**（Tab 4 空格 + Shift+Tab 反缩进 + Enter 自动保持/增加缩进 + 30 条冒烟测试） | 79 |
 | **4.9** | **50 行终态收敛** | **已完成**（5 层 Sugar：L1 highlight pack + L2 Producer 自动生成 + L3 搜索交互内置 + L4 框架辅助 + L5 主循环生成，885→85 行，10.4x 压缩） | **88** |
 | **4.9.1** | **语法打磨终态** | **已完成**（7 项改进：dense=N + builtin 绑定 + layout 提升 + children/row + cell 默认值 + auto_editor_name + editor_main 默认，886→19 行，46.6x 压缩） | **90** |
-| 4.X-T2 | Terminal Emulator v2 | **规划中**（sugar 化终端模拟器，`nebula_terminal_main` 模板，489→55 行，验证 sugar 通用性） | 80 |
-|| 4.6 | Indirect Drawing | 规划中 | 78 |
+| **4.X-T2** | Terminal Emulator v2 | **已完成**（`nebula_terminal_main` + builtin="term_grid" + spec 缓存，489→16 行，30.6x 压缩） | 80 |
+| **4.6** | **语法统一化** | **已完成**（S1: `nebula_main()` + S2: builtin 隐含 dense + S3: spec 缓存，button 18 行，term 16 行，editor 19 行） | **85** |
+| 4.6-I | Indirect Drawing | 规划中（文档预研，等待组件数>100 触发） | 78 |
 | 4.7 | 文本编辑器原型 | **S1-S7 已完成**（S7: text_editor_demo 全集成验收） | — |
 | 5.0 | 生态与 CI/CD | 规划中 | — |
 
@@ -190,18 +192,18 @@ require "nebula"
 ## nebula_app("TextEditorApp", {
 ##   components = {
 ##     { name = "editor",      type = "EditorBgVisual" },
-##     { name = "search_bar",  dense = 256, builtin = "search_bar", flex_basis = 24 },
+##     { name = "search_bar",  builtin = "search_bar", flex_basis = 24 },
 ##     { name = "editor_body", row = true, flex_grow = 1,
 ##       children = { "line_nums", "edit_area" } },
-##     { name = "line_nums",   dense = 250, builtin = "line_nums", flex_basis = 50 },
-##     { name = "edit_area",   dense = 6000, builtin = "edit_area", flex_grow = 1 },
-##     { name = "status_bar",  dense = 200, builtin = "status_bar", flex_basis = 24 },
+##     { name = "line_nums",   builtin = "line_nums", flex_basis = 50 },
+##     { name = "edit_area",   builtin = "edit_area", flex_grow = 1 },
+##     { name = "status_bar",  builtin = "status_bar", flex_basis = 24 },
 ##   },
 ## })
 ## nebula_editor_main("TextEditorApp")
 ```
 
-> **Sugar 能力**：`dense=N` 自动生成 DenseText record + component | `builtin="line_nums"` 自动绑定 Producer | layout 字段提升（flex_basis 直接写顶层）+ children/row 简写 | `auto_editor_name` 从 multiline_editable primitive 自动推断 | `nebula_editor_main` 默认参数覆盖
+> **Sugar 能力**：`builtin="line_nums"` 自动绑定 Producer + 隐含默认 dense 值 | layout 字段提升 + children/row 简写 | `auto_editor_name` 自动推断 | `nebula_editor_main` 默认参数 | `nebula_main()` 泛用 main 生成器 | nebula_app spec 缓存供下游 sugar 读取
 
 ### 最小编辑器（minimal_editor_demo，39 行）
 
@@ -227,7 +229,7 @@ require "nebula"
 
 完整示例见 `examples/minimal_editor_demo.nelua`。
 
-### 已达成：button_v2_demo（30 行）
+### 已达成：button_v2_demo（18 行）
 
 ```nelua
 require "nebula"
@@ -235,22 +237,18 @@ require "nebula"
 ## nebula_visual("ButtonVisual", { primitives = {"clickable"} })
 ## nebula_app("ButtonApp", { components = {{ name="btn", type="ButtonVisual" }} })
 
-local function main(): int32
-  local renderer: NebulaRenderer
-  local app: ButtonApp
-  if not nebula_init(&renderer, &app, "Button V2 Demo", 800, 600) then return 1 end
-  app.btn:init_themed(Vec2{x=300,y=250}, Vec2{x=200,y=60}, 12.0)
-  local input: NebulaInputState
-  while not nebula_should_close() do
-    local dt = nebula_frame_begin(&input)
-    if app.btn.click.just_clicked then printf("clicked!\n") end
-    nebula_frame_render(&renderer, &app, &input, dt, 0.09, 0.09, 0.10)
-  end
-  app:deinit()
-  nebula_shutdown(&renderer)
-  return 0
-end
-main()
+## local function on_init(app)
+##   return { app .. ".btn:init_themed(Vec2{x=300,y=250}, Vec2{x=200,y=60}, 12.0)" }
+## end
+## local function on_frame(app)
+##   return { "if " .. app .. ".btn.click.just_clicked then printf(\"clicked!\\n\") end" }
+## end
+##
+## nebula_main("ButtonApp", {
+##   title = "Button V2 Demo", width = 800, height = 600,
+##   bg_r = 0.09, bg_g = 0.09, bg_b = 0.10,
+##   on_init = on_init, on_frame = on_frame,
+## })
 ```
 
 ---
@@ -267,12 +265,12 @@ L0 (Raw)    : nebula_annotate + nebula_derive                   ← 最初的 ra
 
 | Demo | L0 (Raw) | L1 (Sugar) | L2 (Visual) | 压缩比 |
 |:-----|:---------|:-----------|:------------|:-------|
-| button | 147 行 | 141 行 | **30 行** | 5x |
+| button | 147 行 | 141 行 | **18 行** | **8.2x** |
 | multiline_sugar | — | 153 行 | ~20 行 | 8x |
 | highlight_sugar | — | 386 行 | ~120 行 | 3x |
 | minimal_editor | — | — | **39 行** | — |
 | text_editor | — | 885 行 | **19 行** | **46.6x** |
-| terminal (v1→v2) | 489 行 | — | **~55 行** | **8.9x** |
+| terminal | 489 行 | — | **16 行** | **30.6x** |
 
 ---
 
@@ -294,7 +292,11 @@ LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/text_editor_demo_v3
 LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/text_editor_demo
 # 或打开文件编辑
 LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/text_editor_demo path/to/file.nelua
-# 或运行终端模拟器
+# 终端模拟器 v2（16 行 sugar 化终态）
+./build.sh term_demo_v2
+LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/term_demo_v2
+
+# 终端模拟器 v1（489 行原始版本）
 ./build.sh term_demo
 LD_LIBRARY_PATH=vendor/wgpu-native/lib ~/.cache/nelua/term_demo
 ```
@@ -358,13 +360,14 @@ nebula/
 │   ├── text_editor_demo.nelua   # ★ Phase 4.7-S7 文本编辑器原型（S1-S6 全集成验收）
 │   ├── text_editor_demo_v2.nelua # ★ Phase 4.9 终态收敛（85 行，5 层 Sugar，10.4x 压缩）
 │   ├── text_editor_demo_v3.nelua # ★ Phase 4.9.1 终态（19 行，46.6x 压缩，全部 sugar 内联）
-│   ├── button_v2_demo.nelua    # ★ Phase 4.5-S3 极限形态（30 行，全部 L2 API）
+│   ├── button_v2_demo.nelua    # ★ Phase 4.6-S1 nebula_main() 验证（18 行，8.2x 压缩）
 │   ├── json_viewer_demo.nelua   # ★ Phase 4.X-J JSON 树形浏览器（折叠/展开 + 语法着色）
 │   ├── json_viewer/             # JSON Viewer 子模块
 │   │   ├── json_parser.nelua    # 递归下降 JSON 解析器
 │   │   ├── json_tree.nelua      # 可见行计算 + 折叠 + 格式化 + 着色
 │   │   └── sample.json          # 测试数据
-│   ├── term_demo.nelua          # 终端模拟器原型（PTY + ANSI + Dense Text）
+│   ├── term_demo.nelua          # 终端模拟器原型 v1（PTY + ANSI + Dense Text，489 行）
+│   ├── term_demo_v2.nelua       # ★ Phase 4.6-S3 sugar 化终端模拟器（16 行，30.6x 压缩）
 │   └── term/                    # 终端模拟器子模块
 │       ├── pty_bindings.nelua   # POSIX PTY C FFI 绑定
 │       ├── ansi_parser.nelua    # ANSI/VT100 转义序列状态机
@@ -380,7 +383,8 @@ nebula/
 
 ## 文档索引
 | [`PLAN_PHASE4_9_1_SYNTAX.md`](docs/PLAN_PHASE4_9_1_SYNTAX.md) | ★ Phase 4.9.1 — 语法打磨终态（886→19 行，46.6x） |
-| [`PLAN_TERM_DEMO_V2.md`](docs/PLAN_TERM_DEMO_V2.md) | ★ Terminal Emulator v2 — sugar 化终端模拟器方案（489→55 行） |
+| [`PLAN_SYNTAX_UNIFICATION.md`](docs/PLAN_SYNTAX_UNIFICATION.md) | ★ Phase 4.6 — 语法统一化（nebula_main + builtin 默认 dense + spec 缓存） |
+| [`PLAN_TERM_DEMO_V2.md`](docs/PLAN_TERM_DEMO_V2.md) | ★ Terminal Emulator v2 — sugar 化终端模拟器方案（489→16 行，30.6x） |
 
 | 文档 | 内容 |
 | :--- | :--- |
