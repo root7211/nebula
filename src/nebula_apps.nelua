@@ -1,0 +1,451 @@
+-- =============================================================================
+-- nebula_apps.nelua -- Application Template Library
+--
+-- Complete application main() function generators (text editor, terminal, etc.)
+-- These are application scaffolding, not framework derivation rules.
+--
+-- Compile-time only, zero runtime overhead.
+-- =============================================================================
+
+require "nebula_core"
+require "nebula_builtins"
+
+## -- ★ Phase 4.9 L5: nebula_editor_main(app_type, opts)
+## --
+## -- 生成完整的 main() 函数：init + 文件加载 + 主循环（含交互处理）+ deinit。
+## --
+## -- Usage:
+## --   ## nebula_editor_main("TextEditorApp", {
+## --     editor = "editor",
+## --     title = "Nebula Editor",
+## --     cell_h = 16.0,
+## --   })
+## --
+## function nebula_editor_main(app_type, opts)
+##   opts = opts or {}
+##   local editor_name = opts.editor or "editor"
+##   local title       = opts.title  or "Nebula Editor"
+##   local cell_h      = opts.cell_h or 16.0
+##   local win_w_const = app_type .. "_WIN_WIDTH"
+##   local win_h_const = app_type .. "_WIN_HEIGHT"
+##
+##   local src = ([[local function main(): int32
+##   local renderer: NebulaRenderer
+##   local app: %s
+##   if not nebula_init(&renderer, &app, "%s", %s, %s) then
+##     return 1
+##   end
+##   app.%s:init_themed(
+##     Vec2{x = 0.0, y = 0.0},
+##     Vec2{x = (@float32)(%s), y = (@float32)(%s)},
+##     0.0)
+##   -- 修正 editor 背景为 editor_body 布局坐标（编译期常量）
+##   app.%s.visual.pos  = Vec2{x = 0.0, y = 24.0}
+##   app.%s.visual.size = Vec2{x = (@float32)(%s), y = (@float32)(%s) - 24.0 - 24.0}
+##   -- 加载文件
+##   if _editor_has_file then
+##     local path_len: uint32 = 0
+##     while _editor_file_path[path_len] ~= 0 and path_len < 511 do
+##       path_len = path_len + 1
+##     end
+##     _editor_highlight_id = nebula_highlight_detect_ext(&_editor_file_path[0], path_len)
+##     if app.%s.visual.multi_buf:load_file((@cstring)(&_editor_file_path[0])) then
+##       app.%s.line_count = app.%s.visual.multi_buf.line_count
+##       app.%s.cursor_row = 0
+##       app.%s.cursor_col = 0
+##       printf("nebula: loaded file (highlight=%%d)\n", (@int32)(_editor_highlight_id))
+##     else
+##       printf("nebula: cannot open file, starting empty buffer\n")
+##       _editor_has_file = false
+##     end
+##   else
+##     _editor_highlight_id = 1
+##   end
+##   _editor_modified = false
+##   nebula_editor_update_title(0, 0)
+##   printf("=== Nebula Text Editor ===\n")
+##   printf("  Ctrl+S save | Ctrl+Z undo | Ctrl+Y redo | Ctrl+F find | Ctrl+H replace\n")
+##   local input: NebulaInputState
+##   local prev_time = glfwGetTime()
+##   local prev_undo_cursor: uint32 = 0
+##   local title_timer: float32 = 0.0
+##   while not nebula_should_close() do
+##     nebula_poll_events()
+##     local now = glfwGetTime()
+##     local dt  = (@float32)(now - prev_time)
+##     prev_time = now
+##     nebula_collect_input(_nebula_window, &input, dt)
+##     -- Ctrl+S 保存
+##     if input.key_pressed == NebulaKey.Save then
+##       if _editor_has_file then
+##         if app.%s.visual.multi_buf:save_file((@cstring)(&_editor_file_path[0])) then
+##           _editor_modified = false
+##           prev_undo_cursor = app.%s.undo_stack.cursor
+##           printf("nebula: saved\n")
+##           nebula_editor_update_title(app.%s.cursor_row, app.%s.cursor_col)
+##         end
+##       else
+##         printf("nebula: no file path\n")
+##       end
+##     end
+##     -- Ctrl+F / Ctrl+H 搜索栏切换
+##     if input.key_pressed == NebulaKey.Find then
+##       _search_active = not _search_active
+##       _search_replace = false
+##       if _search_active then
+##         _search_len = 0; _search_cursor = 0
+##         _search_match_count = 0; _search_current = 0
+##       end
+##     end
+##     if input.key_pressed == NebulaKey.Replace then
+##       _search_active = not _search_active
+##       _search_replace = true
+##       if _search_active then
+##         _search_len = 0; _search_cursor = 0
+##         _replace_len = 0; _replace_cursor = 0
+##         _search_match_count = 0; _search_current = 0
+##       end
+##     end
+##     -- 搜索栏键盘处理
+##     if _search_active then
+##       if input.key_pressed == NebulaKey.Escape then
+##         _search_active = false; _search_replace = false
+##       elseif input.key_pressed == NebulaKey.FindNext or input.key_pressed == NebulaKey.Enter then
+##         if _search_match_count > 0 then
+##           _search_current = (_search_current + 1) %% _search_match_count
+##           nebula_search_goto_current(&app.%s)
+##         end
+##       elseif input.key_pressed == NebulaKey.Backspace then
+##         if _search_cursor > 0 then
+##           _search_cursor = _search_cursor - 1
+##           _search_len = _search_len - 1
+##           local si: uint32 = _search_cursor
+##           while si < _search_len do
+##             _search_buf[si] = _search_buf[si + 1]
+##             si = si + 1
+##           end
+##           nebula_search_scan(&app.%s.visual.multi_buf)
+##         end
+##       else
+##         local ci: uint8 = 0
+##         while ci < input.char_count do
+##           local ch: uint32 = input.char_input[ci]
+##           if ch >= 32 and ch < 127 then
+##             if _search_replace and _replace_cursor < 255 then
+##               if _replace_cursor < _replace_len then
+##                 local ri2: uint32 = _replace_len
+##                 while ri2 > _replace_cursor do
+##                   _replace_buf[ri2] = _replace_buf[ri2 - 1]
+##                   ri2 = ri2 - 1
+##                 end
+##               end
+##               _replace_buf[_replace_cursor] = (@uint8)(ch)
+##               _replace_cursor = _replace_cursor + 1
+##               _replace_len = _replace_len + 1
+##             elseif _search_cursor < 255 then
+##               if _search_cursor < _search_len then
+##                 local si2: uint32 = _search_len
+##                 while si2 > _search_cursor do
+##                   _search_buf[si2] = _search_buf[si2 - 1]
+##                   si2 = si2 - 1
+##                 end
+##               end
+##               _search_buf[_search_cursor] = (@uint8)(ch)
+##               _search_cursor = _search_cursor + 1
+##               _search_len = _search_len + 1
+##               nebula_search_scan(&app.%s.visual.multi_buf)
+##               if _search_match_count > 0 then
+##                 _search_current = 0
+##                 nebula_search_goto_current(&app.%s)
+##               end
+##             end
+##           end
+##           ci = ci + 1
+##         end
+##       end
+##       if _search_active and _search_replace then
+##         if input.key_pressed == NebulaKey.Replace then
+##           nebula_search_replace_current(&app.%s, &app.%s.visual.multi_buf)
+##         end
+##       end
+##       input.key_pressed = NebulaKey.None
+##       input.char_count = 0
+##     end
+##     -- 修改检测
+##     if app.%s.undo_stack.cursor ~= prev_undo_cursor then
+##       _editor_modified = true
+##     end
+##     app.%s.visual.content_height = (@float32)(app.%s.line_count) * (%s + 2.0)
+##     title_timer = title_timer + dt
+##     if title_timer > 0.2 then
+##       title_timer = 0.0
+##       nebula_editor_update_title(app.%s.cursor_row, app.%s.cursor_col)
+##     end
+##     nebula_frame_render(&renderer, &app, &input, dt, 0.04, 0.04, 0.06)
+##   end
+##   app:deinit()
+##   nebula_shutdown(&renderer)
+##   printf("nebula: text editor clean exit\n")
+##   return 0
+## end
+## main()]]):format(
+##     app_type, title, win_w_const, win_h_const,
+##     editor_name,
+##     win_w_const, win_h_const,
+##     editor_name,
+##     editor_name, win_w_const, win_h_const,
+##     editor_name, editor_name, editor_name, editor_name, editor_name,
+##     editor_name, editor_name, editor_name, editor_name,
+##     editor_name,
+##     editor_name,
+##     editor_name, editor_name,
+##     editor_name, editor_name,
+##     editor_name, editor_name, editor_name, tostring(cell_h),
+##     editor_name, editor_name
+##   )
+##
+##   local ast = aster.parse(src, "<nebula_editor_main:" .. app_type .. ">")
+##   for _, stat in ipairs(ast) do
+##     inject_statement(stat)
+##   end
+##   print(("[sugar] nebula_editor_main: %s (editor=%s, title=%s)"):format(
+##     app_type, editor_name, title))
+## end
+
+
+-- =============================================================================
+-- ★ Phase 4.X-T2: nebula_terminal_main(app_type, opts)
+--
+-- 终端模拟器专用主循环模板。生成完整的 main() 函数：
+--   · PTY 子进程启动（forkpty + shell）
+--   · 自定义键盘回调（key + char 转发到 PTY）
+--   · 主循环：非阻塞读 PTY → ANSI feed → Producer 填充 → GPU 渲染
+--   · 光标闪烁（0.5s 周期反色块）
+--   · 子进程退出检测 + cleanup
+--
+-- 公理合规：
+--   A: 模板展开在 S1 完成，运行时不存在任何模板代码
+--   B: L0 管线/PTY fd + L2 帧级实例数组
+--   C: DenseText 管线通过 nebula_app 声明，确定性映射
+--
+-- Usage:
+--   ## nebula_terminal_main("TermApp", {
+--     grid    = { cols = 80, rows = 24 },
+--     cell    = { w = 12.0, h = 18.0 },
+--     shell   = "/bin/bash",
+--     title   = "Nebula Terminal",
+--   })
+-- =============================================================================
+## function nebula_terminal_main(app_type, opts)
+##   opts = opts or {}
+##   -- ★ Phase 4.6-S3: 从 nebula_app 缓存的 spec 中推导缺失参数
+##   local cached = _nebula_last_app_spec or {}
+##   local grid_cols = (opts.grid and opts.grid.cols)
+##     or (cached.components and cached.components[1] and cached.components[1].cols)
+##     or 80
+##   local grid_rows = (opts.grid and opts.grid.rows)
+##     or (cached.components and cached.components[1] and cached.components[1].rows)
+##     or 24
+##   local cell_w    = (opts.cell and opts.cell.w)
+##     or (cached.cell and cached.cell.w)
+##     or 12.0
+##   local cell_h    = (opts.cell and opts.cell.h)
+##     or (cached.cell and cached.cell.h)
+##     or 18.0
+##   local shell     = opts.shell or "/bin/bash"
+##   local title     = opts.title or "Nebula Terminal"
+##   local win_w     = math.floor(grid_cols * cell_w + 20)
+##   local win_h     = math.floor(grid_rows * cell_h + 8)
+##
+##   local src = ([[
+## global _nebula_term_buf: *TermBuffer = nilptr
+## global _nebula_term_cursor_visible: boolean = true
+## local _term_pty_master_fd: cint = -1
+## local _term_pty_child_pid: pid_t = 0
+## local function _term_start_shell(): boolean
+##   local ws: winsize
+##   ws.ws_row = %d
+##   ws.ws_col = %d
+##   ws.ws_xpixel = 0
+##   ws.ws_ypixel = 0
+##   local master_fd: cint = -1
+##   local pid = forkpty(&master_fd, nilptr, nilptr, &ws)
+##   if pid < 0 then
+##     printf("term: forkpty failed\n")
+##     return false
+##   end
+##   if pid == 0 then
+##     setenv("TERM", "xterm-256color", 1)
+##     setenv("COLORTERM", "truecolor", 1)
+##     setenv("LANG", "en_US.UTF-8", 1)
+##     local shell: cstring = getenv("SHELL")
+##     if shell == nilptr then shell = "%s" end
+##     local argv: [3]cstring = { shell, "--norc", nilptr }
+##     execvp(shell, &argv[0])
+##     _exit(1)
+##   end
+##   _term_pty_master_fd = master_fd
+##   _term_pty_child_pid = pid
+##   if not nebula_set_nonblock(_term_pty_master_fd) then
+##     printf("term: failed to set nonblock\n")
+##     return false
+##   end
+##   printf("term: shell started (pid=%%d, fd=%%d, %dx%d)\n",
+##     (@int32)(pid), master_fd)
+##   return true
+## end
+## local function _term_stop_shell(): void
+##   if _term_pty_master_fd >= 0 then
+##     close(_term_pty_master_fd)
+##     _term_pty_master_fd = -1
+##   end
+##   if _term_pty_child_pid > 0 then
+##     kill(_term_pty_child_pid, SIGTERM)
+##     local status: cint = 0
+##     waitpid(_term_pty_child_pid, &status, 0)
+##     _term_pty_child_pid = 0
+##   end
+## end
+## local function _term_key_callback(window: GLFWwindow, key: int32, scancode: int32,
+##                                   action: int32, mods: int32): void
+##   if action ~= GLFW_PRESS and action ~= 2 then return end
+##   local buf: [8]uint8
+##   local len: csize = 0
+##   if mods & 2 ~= 0 then
+##     if key >= 65 and key <= 90 then
+##       buf[0] = (@uint8)(key - 64)
+##       len = 1
+##     end
+##   else
+##     if key == 257 then
+##       buf[0] = 13; len = 1
+##     elseif key == 259 then
+##       buf[0] = 127; len = 1
+##     elseif key == 258 then
+##       buf[0] = 9; len = 1
+##     elseif key == 256 then
+##       buf[0] = 27; len = 1
+##     elseif key == 265 then
+##       buf[0] = 27; buf[1] = 91; buf[2] = 65; len = 3
+##     elseif key == 264 then
+##       buf[0] = 27; buf[1] = 91; buf[2] = 66; len = 3
+##     elseif key == 262 then
+##       buf[0] = 27; buf[1] = 91; buf[2] = 67; len = 3
+##     elseif key == 263 then
+##       buf[0] = 27; buf[1] = 91; buf[2] = 68; len = 3
+##     elseif key == 268 then
+##       buf[0] = 27; buf[1] = 91; buf[2] = 72; len = 3
+##     elseif key == 269 then
+##       buf[0] = 27; buf[1] = 91; buf[2] = 70; len = 3
+##     elseif key == 261 then
+##       buf[0] = 27; buf[1] = 91; buf[2] = 51; buf[3] = 126; len = 4
+##     end
+##   end
+##   if len > 0 and _term_pty_master_fd >= 0 then
+##     nebula_pty_write(_term_pty_master_fd, &buf[0], len)
+##   end
+## end
+## local function _term_char_callback(window: GLFWwindow, codepoint: uint32): void
+##   if _term_pty_master_fd < 0 then return end
+##   local buf: [4]uint8
+##   local len: csize = 0
+##   if codepoint < 0x80 then
+##     buf[0] = (@uint8)(codepoint); len = 1
+##   elseif codepoint < 0x800 then
+##     buf[0] = (@uint8)(0xC0 | (codepoint >> 6))
+##     buf[1] = (@uint8)(0x80 | (codepoint & 0x3F)); len = 2
+##   elseif codepoint < 0x10000 then
+##     buf[0] = (@uint8)(0xE0 | (codepoint >> 12))
+##     buf[1] = (@uint8)(0x80 | ((codepoint >> 6) & 0x3F))
+##     buf[2] = (@uint8)(0x80 | (codepoint & 0x3F)); len = 3
+##   else
+##     buf[0] = (@uint8)(0xF0 | (codepoint >> 18))
+##     buf[1] = (@uint8)(0x80 | ((codepoint >> 12) & 0x3F))
+##     buf[2] = (@uint8)(0x80 | ((codepoint >> 6) & 0x3F))
+##     buf[3] = (@uint8)(0x80 | (codepoint & 0x3F)); len = 4
+##   end
+##   nebula_pty_write(_term_pty_master_fd, &buf[0], len)
+## end
+## local function main(): int32
+##   local renderer: NebulaRenderer
+##   local app: %s
+##   if not nebula_init(&renderer, &app, "%s", %d, %d) then
+##     return 1
+##   end
+##   glfwSetKeyCallback(_nebula_window, _term_key_callback)
+##   glfwSetCharCallback(_nebula_window, _term_char_callback)
+##   local term_buf: TermBuffer
+##   term_buf:init(%d, %d)
+##   local parser: AnsiParser
+##   parser:init()
+##   if not _term_start_shell() then
+##     printf("term: failed to start shell\n")
+##     return 1
+##   end
+##   local pty_read_buf: [8192]uint8
+##   local cursor_blink_time: float64 = 0.0
+##   local cursor_visible: boolean = true
+##   local prev_time = glfwGetTime()
+##   printf("=== Nebula Terminal Emulator (v2 sugar) ===\n")
+##   printf("  Grid: %dx%d | Cell: %%.0fx%%.0f\n", %.1f, %.1f)
+##   printf("  Pipeline: Dense Text (Instanced + SDF Atlas)\n")
+##   printf("============================================\n")
+##   while not nebula_should_close() do
+##     nebula_poll_events()
+##     local now = glfwGetTime()
+##     local dt = now - prev_time
+##     prev_time = now
+##     cursor_blink_time = cursor_blink_time + dt
+##     if cursor_blink_time >= 0.5 then
+##       cursor_blink_time = cursor_blink_time - 0.5
+##       cursor_visible = not cursor_visible
+##     end
+##     local total_read: csize = 0
+##     while total_read < 65536 do
+##       local n = nebula_pty_read(_term_pty_master_fd, &pty_read_buf[0], 8192)
+##       if n <= 0 then
+##         if n < 0 then
+##           if not nebula_pty_child_alive(_term_pty_child_pid) then
+##             printf("term: shell exited\n")
+##             goto cleanup
+##           end
+##         end
+##         break
+##       end
+##       for i = 0, < (@csize)(n) do
+##         local ev: AnsiEvent
+##         if parser:feed(pty_read_buf[i], &ev) then
+##           term_buf:handle_event(&ev, &parser)
+##         end
+##       end
+##       total_read = total_read + (@csize)(n)
+##     end
+##     _nebula_term_buf = &term_buf
+##     _nebula_term_cursor_visible = cursor_visible
+##     local input: NebulaInputState
+##     nebula_frame_render(&renderer, &app, &input, (@float32)(dt), 0.08, 0.08, 0.12)
+##   end
+##   ::cleanup::
+##   _term_stop_shell()
+##   app:deinit()
+##   nebula_shutdown(&renderer)
+##   printf("nebula: terminal clean exit\n")
+##   return 0
+## end
+## main()
+## ]]):format(
+##     grid_rows, grid_cols, shell,
+##     grid_cols, grid_rows,
+##     app_type, title, win_w, win_h,
+##     grid_rows, grid_cols,
+##     grid_cols, grid_rows, cell_w, cell_h
+##   )
+##
+##   local ast = aster.parse(src, "<nebula_terminal_main:" .. app_type .. ">")
+##   for _, stat in ipairs(ast) do
+##     inject_statement(stat)
+##   end
+##   print(("[sugar] nebula_terminal_main: %s (grid=%dx%d, cell=%.0fx%.0f, title=%s)"):format(
+##     app_type, grid_cols, grid_rows, cell_w, cell_h, title))
+## end
+

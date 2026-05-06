@@ -9,6 +9,8 @@
 ## cinclude "<string.h>"
 
 require "nebula_core"
+require "nebula_builtins"
+require "nebula_apps"
 require "glfw_bindings"
 require "wgpu_bindings"
 require "renderer"
