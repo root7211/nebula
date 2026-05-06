@@ -20,6 +20,7 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
+| **Era III 模块化拆分** | 5 个 builtin Producer 工厂 (`nebula_builtin_*`) 从 `nebula_core` 提取到 `nebula_builtins.nelua`；`nebula_editor_main` / `nebula_terminal_main` 提取到 `nebula_apps.nelua`；内置 `_nebula_builtins` 编译期注册表替代 if-else 分发链；`nebula_core` 净减少 930 行 → 497 行；24/24 demo 编译通过 | `634a362` |
 | **Phase 4.9.1 终态收尾** | 7 项 sugar 改进全落地——`dense=N` 自动生成 DenseText + `builtin` 自动绑定 Producer + layout 字段提升 + children/row 简写 + cell 默认值 + `auto_editor_name` 推断 + editor_main 默认参数 + `text_editor_demo_v3.nelua`（19 行，原 886 行压缩 46.6x）+ 77/77 回归全绿 | `77973d0` |
 | **Phase 4.6 语法统一化** | `nebula_main()` 泛用生成器（S1）+ builtin 隐含默认 dense（S2）+ nebula_app spec 缓存消除参数重复（S3）+ term_demo_v2: 489→16 行 (30.6x) + button_v2_demo: 147→18 行 (8.2x) + 77/77 回归全绿 | `849cec7` |
 | ~~Terminal v2 方案~~ | `docs/PLAN_TERM_DEMO_V2.md` — sugar 化终端模拟器设计（489→55 行，8.9x），验证 nebula_app/dense/terminal_main 体系的通用性，新增 `nebula_terminal_main` 终端专用主循环模板 | `3bd1722` |
@@ -314,7 +315,9 @@ bash tools/run_all_tests.sh
 nebula/
 ├── src/                          # 核心框架
 │   ├── nebula.nelua              # ★ Phase 4.5-S3 统一入口模块（1 行 require 替代 ~10 行）
-│   ├── nebula_core.nelua         # 框架核心模块（含 nebula_visual + init_themed 生成）
+│   ├── nebula_core.nelua         # 框架核心（derive 引擎 + nebula_visual + init_themed + nebula_app + nebula_main）
+│   ├── nebula_builtins.nelua     # 预置 Producer 工厂（line_nums / status_bar / search_bar / edit_area / term_grid）
+│   ├── nebula_apps.nelua          # 应用模板（nebula_editor_main + nebula_terminal_main）
 │   ├── app.nelua                 # App 编排 + GLFW 事件循环 + nebula_frame_begin
 │   ├── renderer.nelua            # WebGPU 渲染器
 │   ├── text_runtime.nelua        # 文本渲染运行时
