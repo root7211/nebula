@@ -1,4 +1,4 @@
-require 'liberation_sans_ascii_48_metrics'
+require 'jetbrains_mono_ascii_48_metrics'
 
 global function printf(fmt: cstring, ...: cvarargs): cint <cimport,cinclude'<stdio.h>'> end
 

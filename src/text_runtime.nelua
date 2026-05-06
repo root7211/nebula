@@ -1,6 +1,6 @@
 require "renderer"
-require "liberation_sans_ascii_48_metrics"
-require "liberation_sans_slug_metrics"  -- ★ BUG-7 修复：Slug 路径所需的 NebulaSlugGlyph 等符号
+require "jetbrains_mono_ascii_48_metrics"
+require "jetbrains_mono_slug_metrics"  -- ★ BUG-7 修复：Slug 路径所需的 NebulaSlugGlyph 等符号
 require "cjk_shaping_tables"            -- ★ Phase 4.2.3-S2: CJK shaping 表（GB2312 一级 3755 字）
 
 ## cinclude "<stdio.h>"

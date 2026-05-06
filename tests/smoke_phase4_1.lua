@@ -3,7 +3,7 @@
 --
 -- 验证内容：
 --   S0 阶段 — 字体预处理器与 Slug 字形数据
---    1. [S0] liberation_sans_slug_metrics.nelua 文件存在
+--    1. [S0] jetbrains_mono_slug_metrics.nelua 文件存在
 --    2. [S0] NEBULA_SLUG_GLYPH_COUNT = 95（ASCII 32-126）
 --    3. [S0] NEBULA_SLUG_TOTAL_CURVES > 0（贝塞尔曲线已提取）
 --    4. [S0] NEBULA_SLUG_TOTAL_BAND_METAS > 0（Band 元数据已生成）
@@ -138,11 +138,11 @@ end
 -- =============================================================================
 print("\n=== S0 阶段：字体预处理器与 Slug 字形数据 ===")
 
-local slug_metrics_path = script_dir .. "/../assets/generated/liberation_sans_slug_metrics.nelua"
+local slug_metrics_path = script_dir .. "/../assets/generated/jetbrains_mono_slug_metrics.nelua"
 local slug_metrics = read_file(slug_metrics_path)
 
 -- 1. 文件存在
-assert_true("liberation_sans_slug_metrics.nelua 文件存在", slug_metrics ~= nil)
+assert_true("jetbrains_mono_slug_metrics.nelua 文件存在", slug_metrics ~= nil)
 
 if slug_metrics then
   -- 2. GLYPH_COUNT = 95

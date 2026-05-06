@@ -53,9 +53,9 @@ local function free(ptr: pointer): void <cimport,cinclude'<stdlib.h>'> end
 local function memset(ptr: pointer, ch: cint, count: csize): pointer <cimport,cinclude'<string.h>'> end
 local function nebula_blit_row(dst: *cuchar, dst_offset: cint, src: *cuchar, src_offset: cint, count: cint): void <cimport,nodecl> end
 
-local FONT_PATH <const> = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
-local OUTPUT_ATLAS <const> = "assets/generated/liberation_sans_ascii_48_sdf.pgm"
-local OUTPUT_METRICS <const> = "assets/generated/liberation_sans_ascii_48_metrics.nelua"
+local FONT_PATH <const> = "assets/fonts/JetBrainsMono-Regular.ttf"
+local OUTPUT_ATLAS <const> = "assets/generated/jetbrains_mono_ascii_48_sdf.pgm"
+local OUTPUT_METRICS <const> = "assets/generated/jetbrains_mono_ascii_48_metrics.nelua"
 
 local PIXEL_HEIGHT <const> = 48.0
 local ATLAS_W <comptime> = 1024

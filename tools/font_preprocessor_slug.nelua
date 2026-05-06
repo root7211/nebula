@@ -7,7 +7,7 @@
 --   · 将直线段转换为退化二次贝塞尔（含对角线微扰，防止 Slug 根判定失效）
 --   · 将三次贝塞尔在中点处分裂为两段二次贝塞尔
 --   · ★ Phase 4.2.2 D-4.1-A: 自适应 Band 数量 + 等价子集哈希合并
---   · 导出 liberation_sans_slug_metrics.nelua（编译期常量数组）
+--   · 导出 jetbrains_mono_slug_metrics.nelua（编译期常量数组）
 --
 -- 输出格式：
 --   · NebulaSlugCurve  — 每条二次贝塞尔的 3 个控制点（em 空间，font units）
@@ -51,8 +51,8 @@ local function memset(ptr: pointer, ch: cint, count: csize): pointer <cimport,ci
 -- =============================================================================
 -- 配置常量
 -- =============================================================================
-local FONT_PATH <const>       = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
-local OUTPUT_METRICS <const>  = "assets/generated/liberation_sans_slug_metrics.nelua"
+local FONT_PATH <const>       = "assets/fonts/JetBrainsMono-Regular.ttf"
+local OUTPUT_METRICS <const>  = "assets/generated/jetbrains_mono_slug_metrics.nelua"
 local FIRST_CODEPOINT <comptime> = 32    -- ASCII space
 local LAST_CODEPOINT  <comptime> = 126   -- ASCII ~
 local GLYPH_COUNT     <comptime> = LAST_CODEPOINT - FIRST_CODEPOINT + 1

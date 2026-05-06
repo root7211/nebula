@@ -178,7 +178,7 @@ check("S2: CJK UPEM = 1000",
   tables and tables:find("NEBULA_CJK_UPEM <const> = 1000") ~= nil)
 
 -- Slug ASCII 表仍然完整
-local slug = read_file("assets/generated/liberation_sans_slug_metrics.nelua")
+local slug = read_file("assets/generated/jetbrains_mono_slug_metrics.nelua")
 check("S2: ASCII Slug metrics still present",
   slug and slug:find("NEBULA_SLUG_GLYPH_COUNT") ~= nil)
 
