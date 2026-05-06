@@ -1,15 +1,4 @@
--- =============================================================================
--- term_demo_v2.nelua — Terminal Emulator v2 (Sugar 化终态)
---
--- 用 Nebula L2 sugar 重写 term_demo.nelua (489 行 → 15 行, 32.6x 压缩)
--- 验证 sugar 体系（dense/builtin/app/terminal_main）对非编辑器应用的通用性。
---
--- 公理合规：
---   A: Visual 类型 + 管线 + Producer + 主循环均在 S1 编译期推导
---   B: L0 管线 + PTY fd, L2 帧级实例数组
---   C: DenseText 管线通过 nebula_app 声明，确定性映射
--- =============================================================================
-
+-- term_demo_v2: sugar 化终端模拟器 (原 489 行 → 18 行, 27.2x)
 require "nebula"
 require "pty_bindings"
 require "ansi_parser"
@@ -19,14 +8,9 @@ require "term_buffer"
 ##   cell = { w = 12.0, h = 18.0 },
 ##   layout = { direction = "column", width = 1220, height = 440 },
 ##   components = {
-##     { name = "grid", dense = 2048, builtin = "term_grid",
+##     { name = "grid", builtin = "term_grid",
 ##       rows = 24, cols = 80, flex_grow = 1 },
 ##   },
 ## })
 
-## nebula_terminal_main("TermApp", {
-##   grid  = { cols = 80, rows = 24 },
-##   cell  = { w = 12.0, h = 18.0 },
-##   shell = "/bin/bash",
-##   title = "Nebula Terminal v2",
-## })
+## nebula_terminal_main("TermApp", { title = "Nebula Terminal v2" })

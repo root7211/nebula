@@ -2155,6 +2155,9 @@ global ClickableState = @record{
 ## --   shadows     : table[]? — 阴影组件 [{name, type, blur_radius?}]
 ## function nebula_app(app_name, spec)
 ##   spec = spec or {}
+##   -- ★ Phase 4.6-S3: 缓存 spec 供 nebula_terminal_main 等后续 sugar 读取
+##   _nebula_last_app_spec = spec
+##   _nebula_last_app_name = app_name
 ##   -- ★ Phase 4.9.1: app 级 cell 默认值
 ##   local app_cell_w = (spec.cell and spec.cell.w) or 10.0
 ##   local app_cell_h = (spec.cell and spec.cell.h) or 16.0
@@ -2217,8 +2220,12 @@ global ClickableState = @record{
 ##         line_nums  = 250,    -- 250行行号
 ##         status_bar = 200,    -- 单行状态栏
 ##         search_bar = 256,    -- 单行搜索栏
-##         term_grid  = 6000,   -- 200行 × 30列终端网格
+##         term_grid  = -1,     -- 动态计算 (rows * cols)
 ##       })[c.builtin]
+##       if default_dense == -1 then
+##         -- term_grid: 从 rows*cols 动态推导
+##         default_dense = (c.rows or 24) * (c.cols or 80)
+##       end
 ##       if default_dense then
 ##         c.dense = default_dense
 ##         print(("[sugar] nebula_app: builtin='%s' implies dense=%d"):format(c.builtin, default_dense))
@@ -3129,10 +3136,20 @@ global ClickableState = @record{
 -- =============================================================================
 ## function nebula_terminal_main(app_type, opts)
 ##   opts = opts or {}
-##   local grid_cols = (opts.grid and opts.grid.cols) or 80
-##   local grid_rows = (opts.grid and opts.grid.rows) or 24
-##   local cell_w    = (opts.cell and opts.cell.w)    or 12.0
-##   local cell_h    = (opts.cell and opts.cell.h)    or 18.0
+##   -- ★ Phase 4.6-S3: 从 nebula_app 缓存的 spec 中推导缺失参数
+##   local cached = _nebula_last_app_spec or {}
+##   local grid_cols = (opts.grid and opts.grid.cols)
+##     or (cached.components and cached.components[1] and cached.components[1].cols)
+##     or 80
+##   local grid_rows = (opts.grid and opts.grid.rows)
+##     or (cached.components and cached.components[1] and cached.components[1].rows)
+##     or 24
+##   local cell_w    = (opts.cell and opts.cell.w)
+##     or (cached.cell and cached.cell.w)
+##     or 12.0
+##   local cell_h    = (opts.cell and opts.cell.h)
+##     or (cached.cell and cached.cell.h)
+##     or 18.0
 ##   local shell     = opts.shell or "/bin/bash"
 ##   local title     = opts.title or "Nebula Terminal"
 ##   local win_w     = math.floor(grid_cols * cell_w + 20)
