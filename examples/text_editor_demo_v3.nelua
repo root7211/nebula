@@ -1,4 +1,4 @@
--- text_editor_demo_v3.nelua — 22 行终态 (31.6x vs 886行 v1)
+-- text_editor_demo_v3.nelua — 19 行终态 (46.6x vs 886行 v1)
 require "nebula"
 ## cinclude "<stdio.h>" -- snprintf for title update
 ## nebula_highlight_builtins({"nelua", "lua", "c", "python", "json", "markdown"})
@@ -8,12 +8,12 @@ require "nebula"
 ## nebula_app("TextEditorApp", {
 ##   components = {
 ##     { name = "editor",      type = "EditorBgVisual" },
-##     { name = "search_bar",  dense = 256, builtin = "search_bar", flex_basis = 24 },
+##     { name = "search_bar",  builtin = "search_bar", flex_basis = 24 },
 ##     { name = "editor_body", row = true, flex_grow = 1,
 ##       children = { "line_nums", "edit_area" } },
-##     { name = "line_nums",   dense = 250, builtin = "line_nums", flex_basis = 50 },
-##     { name = "edit_area",   dense = 6000, builtin = "edit_area", flex_grow = 1 },
-##     { name = "status_bar",  dense = 200, builtin = "status_bar", flex_basis = 24 },
+##     { name = "line_nums",   builtin = "line_nums", flex_basis = 50 },
+##     { name = "edit_area",   builtin = "edit_area", flex_grow = 1 },
+##     { name = "status_bar",  builtin = "status_bar", flex_basis = 24 },
 ##   },
 ## })
 ## nebula_editor_main("TextEditorApp")

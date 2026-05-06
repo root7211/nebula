@@ -2210,6 +2210,20 @@ global ClickableState = @record{
 ##         c[key] = nil
 ##       end
 ##     end
+##     -- ★ Phase 4.6-S2: builtin 隐含默认 dense 值（用户可显式覆盖）
+##     if c.builtin and not c.dense and not c.type then
+##       local default_dense = ({
+##         edit_area  = 6006,   -- 200行 × 30字符 (含宽字符余量)
+##         line_nums  = 250,    -- 250行行号
+##         status_bar = 200,    -- 单行状态栏
+##         search_bar = 256,    -- 单行搜索栏
+##         term_grid  = 6000,   -- 200行 × 30列终端网格
+##       })[c.builtin]
+##       if default_dense then
+##         c.dense = default_dense
+##         print(("[sugar] nebula_app: builtin='%s' implies dense=%d"):format(c.builtin, default_dense))
+##       end
+##     end
 ##     -- ★ Phase 4.9.1: dense = N — 自动生成 DenseText Visual record + component 注册
 ##     if c.dense and not c.type then
 ##       local dense_type = app_name .. "_" .. c.name .. "_DenseVisual"
