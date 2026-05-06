@@ -211,7 +211,7 @@ if vf then
   check("button_v2 使用 require nebula", content:find('require "nebula"') ~= nil)
   check("button_v2 使用 nebula_visual", content:find('nebula_visual') ~= nil)
   check("button_v2 使用 init_themed", content:find('init_themed') ~= nil)
-  check("button_v2 使用 nebula_frame_begin", content:find('nebula_frame_begin') ~= nil)
+  check("button_v2 使用 nebula_main", content:find('nebula_main') ~= nil)
   check("button_v2 使用 nebula_app", content:find('nebula_app') ~= nil)
   -- 行数检查
   local line_count = 0

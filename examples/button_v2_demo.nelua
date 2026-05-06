@@ -1,32 +1,18 @@
--- =============================================================================
--- button_v2_demo.nelua — Phase 4.5-S3 语法糖极限形态
---
--- 用全部 L2 层 API 重写 button_demo：
---   require "nebula"    → 1 行替代 ~10 行 require
---   nebula_visual       → 自动生成 Visual record
---   init_themed         → 主题默认颜色
---   nebula_frame_begin  → 帧循环整合
---
--- 原 button_demo.nelua: 147 行 → 本文件: ~18 行
--- =============================================================================
+-- button_v2_demo: nebula_main() 验证 (原 147 行 → 17 行, 8.6x)
 require "nebula"
 
 ## nebula_visual("ButtonVisual", { primitives = {"clickable"} })
 ## nebula_app("ButtonApp", { components = {{ name="btn", type="ButtonVisual" }} })
 
-local function main(): int32
-  local renderer: NebulaRenderer
-  local app: ButtonApp
-  if not nebula_init(&renderer, &app, "Button V2 Demo", 800, 600) then return 1 end
-  app.btn:init_themed(Vec2{x=300,y=250}, Vec2{x=200,y=60}, 12.0)
-  local input: NebulaInputState
-  while not nebula_should_close() do
-    local dt = nebula_frame_begin(&input)
-    if app.btn.click.just_clicked then printf("clicked!\n") end
-    nebula_frame_render(&renderer, &app, &input, dt, 0.09, 0.09, 0.10)
-  end
-  app:deinit()
-  nebula_shutdown(&renderer)
-  return 0
-end
-main()
+## local function on_init(app)
+##   return { app .. ".btn:init_themed(Vec2{x=300,y=250}, Vec2{x=200,y=60}, 12.0)" }
+## end
+## local function on_frame(app)
+##   return { "if " .. app .. ".btn.click.just_clicked then printf(\"clicked!\\n\") end" }
+## end
+
+## nebula_main("ButtonApp", {
+##   title = "Button V2 Demo", width = 800, height = 600,
+##   bg_r = 0.09, bg_g = 0.09, bg_b = 0.10,
+##   on_init = on_init, on_frame = on_frame,
+## })
