@@ -35,6 +35,8 @@ dofile("src/derive/app_factory.lua")
 
 local demo_src = io.open("examples/text_editor_demo.nelua"):read("*a")
 local core_src = io.open("src/nebula_core.nelua"):read("*a")
+local builtins_src = io.open("src/nebula_builtins.nelua"):read("*a")
+local apps_src = io.open("src/nebula_apps.nelua"):read("*a")
 local app_src  = io.open("src/app.nelua"):read("*a")
 local theme_src = io.open("src/nebula_theme.nelua"):read("*a")
 local ifact_src = io.open("src/derive/interaction_factory.lua"):read("*a")

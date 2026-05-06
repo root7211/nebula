@@ -30,6 +30,8 @@ dofile("src/derive/highlight_factory.lua")
 
 -- 读取源文件
 local core_src = io.open("src/nebula_core.nelua"):read("*a")
+local builtins_src = io.open("src/nebula_builtins.nelua"):read("*a")
+local apps_src = io.open("src/nebula_apps.nelua"):read("*a")
 local app_src  = io.open("src/app.nelua"):read("*a")
 local demo_v2_src = io.open("examples/text_editor_demo_v2.nelua"):read("*a")
 local demo_v1_src = io.open("examples/text_editor_demo.nelua"):read("*a")
@@ -91,17 +93,17 @@ check("demo_v1 still uses nebula_highlight_rules", demo_v1_src:find("nebula_high
 -- =============================================================================
 print("\n=== Part 2: L2 — Producer Sugar ===")
 
-check("nebula_builtin_status_bar exists in core", core_src:find("function nebula_builtin_status_bar") ~= nil)
-check("nebula_builtin_search_bar exists in core", core_src:find("function nebula_builtin_search_bar") ~= nil)
-check("nebula_builtin_edit_area exists in core", core_src:find("function nebula_builtin_edit_area") ~= nil)
+check("nebula_builtin_status_bar exists in builtins", builtins_src:find("function nebula_builtin_status_bar") ~= nil)
+check("nebula_builtin_search_bar exists in builtins", builtins_src:find("function nebula_builtin_search_bar") ~= nil)
+check("nebula_builtin_edit_area exists in builtins", builtins_src:find("function nebula_builtin_edit_area") ~= nil)
 
 -- 验证生成的函数名模式
-check("status_bar producer naming: nebula_fill_status_bar_<editor>", core_src:find('nebula_fill_status_bar_"') ~= nil or core_src:find("nebula_fill_status_bar_") ~= nil)
-check("search_bar producer naming: nebula_fill_search_bar_<editor>", core_src:find("nebula_fill_search_bar_") ~= nil)
-check("edit_area producer naming: nebula_fill_edit_area_<editor>", core_src:find("nebula_fill_edit_area_") ~= nil)
+check("status_bar producer naming: nebula_fill_status_bar_<editor>", builtins_src:find('nebula_fill_status_bar_"') ~= nil or builtins_src:find("nebula_fill_status_bar_") ~= nil)
+check("search_bar producer naming: nebula_fill_search_bar_<editor>", builtins_src:find("nebula_fill_search_bar_") ~= nil)
+check("edit_area producer naming: nebula_fill_edit_area_<editor>", builtins_src:find("nebula_fill_edit_area_") ~= nil)
 
 -- 验证 Producer 函数签名模式
-check("status_bar has correct signature (app, instances, count, max)", core_src:find("app: auto, instances: %*%[0%]DenseCharInstance, count: %*uint32, max: uint32") ~= nil)
+check("status_bar has correct signature (app, instances, count, max)", builtins_src:find("app: auto, instances: %*%[0%]DenseCharInstance, count: %*uint32, max: uint32") ~= nil)
 
 -- 验证 demo_v2 使用内置 Producer
 check("demo_v2 uses nebula_builtin_status_bar", demo_v2_src:find("nebula_builtin_status_bar") ~= nil)
@@ -109,20 +111,20 @@ check("demo_v2 uses nebula_builtin_search_bar", demo_v2_src:find("nebula_builtin
 check("demo_v2 uses nebula_builtin_edit_area", demo_v2_src:find("nebula_builtin_edit_area") ~= nil)
 
 -- 验证 status_bar producer 包含关键内容
-check("status_bar producer has snprintf", core_src:find("snprintf") ~= nil)
-check("status_bar producer has Ln/Col format", core_src:find("Ln") ~= nil)
-check("status_bar producer references _editor_modified", core_src:find("_editor_modified") ~= nil)
+check("status_bar producer has snprintf", builtins_src:find("snprintf") ~= nil)
+check("status_bar producer has Ln/Col format", builtins_src:find("Ln") ~= nil)
+check("status_bar producer references _editor_modified", builtins_src:find("_editor_modified") ~= nil)
 
 -- 验证 edit_area producer 包含语法高亮/选区/搜索匹配
-check("edit_area producer has nebula_highlight_dispatch", core_src:find("nebula_highlight_dispatch") ~= nil)
-check("edit_area producer has sel_active", core_src:find("sel_active") ~= nil)
-check("edit_area producer has _search_matches", core_src:find("_search_matches") ~= nil)
-check("edit_area producer has nebula_theme_bg_cursor_line", core_src:find("nebula_theme_bg_cursor_line") ~= nil)
+check("edit_area producer has nebula_highlight_dispatch", builtins_src:find("nebula_highlight_dispatch") ~= nil)
+check("edit_area producer has sel_active", builtins_src:find("sel_active") ~= nil)
+check("edit_area producer has _search_matches", builtins_src:find("_search_matches") ~= nil)
+check("edit_area producer has nebula_theme_bg_cursor_line", builtins_src:find("nebula_theme_bg_cursor_line") ~= nil)
 
 -- 验证 search_bar producer 包含搜索/替换 UI
-check("search_bar producer has _search_active", core_src:find("_search_active") ~= nil)
-check("search_bar producer has _search_replace", core_src:find("_search_replace") ~= nil)
-check("search_bar producer has fg_label", core_src:find("fg_label") ~= nil)
+check("search_bar producer has _search_active", builtins_src:find("_search_active") ~= nil)
+check("search_bar producer has _search_replace", builtins_src:find("_search_replace") ~= nil)
+check("search_bar producer has fg_label", builtins_src:find("fg_label") ~= nil)
 
 -- =============================================================================
 -- Part 3: L3 — Search Interaction (Framework Built-in)
@@ -173,18 +175,18 @@ check("demo_v2 does NOT define fill_search_bar", demo_v2_src:find("function fill
 -- =============================================================================
 print("\n=== Part 5: L5 — Main Loop Sugar ===")
 
-check("nebula_editor_main function exists in core", core_src:find("function nebula_editor_main") ~= nil)
-check("editor_main generates main() function", core_src:find("local function main") ~= nil)
-check("editor_main calls nebula_init", core_src:find("nebula_init") ~= nil)
-check("editor_main calls init_themed", core_src:find("init_themed") ~= nil)
-check("editor_main calls nebula_frame_render", core_src:find("nebula_frame_render") ~= nil)
-check("editor_main calls nebula_shutdown", core_src:find("nebula_shutdown") ~= nil)
-check("editor_main handles Ctrl+S save", core_src:find("NebulaKey.Save") ~= nil)
-check("editor_main handles Ctrl+F/H search", core_src:find("NebulaKey.Find") ~= nil and core_src:find("NebulaKey.Replace") ~= nil)
-check("editor_main handles search keyboard routing", core_src:find("nebula_search_scan") ~= nil)
-check("editor_main handles undo tracking", core_src:find("undo_stack") ~= nil)
-check("editor_main calls nebula_editor_update_title", core_src:find("nebula_editor_update_title") ~= nil)
-check("editor_main handles file loading", core_src:find("nebula_highlight_detect_ext") ~= nil)
+check("nebula_editor_main function exists in apps", apps_src:find("function nebula_editor_main") ~= nil)
+check("editor_main generates main() function", apps_src:find("local function main") ~= nil)
+check("editor_main calls nebula_init", apps_src:find("nebula_init") ~= nil)
+check("editor_main calls init_themed", apps_src:find("init_themed") ~= nil)
+check("editor_main calls nebula_frame_render", apps_src:find("nebula_frame_render") ~= nil)
+check("editor_main calls nebula_shutdown", apps_src:find("nebula_shutdown") ~= nil)
+check("editor_main handles Ctrl+S save", apps_src:find("NebulaKey.Save") ~= nil)
+check("editor_main handles Ctrl+F/H search", apps_src:find("NebulaKey.Find") ~= nil and apps_src:find("NebulaKey.Replace") ~= nil)
+check("editor_main handles search keyboard routing", apps_src:find("nebula_search_scan") ~= nil)
+check("editor_main handles undo tracking", apps_src:find("undo_stack") ~= nil)
+check("editor_main calls nebula_editor_update_title", apps_src:find("nebula_editor_update_title") ~= nil)
+check("editor_main handles file loading", apps_src:find("nebula_highlight_detect_ext") ~= nil)
 
 -- demo_v2 使用 nebula_editor_main
 check("demo_v2 uses nebula_editor_main", demo_v2_src:find("nebula_editor_main") ~= nil)
@@ -228,17 +230,17 @@ print("\n=== Part 7: Axiom Compliance ===")
 
 -- 公理 A: 所有 sugar 在编译期展开
 check("L1 pack: compile-time function (## prefix)", core_src:find("nebula_highlight_pack") == nil or true)  -- L1 is in highlight_factory.lua
-check("L2 status_bar: compile-time function", core_src:find("## function nebula_builtin_status_bar") ~= nil or core_src:find("function nebula_builtin_status_bar") ~= nil)
-check("L2 search_bar: compile-time function", core_src:find("function nebula_builtin_search_bar") ~= nil)
-check("L2 edit_area: compile-time function", core_src:find("function nebula_builtin_edit_area") ~= nil)
-check("L5 editor_main: compile-time function", core_src:find("function nebula_editor_main") ~= nil)
+check("L2 status_bar: compile-time function", builtins_src:find("## function nebula_builtin_status_bar") ~= nil or builtins_src:find("function nebula_builtin_status_bar") ~= nil)
+check("L2 search_bar: compile-time function", builtins_src:find("function nebula_builtin_search_bar") ~= nil)
+check("L2 edit_area: compile-time function", builtins_src:find("function nebula_builtin_edit_area") ~= nil)
+check("L5 editor_main: compile-time function", apps_src:find("function nebula_editor_main") ~= nil)
 
 -- 公理 B: 零堆分配
 check("search state uses fixed arrays [256]", app_src:find("%[256%]uint8") ~= nil)
 check("match result uses fixed array [512]", app_src:find("%[512%]MatchPos") ~= nil)
 
 -- 公理 C: GPU 直映
-check("edit_area uses nebula_dense_grid_fill_instance", core_src:find("nebula_dense_grid_fill_instance") ~= nil)
+check("edit_area uses nebula_dense_grid_fill_instance", builtins_src:find("nebula_dense_grid_fill_instance") ~= nil)
 
 -- =============================================================================
 -- Part 8: 压缩比验证

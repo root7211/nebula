@@ -211,8 +211,9 @@ check("nebula_editor_visual or nebula_visual macro exists in nebula_core",
 check("demo uses nebula_editor_visual or nebula_visual (sugar)",
   demo_src:find("nebula_editor_visual") ~= nil or demo_src:find("nebula_visual") ~= nil)
 
-check("nebula_builtin_line_nums macro exists in nebula_core",
-  core_src:find("function nebula_builtin_line_nums") ~= nil)
+local builtins_src = read_file("src/nebula_builtins.nelua")
+check("nebula_builtin_line_nums macro exists in nebula_builtins",
+  builtins_src:find("function nebula_builtin_line_nums") ~= nil)
 
 check("demo uses nebula_builtin_line_nums (sugar)",
   demo_src:find("nebula_builtin_line_nums") ~= nil)
