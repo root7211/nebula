@@ -2254,6 +2254,11 @@ global ClickableState = @record{
 ##         opts.cols = opts.cols or (spec.layout and spec.layout.width and math.floor(spec.layout.width / opts.cell_w) or 128)
 ##         nebula_builtin_edit_area(edname, opts)
 ##         c.producer = "nebula_fill_edit_area_" .. edname
+##       elseif bname == "term_grid" then
+##         opts.rows = opts.rows or (opts.grid and opts.grid.rows) or (spec.layout.height and math.floor(spec.layout.height / opts.cell_h) or 24)
+##         opts.cols = opts.cols or (opts.grid and opts.grid.cols) or (spec.layout and spec.layout.width and math.floor(spec.layout.width / opts.cell_w) or 80)
+##         nebula_builtin_term_grid(c.name, opts)
+##         c.producer = "nebula_fill_term_grid_" .. c.name
 ##       else
 ##         assert(false, ("unknown builtin '%s'"):format(bname))
 ##       end
@@ -2910,6 +2915,87 @@ global ClickableState = @record{
 ##   end
 ##   print(("[sugar] nebula_editor_main: %s (editor=%s, title=%s)"):format(
 ##     app_type, editor_name, title))
+## end
+
+-- =============================================================================
+-- ★ Phase 4.X-T2: nebula_builtin_term_grid(name, opts)
+--
+-- 生成终端网格内置 Producer 函数：TermBuffer → DenseCharInstance + 光标反色块。
+-- 读取全局变量 _nebula_term_buf / _nebula_term_cursor_visible。
+--
+-- Usage:
+--   ## nebula_builtin_term_grid("grid", { cell_w=12.0, cell_h=18.0, rows=24, cols=80 })
+--   -- 生成: global function nebula_fill_term_grid_grid(app, instances, count, max)
+-- =============================================================================
+## function nebula_builtin_term_grid(comp_name, opts)
+##   opts = opts or {}
+##   local cell_w = opts.cell_w or 12.0
+##   local cell_h = opts.cell_h or 18.0
+##   local rows   = opts.rows   or 24
+##   local cols   = opts.cols   or 80
+##   local fname  = "nebula_fill_term_grid_" .. comp_name
+##
+##   local src = ([[global function %s(
+##   app: auto, instances: *[0]DenseCharInstance, count: *uint32, max: uint32
+## ): void
+##   local tb = _nebula_term_buf
+##   if tb == nilptr then $count = 0; return end
+##   local origin_x: float32 = app.dense_layout_%s_x
+##   local origin_y: float32 = app.dense_layout_%s_y
+##   local cell_w: float32 = %.1f
+##   local cell_h: float32 = %.1f
+##   local GRID_ROWS: int32 = %d
+##   local GRID_COLS: int32 = %d
+##   local idx: uint32 = 0
+##   for row = 0, < GRID_ROWS do
+##     for col = 0, < GRID_COLS do
+##       if idx >= max then break end
+##       local cell = tb:get_cell(row, col)
+##       nebula_dense_grid_fill_instance(
+##         &instances[idx],
+##         (@uint32)(row), (@uint32)(col),
+##         cell.codepoint,
+##         origin_x, origin_y,
+##         cell_w, cell_h,
+##         cell.fg, cell.bg)
+##       idx = idx + 1
+##     end
+##   end
+##   -- 光标渲染（反色块）
+##   if _nebula_term_cursor_visible and
+##      tb.cursor_row >= 0 and tb.cursor_row < GRID_ROWS and
+##      tb.cursor_col >= 0 and tb.cursor_col < GRID_COLS then
+##     local cr = tb.cursor_row
+##     local cc = tb.cursor_col
+##     local cell = tb:get_cell(cr, cc)
+##     local cursor_fg = cell.bg
+##     local cursor_bg = cell.fg
+##     if cursor_fg == cursor_bg then
+##       cursor_fg = TERM_DEFAULT_BG
+##       cursor_bg = TERM_DEFAULT_FG
+##     end
+##     local cursor_idx = (@uint32)(cr) * (@uint32)(GRID_COLS) + (@uint32)(cc)
+##     if cursor_idx < idx then
+##       nebula_dense_grid_fill_instance(
+##         &instances[cursor_idx],
+##         (@uint32)(cr), (@uint32)(cc),
+##         cell.codepoint,
+##         origin_x, origin_y,
+##         cell_w, cell_h,
+##         cursor_fg, cursor_bg)
+##     end
+##   end
+##   $count = idx
+## end]]):format(fname,
+##     comp_name, comp_name,
+##     cell_w, cell_h, rows, cols)
+##
+##   local ast = aster.parse(src, "<nebula_builtin_term_grid:" .. comp_name .. ">")
+##   for _, stat in ipairs(ast) do
+##     inject_statement(stat)
+##   end
+##   print(("[sugar] nebula_builtin_term_grid: %s (grid=%dx%d, cell=%.0fx%.0f)"):format(
+##     fname, cols, rows, cell_w, cell_h))
 ## end
 
 -- =============================================================================
