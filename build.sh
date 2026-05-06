@@ -47,7 +47,7 @@ done
 
 # 验证 Demo 目标
 case "$DEMO_TARGET" in
-  button_demo|layout_demo|login_demo|form_demo|dynamic_list_demo|shadow_demo|text_demo|slider_demo|scrollable_demo|dropdown_demo|multiline_editable_demo|slug_bench|cjk_text_demo|dense_text_demo|term_demo|cjk_editor_demo|dense_editor_demo|editor_with_lines_demo|button_sugar_demo|multiline_sugar_demo|json_viewer_demo|highlight_editor_demo|highlight_sugar_demo|text_editor_demo|button_v2_demo|minimal_editor_demo|text_editor_demo_v2|text_editor_demo_v3)
+  button_demo|layout_demo|login_demo|form_demo|dynamic_list_demo|shadow_demo|text_demo|slider_demo|scrollable_demo|dropdown_demo|multiline_editable_demo|slug_bench|cjk_text_demo|dense_text_demo|term_demo|term_demo_v2|cjk_editor_demo|dense_editor_demo|editor_with_lines_demo|button_sugar_demo|multiline_sugar_demo|json_viewer_demo|highlight_editor_demo|highlight_sugar_demo|text_editor_demo|button_v2_demo|minimal_editor_demo|text_editor_demo_v2|text_editor_demo_v3)
     ;;
   *)
     echo "[nebula] Error: unknown demo target '$DEMO_TARGET'"
@@ -69,8 +69,8 @@ if [ "$NEBULA_TARGET" == "linux" ]; then
   NELUA_FLAGS="$NELUA_FLAGS -D NEBULA_LINUX_DISPLAY=$NEBULA_DISPLAY"
   CFLAGS="-I$VENDOR/include"
   LDFLAGS="-L$VENDOR/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,$VENDOR/lib"
-  # term_demo 需要 libutil (forkpty) + examples/term 搜索路径
-  if [ "$DEMO_TARGET" == "term_demo" ]; then
+  # term_demo / term_demo_v2 需要 libutil (forkpty) + examples/term 搜索路径
+  if [ "$DEMO_TARGET" == "term_demo" ] || [ "$DEMO_TARGET" == "term_demo_v2" ]; then
     LDFLAGS="$LDFLAGS -lutil"
     NELUA_FLAGS="$NELUA_FLAGS -L $SCRIPT_DIR/examples/term"
   fi

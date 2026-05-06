@@ -1,0 +1,99 @@
+-- =============================================================================
+-- term_demo_v2.nelua — Terminal Emulator v2 (Sugar 化)
+--
+-- 用 Nebula L2 sugar 重写 term_demo.nelua (489 行 → ~55 行, 8.9x 压缩)
+-- 验证 sugar 体系对非编辑器应用的通用性。
+--
+-- 公理合规：
+--   A: Visual 类型 + 管线 + 主循环均在 S1 编译期推导
+--   B: L0 管线 + PTY fd, L2 帧级实例数组
+--   C: DenseText 管线通过 nebula_app 声明，确定性映射
+-- =============================================================================
+
+require "nebula"
+require "pty_bindings"
+require "ansi_parser"
+require "term_buffer"
+
+-- =============================================================================
+-- 终端配置
+-- =============================================================================
+local TERM_GRID_COLS <comptime> = 80
+local TERM_GRID_ROWS <comptime> = 24
+local TERM_CELL_W: float32 = 12.0
+local TERM_CELL_H: float32 = 18.0
+local TERM_ORIGIN_X: float32 = 4.0
+local TERM_ORIGIN_Y: float32 = 4.0
+
+-- =============================================================================
+-- 自定义 Producer: TermBuffer → DenseCharInstance 实例数组
+-- 每帧由框架自动调用，填充全屏字符网格 + 光标反色块
+-- =============================================================================
+global function nebula_fill_term_grid(
+  app: auto, instances: *[0]DenseCharInstance, count: *uint32, max: uint32
+): void
+  local tb = _nebula_term_buf
+  if tb == nilptr then $count = 0; return end
+  local idx: uint32 = 0
+  for row = 0, < TERM_GRID_ROWS do
+    for col = 0, < TERM_GRID_COLS do
+      if idx >= max then break end
+      local cell = tb:get_cell(row, col)
+      nebula_dense_grid_fill_instance(
+        &instances[idx],
+        (@uint32)(row), (@uint32)(col),
+        cell.codepoint,
+        TERM_ORIGIN_X, TERM_ORIGIN_Y,
+        TERM_CELL_W, TERM_CELL_H,
+        cell.fg, cell.bg)
+      idx = idx + 1
+    end
+  end
+  -- 光标渲染（反色块）
+  if _nebula_term_cursor_visible and
+     tb.cursor_row >= 0 and tb.cursor_row < TERM_GRID_ROWS and
+     tb.cursor_col >= 0 and tb.cursor_col < TERM_GRID_COLS then
+    local cr = tb.cursor_row
+    local cc = tb.cursor_col
+    local cell = tb:get_cell(cr, cc)
+    local cursor_fg = cell.bg
+    local cursor_bg = cell.fg
+    if cursor_fg == cursor_bg then
+      cursor_fg = TERM_DEFAULT_BG
+      cursor_bg = TERM_DEFAULT_FG
+    end
+    local cursor_idx = (@uint32)(cr) * TERM_GRID_COLS + (@uint32)(cc)
+    if cursor_idx < idx then
+      nebula_dense_grid_fill_instance(
+        &instances[cursor_idx],
+        (@uint32)(cr), (@uint32)(cc),
+        cell.codepoint,
+        TERM_ORIGIN_X, TERM_ORIGIN_Y,
+        TERM_CELL_W, TERM_CELL_H,
+        cursor_fg, cursor_bg)
+    end
+  end
+  $count = idx
+end
+
+-- =============================================================================
+-- App 声明（1 个全屏 DenseText 组件）
+-- =============================================================================
+## nebula_app("TermApp", {
+##   cell = { w = 12.0, h = 18.0 },
+##   layout = { direction = "column", width = 1220, height = 440 },
+##   components = {
+##     { name = "grid", dense = 2048, producer = "nebula_fill_term_grid",
+##       flex_grow = 1 },
+##   },
+## })
+
+-- =============================================================================
+-- 终端主循环（PTY + ANSI + 光标闪烁 + 自定义键盘）
+-- =============================================================================
+## nebula_terminal_main("TermApp", {
+##   grid  = { cols = 80, rows = 24 },
+##   cell  = { w = 12.0, h = 18.0 },
+##   shell = "/bin/bash",
+##   title = "Nebula Terminal v2",
+## })
