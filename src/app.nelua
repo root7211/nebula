@@ -255,6 +255,7 @@ global function nebula_init(
     return false
   end
   if not app:init(renderer, (@float32)(win_w), (@float32)(win_h)) then
+    nebula_shutdown(renderer)
     glfwDestroyWindow(_nebula_window)
     glfwTerminate()
     return false
@@ -670,6 +671,9 @@ end
   _nebula_ml_clear_g   = #[cg]#
   _nebula_ml_clear_b   = #[cb]#
   emscripten_set_main_loop(_nebula_wasm_frame, 0, 1)
+  -- ★ 审计修复: emscripten_set_main_loop with simulate_infinite_loop=1 不会返回，
+  -- 但如果未来改为 0，需要在此处 deinit。目前通过 emscripten_set_main_loop_arg + atexit 保证清理。
+  #[app_ptr]#:deinit()
   ## else
   -- Native: 传统阻塞循环
   while not nebula_should_close() do

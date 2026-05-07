@@ -650,6 +650,8 @@ global function nebula_upload_texture(
   $out_view = wgpuTextureCreateView($out_texture, &view_desc)
   if $out_view == nilptr then
     printf("wgpu: failed to create upload texture view (%s)\n", label)
+    wgpuTextureRelease($out_texture)
+    $out_texture = nilptr
     return false
   end
 

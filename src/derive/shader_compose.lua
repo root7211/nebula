@@ -557,8 +557,8 @@ fn fs_main(in: SlugVertexOutput) -> @location(0) vec4<f32> {
   let height = glyph_max.y - glyph_min.y;
   let band_scale_x = f32(v_band_count) / max(width, 0.0001);
   let band_scale_y = f32(h_band_count) / max(height, 0.0001);
-  let band_ix = clamp(i32((render_coord.x - glyph_min.x) * band_scale_x), 0, v_band_count - 1);
-  let band_iy = clamp(i32((render_coord.y - glyph_min.y) * band_scale_y), 0, h_band_count - 1);
+  let band_ix = clamp(i32((render_coord.x - glyph_min.x) * band_scale_x), 0, max(v_band_count - 1, 0));
+  let band_iy = clamp(i32((render_coord.y - glyph_min.y) * band_scale_y), 0, max(h_band_count - 1, 0));
 
   var xcov: f32 = 0.0;
   var xwgt: f32 = 0.0;

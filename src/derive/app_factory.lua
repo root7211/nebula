@@ -824,6 +824,7 @@ local function gen_app_update(app_name, reg)
           txt.name, txt.bound_to, txt.name))
         if txt.mask_password then
           emit(("      local _%s_len = self.%s:get_text_len()"):format(txt.name, txt.bound_to))
+          emit(("      if _%s_len > 255 then _%s_len = 255 end"):format(txt.name, txt.name))
           emit(("      local _%s_mask: [256]uint8"):format(txt.name))
           emit(("      local _%s_mi: uint16 = 0"):format(txt.name))
           emit(("      while _%s_mi < _%s_len do"):format(txt.name, txt.name))
