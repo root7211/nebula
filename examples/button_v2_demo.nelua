@@ -22,6 +22,28 @@ require "nebula"
 -- =============================================================================
 -- 主程序
 -- =============================================================================
+
+-- ★ WASM: 全局变量必须在顶层作用域声明（Nelua 限制）
+## if NEBULA_TARGET == 'wasm' then
+global _wasm_demo_renderer: *NebulaRenderer = nilptr
+global _wasm_demo_app: *ButtonApp = nilptr
+global _wasm_demo_input: NebulaInputState
+global _wasm_demo_prev_time: float64 = 0.0
+
+global function _wasm_demo_frame(): void
+  glfwPollEvents()
+  local now = glfwGetTime()
+  local dt = (@float32)(now - _wasm_demo_prev_time)
+  _wasm_demo_prev_time = now
+  nebula_collect_input(_nebula_window, &_wasm_demo_input, dt)
+  -- 帧逻辑：响应按钮点击
+  if _wasm_demo_app.btn.click.just_clicked then
+    printf("nebula: button clicked!\n")
+  end
+  nebula_frame_render(_wasm_demo_renderer, _wasm_demo_app, &_wasm_demo_input, dt, 0.09, 0.09, 0.10)
+end
+## end
+
 local function main(): int32
   local renderer: NebulaRenderer
   local app: ButtonApp
@@ -38,33 +60,15 @@ local function main(): int32
     12.0                             -- 圆角半径
   )
 
-  -- 主循环：显式可控，用户可在此添加任意帧逻辑
-  local input: NebulaInputState
   ## if NEBULA_TARGET == 'wasm' then
-  -- Web: 生成类型化帧回调，交出控制权给浏览器事件循环
-  global _wasm_demo_renderer: *NebulaRenderer = nilptr
-  global _wasm_demo_app: *ButtonApp = nilptr
-  global _wasm_demo_input: *NebulaInputState = nilptr
-  global _wasm_demo_prev_time: float64 = 0.0
+  -- Web: 设置全局状态，注册帧回调，交出控制权
   _wasm_demo_renderer = &renderer
   _wasm_demo_app = &app
-  _wasm_demo_input = &input
   _wasm_demo_prev_time = glfwGetTime()
-  global function _wasm_demo_frame(): void
-    glfwPollEvents()
-    local now = glfwGetTime()
-    local dt = (@float32)(now - _wasm_demo_prev_time)
-    _wasm_demo_prev_time = now
-    nebula_collect_input(_nebula_window, _wasm_demo_input, dt)
-    -- 帧逻辑：响应按钮点击
-    if _wasm_demo_app.btn.click.just_clicked then
-      printf("nebula: button clicked!\n")
-    end
-    nebula_frame_render(_wasm_demo_renderer, _wasm_demo_app, _wasm_demo_input, dt, 0.09, 0.09, 0.10)
-  end
   emscripten_set_main_loop(_wasm_demo_frame, 0, 1)
   ## else
   -- Native: 传统阻塞循环
+  local input: NebulaInputState
   while not nebula_should_close() do
     local dt = nebula_frame_begin(&input)
 
