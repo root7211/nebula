@@ -4,13 +4,18 @@
 -- 只绑定 Phase 0 所需的最小 API 子集
 -- =============================================================================
 
--- 链接 wgpu-native 动态库
+-- 链接与头文件：根据目标平台条件编译
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native: 链接 wgpu-native 动态库，引入 wgpu-native 头文件
 ## linklib "wgpu_native"
 ## cdefine "WGPU_SKIP_PROCS"
-
--- 引入 wgpu-native 头文件
 ## cinclude "<webgpu/webgpu.h>"
 ## cinclude "<webgpu/wgpu.h>"
+## else
+-- WASM: Emscripten 通过 -sUSE_WEBGPU=1 提供标准 WebGPU C bindings
+-- 无需 linklib，无需 wgpu.h（wgpu-native 扩展不存在于浏览器端）
+## cinclude "<webgpu/webgpu.h>"
+## end
 
 -- =============================================================================
 -- 基础类型绑定（Opaque Handles）
@@ -129,6 +134,7 @@ global WGPUSType_SurfaceSourceWindowsHWND          <comptime> = (@WGPUSType)(0x0
 global WGPUSType_SurfaceSourceXlibWindow           <comptime> = (@WGPUSType)(0x00000006)
 global WGPUSType_SurfaceSourceWaylandSurface       <comptime> = (@WGPUSType)(0x00000007)
 global WGPUSType_SurfaceSourceCanvasHTMLSelector   <comptime> = (@WGPUSType)(0x0000000F)
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPUSType_InstanceExtras                    <comptime> = (@WGPUSType)(0x00030006)
 
 -- wgpu-native 扩展：后端选择枚举
@@ -139,6 +145,7 @@ global WGPUInstanceBackend_Vulkan <comptime> = (@WGPUInstanceBackend)(0x00000001
 global WGPUInstanceBackend_GL     <comptime> = (@WGPUInstanceBackend)(0x00000002)
 global WGPUInstanceBackend_Metal  <comptime> = (@WGPUInstanceBackend)(0x00000004)
 global WGPUInstanceBackend_Dx12   <comptime> = (@WGPUInstanceBackend)(0x00000008)
+## end
 
 global WGPUSurfaceGetCurrentTextureStatus = @uint32
 global WGPUSurfaceGetCurrentTextureStatus_Success           <comptime> = (@WGPUSurfaceGetCurrentTextureStatus)(0x00000000)
@@ -218,8 +225,8 @@ global WGPUInstanceDescriptor <cimport, nodecl> = @record{
   requiredLimits:       pointer,
 }
 
--- wgpu-native v29 扩展：实例附加信息
--- 包含后端选择、DX12 配置、显示句柄等 v29 新增字段
+-- wgpu-native v29 扩展：实例附加信息（仅 Native 端使用）
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPUInstanceExtras <cimport, nodecl> = @record{
   chain:              WGPUChainedStruct,
   backends:           WGPUInstanceBackend,
@@ -232,6 +239,7 @@ global WGPUInstanceExtras <cimport, nodecl> = @record{
   budgetForDeviceCreation: pointer,
   budgetForDeviceLoss:     pointer,
 }
+## end
 
 global WGPURequestAdapterOptions <cimport, nodecl> = @record{
   nextInChain:          pointer,
@@ -407,32 +415,33 @@ global WGPURenderPipelineDescriptor <cimport, nodecl> = @record{
 --   https://webgpu-native.github.io/webgpu-headers/group__Enumerations.html
 -- =============================================================================
 
--- Surface 来源（Linux X11）
+-- Surface 来源（平台条件编译）
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native 平台的 Surface 来源
 global WGPUSurfaceSourceXlibWindow <cimport, nodecl> = @record{
   chain:   WGPUChainedStruct,
   display: pointer,
   window:  uint64,
 }
 
--- ★ Phase 4.2.1: Surface 来源（Linux Wayland）
 global WGPUSurfaceSourceWaylandSurface <cimport, nodecl> = @record{
   chain:   WGPUChainedStruct,
   display: pointer,
   surface: pointer,
 }
 
--- ★ Phase 4.2.1: Surface 来源（Windows HWND）
 global WGPUSurfaceSourceWindowsHWND <cimport, nodecl> = @record{
   chain:     WGPUChainedStruct,
   hinstance: pointer,
   hwnd:      pointer,
 }
-
--- ★ Phase 4.2.1: Surface 来源（Web Canvas HTML Selector）
+## else
+-- Web (WASM) 的 Surface 来源
 global WGPUSurfaceSourceCanvasHTMLSelector <cimport, nodecl> = @record{
   chain:    WGPUChainedStruct,
   selector: cstring,
 }
+## end
 
 global WGPUSurfaceDescriptor <cimport, nodecl> = @record{
   nextInChain: *WGPUChainedStruct,
