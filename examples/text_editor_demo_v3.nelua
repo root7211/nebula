@@ -1,10 +1,39 @@
--- text_editor_demo_v3.nelua — 19 行终态 (46.6x vs 886行 v1)
+-- =============================================================================
+-- text_editor_demo_v3.nelua
+-- Nebula GUI Compiler — Phase 4.9.1 推荐写法
+--
+-- 使用最新 sugar API：
+--   · require "nebula" 统一入口
+--   · nebula_highlight_builtins() 一键注册多语言高亮
+--   · nebula_visual() + nebula_app() 声明式组件编排
+--   · builtin Producer（search_bar / line_nums / edit_area / status_bar）
+--   · nebula_init / nebula_should_close / nebula_frame_begin / nebula_shutdown
+--     保留显式主循环
+--
+-- 演示能力：完整文本编辑器
+--   · 多语言语法高亮（nelua/lua/c/python/json/markdown）
+--   · 搜索/替换（Ctrl+F / Ctrl+H）
+--   · 行号 + 状态栏
+--   · 选区 + 剪贴板（Ctrl+C/V/X/A）
+--   · Undo/Redo（Ctrl+Z/Y）
+--   · File I/O（Ctrl+S 保存）
+--   · 自动缩进
+-- =============================================================================
 require "nebula"
-## cinclude "<stdio.h>" -- snprintf for title update
+## cinclude "<stdio.h>"  -- snprintf for title update
+
+-- ★ 注册多语言高亮规则（编译期）
 ## nebula_highlight_builtins({"nelua", "lua", "c", "python", "json", "markdown"})
+
+-- ★ 声明编辑器 Visual（multiline_editable 原语）
 ## nebula_visual("EditorBgVisual", {
-##   primitives = {"multiline_editable"}, max_text_len = 256, max_lines = 256, component_id = 1,
+##   primitives   = {"multiline_editable"},
+##   max_text_len = 256,
+##   max_lines    = 256,
+##   component_id = 1,
 ## })
+
+-- ★ App 编排：搜索栏 + 行号/编辑区（横向 row）+ 状态栏
 ## nebula_app("TextEditorApp", {
 ##   components = {
 ##     { name = "editor",      type = "EditorBgVisual" },
@@ -16,4 +45,35 @@ require "nebula"
 ##     { name = "status_bar",  builtin = "status_bar", flex_basis = 24 },
 ##   },
 ## })
-## nebula_editor_main("TextEditorApp")
+
+-- =============================================================================
+-- 主程序
+-- =============================================================================
+local function main(): int32
+  local renderer: NebulaRenderer
+  local app: TextEditorApp
+
+  if not nebula_init(&renderer, &app, "Nebula — Text Editor", 900, 640) then
+    return 1
+  end
+
+  -- 如果命令行指定了文件，加载它
+  -- app.editor:load_file("example.nelua")
+
+  local input: NebulaInputState
+  while not nebula_should_close() do
+    local dt = nebula_frame_begin(&input)
+
+    -- 帧逻辑可在此扩展（例：响应快捷键、更新状态等）
+    -- app.editor 提供完整的编辑器状态（cursor_row/col, line_count 等）
+
+    -- 渲染
+    nebula_frame_render(&renderer, &app, &input, dt, 0.09, 0.09, 0.10)
+  end
+
+  app:deinit()
+  nebula_shutdown(&renderer)
+  return 0
+end
+
+main()

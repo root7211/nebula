@@ -1,18 +1,61 @@
--- button_v2_demo: nebula_main() 验证 (原 147 行 → 17 行, 8.6x)
+-- =============================================================================
+-- button_v2_demo.nelua
+-- Nebula GUI Compiler — Phase 4.5-S3 推荐写法
+--
+-- 使用最新 sugar API：
+--   · require "nebula" 统一入口
+--   · nebula_visual() 从 primitives 自动推导 record 字段 + states + transitions
+--   · nebula_app() 一站式 App 编排
+--   · nebula_init / nebula_should_close / nebula_frame_begin / nebula_shutdown
+--     消除 GLFW/WGPU 样板，但主循环仍在用户手中
+--
+-- 演示能力：单按钮交互（hover + press 状态动画 + init_themed 主题色）
+-- =============================================================================
 require "nebula"
 
+-- ★ 声明 ButtonVisual：从 primitives 自动推导 states/transitions/record 字段
 ## nebula_visual("ButtonVisual", { primitives = {"clickable"} })
+
+-- ★ 一站式 App 编排
 ## nebula_app("ButtonApp", { components = {{ name="btn", type="ButtonVisual" }} })
 
-## local function on_init(app)
-##   return { app .. ".btn:init_themed(Vec2{x=300,y=250}, Vec2{x=200,y=60}, 12.0)" }
-## end
-## local function on_frame(app)
-##   return { "if " .. app .. ".btn.click.just_clicked then printf(\"clicked!\\n\") end" }
-## end
+-- =============================================================================
+-- 主程序
+-- =============================================================================
+local function main(): int32
+  local renderer: NebulaRenderer
+  local app: ButtonApp
 
-## nebula_main("ButtonApp", {
-##   title = "Button V2 Demo", width = 800, height = 600,
-##   bg_r = 0.09, bg_g = 0.09, bg_b = 0.10,
-##   on_init = on_init, on_frame = on_frame,
-## })
+  -- 初始化窗口 + wgpu + app（一行替代 ~20 行 GLFW/WGPU 样板）
+  if not nebula_init(&renderer, &app, "Nebula — Button Demo", 800, 600) then
+    return 1
+  end
+
+  -- 初始化按钮：使用 init_themed 自动填充暗色主题的三态颜色
+  app.btn:init_themed(
+    Vec2{ x = 300.0, y = 250.0 },  -- 位置
+    Vec2{ x = 200.0, y = 60.0 },   -- 尺寸
+    12.0                             -- 圆角半径
+  )
+
+  -- 主循环：显式可控，用户可在此添加任意帧逻辑
+  local input: NebulaInputState
+  while not nebula_should_close() do
+    local dt = nebula_frame_begin(&input)
+
+    -- 帧逻辑：响应按钮点击
+    if app.btn.click.just_clicked then
+      printf("nebula: button clicked!\n")
+    end
+
+    -- 渲染
+    nebula_frame_render(&renderer, &app, &input, dt, 0.09, 0.09, 0.10)
+  end
+
+  -- 清理
+  app:deinit()
+  nebula_shutdown(&renderer)
+  return 0
+end
+
+main()
