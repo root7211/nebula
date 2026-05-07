@@ -14,12 +14,14 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era II 完成 | 77/77 回归测试全绿 | Phase 4.6 已完成（三端 demo 统一 sugar） | Term v2: 489→16 行 (30.6x)（2026-05-06）**
+**Era III | Phase 5.0 Slot Layout 自动定位 | 19/19 新增测试全绿 | wgpu-native v29 绑定修正（2026-05-07）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
+| **Phase 5.0 Slot Layout** | `nebula_app_register_slot` 新增 `layout` 声明（direction/gap/padding/item_size/scroll_var）；`app_factory.lua` 编译期生成单态化定位循环（常量内联，零运行时分支）；Producer 不再手算坐标——框架自动覆写 pos/size；`dynamic_list_v2_demo.nelua` 验证通过；19/19 冒烟测试全绿 | — |
+| **wgpu-native v29 绑定修正** | 恢复 `WGPUBindGroupLayoutEntry.bindingArraySize` + `WGPUVertexAttribute/WGPUVertexBufferLayout.nextInChain`；`WGPUShaderStage` uint32→uint64；所有 demo 编译通过 | — |
 | **Era III 模块化拆分** | 5 个 builtin Producer 工厂 (`nebula_builtin_*`) 从 `nebula_core` 提取到 `nebula_builtins.nelua`；`nebula_editor_main` / `nebula_terminal_main` 提取到 `nebula_apps.nelua`；内置 `_nebula_builtins` 编译期注册表替代 if-else 分发链；`nebula_core` 净减少 930 行 → 497 行；24/24 demo 编译通过 | `634a362` |
 | **Phase 4.9.1 终态收尾** | 7 项 sugar 改进全落地——`dense=N` 自动生成 DenseText + `builtin` 自动绑定 Producer + layout 字段提升 + children/row 简写 + cell 默认值 + `auto_editor_name` 推断 + editor_main 默认参数 + `text_editor_demo_v3.nelua`（19 行，原 886 行压缩 46.6x）+ 77/77 回归全绿 | `77973d0` |
 | **Phase 4.6 语法统一化** | `nebula_main()` 泛用生成器（S1）+ builtin 隐含默认 dense（S2）+ nebula_app spec 缓存消除参数重复（S3）+ term_demo_v2: 489→16 行 (30.6x) + button_v2_demo: 147→18 行 (8.2x) + 77/77 回归全绿 | `849cec7` |

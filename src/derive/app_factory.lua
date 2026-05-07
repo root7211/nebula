@@ -240,6 +240,8 @@ function nebula_app_register_slot(name, visual_type, opts)
     base          = base,
     max_instances = opts.max_instances or 128,
     producer      = producer,
+    -- ★ Phase 5.0: slot layout（可选，自动定位）
+    layout        = opts.layout or nil,
     -- legacy 字段（Phase 3.9 前的旧 API，保留兼容性）
     legacy_count_var = legacy_count_var,
     legacy_data_var  = legacy_data_var,
@@ -1121,6 +1123,40 @@ local function gen_app_draw(app_name, reg)
         emit(("        local _slot_count: uint32 = 0"):format())
         emit(("        %s(&self.arena, _slot_data, &_slot_count, %d)"):format(
           slot.producer, slot.max_instances))
+        -- ★ Phase 5.0: slot layout auto-position（编译期常量内联）
+        if slot.layout then
+          local lo = slot.layout
+          local dir = lo.direction or "column"
+          local gap = lo.gap or 0
+          local pad = lo.padding or 0
+          local pad_x, pad_y
+          if type(pad) == "table" then
+            pad_x = pad.left or pad[2] or 0
+            pad_y = pad.top  or pad[1] or 0
+          else
+            pad_x = pad
+            pad_y = pad
+          end
+          local iw = lo.item_size and lo.item_size.w or 100
+          local ih = lo.item_size and lo.item_size.h or 40
+          local stride = dir == "column" and (ih + gap) or (iw + gap)
+          local scroll_expr = lo.scroll_var or "0.0"
+          emit(("        -- ★ Phase 5.0: slot layout (dir=%s, gap=%g, stride=%g)"):format(dir, gap, stride))
+          emit(("        do"):format())
+          emit(("          local _li: uint32 = 0"):format())
+          emit(("          while _li < _slot_count do"):format())
+          if dir == "column" then
+            emit(("            _slot_data[_li].pos = Vec2{ x = %.1f, y = %.1f + (@float32)(_li) * %.1f - %s }"):format(
+              pad_x, pad_y, stride, scroll_expr))
+          else
+            emit(("            _slot_data[_li].pos = Vec2{ x = %.1f + (@float32)(_li) * %.1f - %s, y = %.1f }"):format(
+              pad_x, stride, scroll_expr, pad_y))
+          end
+          emit(("            _slot_data[_li].size = Vec2{ x = %.1f, y = %.1f }"):format(iw, ih))
+          emit(("            _li = _li + 1"):format())
+          emit(("          end"):format())
+          emit(("        end"):format())
+        end
         emit(("        local _si: uint32 = 0"):format())
         emit(("        while _si < _slot_count and _count < %d do"):format(max_inst))
         emit(("          _batch[_count] = _slot_data[_si]"):format())

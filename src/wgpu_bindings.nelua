@@ -282,6 +282,8 @@ global WGPUBindGroupLayoutEntry <cimport, nodecl> = @record{
   binding:          uint32,
   _pad0:            uint32,    -- padding for 8-byte alignment of visibility
   visibility:       WGPUShaderStage,  -- WGPUFlags = uint64_t
+  bindingArraySize: uint32,   -- wgpu-native v29: binding array size (0 = non-array)
+  _pad1:            uint32,   -- padding for 8-byte alignment of buffer.nextInChain
   buffer:           record{
     nextInChain:      pointer,
     type:             uint32,
@@ -582,12 +584,14 @@ global WGPUTexelCopyBufferLayout <cimport, nodecl> = @record{
 }
 
 global WGPUVertexAttribute <cimport, nodecl> = @record{
+  nextInChain:    pointer,
   format:         WGPUVertexFormat,
   offset:         uint64,
   shaderLocation: uint32,
 }
 
 global WGPUVertexBufferLayout <cimport, nodecl> = @record{
+  nextInChain:    pointer,
   stepMode:       WGPUVertexStepMode,
   arrayStride:    uint64,
   attributeCount: csize,
