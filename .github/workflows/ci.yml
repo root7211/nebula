@@ -133,7 +133,7 @@ jobs:
       - name: Install Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
-          version: 3.1.51
+          version: 4.0.6
 
       - name: Install Nelua
         run: |
@@ -170,7 +170,7 @@ jobs:
       - name: Install Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
-          version: 3.1.51
+          version: 4.0.6
 
       - name: Install Nelua
         run: |
