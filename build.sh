@@ -84,11 +84,16 @@ elif [ "$NEBULA_TARGET" == "windows" ]; then
   LDFLAGS="-L$VENDOR/lib -lwgpu_native -lglfw3 -luser32 -lgdi32 -lshell32"
   
 elif [ "$NEBULA_TARGET" == "wasm" ]; then
-  # Web (Wasm) 编译配置
+  # Web (Wasm) 编译配置 — 推荐使用 build_wasm.sh 获得完整体验
   NELUA_FLAGS="$NELUA_FLAGS --cc emcc"
-  LDFLAGS="-sUSE_WEBGPU=1 -sUSE_GLFW=3 -sALLOW_MEMORY_GROWTH=1"
-  # Wasm 目标通常输出为 .html
-  NELUA_FLAGS="$NELUA_FLAGS -o ~/.cache/nelua/$DEMO_TARGET.html"
+  CFLAGS=""
+  LDFLAGS="-sUSE_WEBGPU=1 -sUSE_GLFW=3 -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=1048576 -sEXIT_RUNTIME=0"
+  LDFLAGS="$LDFLAGS --preload-file $SCRIPT_DIR/assets/generated@/assets/generated"
+  LDFLAGS="$LDFLAGS --shell-file $SCRIPT_DIR/web/shell.html"
+  LDFLAGS="$LDFLAGS -O2"
+  # 输出到 build/wasm/
+  mkdir -p "$SCRIPT_DIR/build/wasm"
+  NELUA_FLAGS="$NELUA_FLAGS -o $SCRIPT_DIR/build/wasm/$DEMO_TARGET.html"
 fi
 
 # 执行编译
@@ -96,7 +101,7 @@ nelua $NELUA_FLAGS --cflags="$CFLAGS" --ldflags="$LDFLAGS" "$SCRIPT_DIR/examples
 
 echo "[nebula] Build complete."
 if [ "$NEBULA_TARGET" == "wasm" ]; then
-  echo "Output: ~/.cache/nelua/$DEMO_TARGET.html"
+  echo "Output: $SCRIPT_DIR/build/wasm/$DEMO_TARGET.html"
 else
   echo "Output: ~/.cache/nelua/$DEMO_TARGET"
 fi

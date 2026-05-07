@@ -21,5 +21,8 @@ vendor/wgpu-native/
 *~
 .DS_Store
 
+# WASM 构建输出
+build/
+
 # 构建日志
 *.log
