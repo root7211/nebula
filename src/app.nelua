@@ -639,40 +639,41 @@ end
 ## if NEBULA_TARGET == 'wasm' then
 -- Web 端：全局帧状态（Emscripten 回调无法捕获局部变量）
 global _nebula_ml_renderer:  *NebulaRenderer = nilptr
-global _nebula_ml_app:       pointer = nilptr  -- ★ BUG-1 fix: 独立存储 app 指针
 global _nebula_ml_input:     *NebulaInputState = nilptr
 global _nebula_ml_prev_time: float64 = 0.0
 global _nebula_ml_clear_r:   float64 = 0.0
 global _nebula_ml_clear_g:   float64 = 0.0
 global _nebula_ml_clear_b:   float64 = 0.0
--- Web 端帧回调（由 emscripten_set_main_loop 注册）
-global function _nebula_wasm_frame(): void
-  glfwPollEvents()
-  local now = glfwGetTime()
-  local dt  = (@float32)(now - _nebula_ml_prev_time)
-  _nebula_ml_prev_time = now
-  nebula_collect_input(_nebula_window, _nebula_ml_input, dt)
-  -- ★ BUG-1 fix: 使用独立 app 指针而非 renderer 指针
-  nebula_frame_render(_nebula_ml_renderer, $(@pointer)(_nebula_ml_app), _nebula_ml_input, dt,
-    _nebula_ml_clear_r, _nebula_ml_clear_g, _nebula_ml_clear_b)
-end
 ## end
 
+-- =============================================================================
 -- nebula_main_loop: 跨平台主循环宏
--- Native 端展开为阻塞式 while 循环；Web 端注册 Emscripten 回调后立即返回。
+--
+-- ★ WASM 修正: 帧回调函数不再预定义为全局函数（旧方案导致类型擦除错误）。
+-- 现在由宏在调用处生成类型化的回调函数，保证 nebula_frame_render 的泛型
+-- 参数 `app: auto` 能正确推导出具体的 App 类型。
+-- =============================================================================
 ## function nebula_main_loop(renderer_ptr, app_ptr, input_ptr, prev_time_ptr, cr, cg, cb)
   ## if NEBULA_TARGET == 'wasm' then
-  -- Web: 将帧状态写入全局变量，注册回调，控制权交还浏览器
+  -- Web: 生成类型化帧回调（捕获调用处的具体 App 类型）
   _nebula_ml_renderer  = #[renderer_ptr]#
-  _nebula_ml_app       = (@pointer)(#[app_ptr]#)  -- ★ BUG-1 fix: 存储正确的 app 指针
   _nebula_ml_input     = #[input_ptr]#
   _nebula_ml_prev_time = $#[prev_time_ptr]#
   _nebula_ml_clear_r   = #[cr]#
   _nebula_ml_clear_g   = #[cg]#
   _nebula_ml_clear_b   = #[cb]#
+  -- ★ 类型化帧回调：app 指针类型在宏展开时已确定，无类型擦除
+  global function _nebula_wasm_frame(): void
+    glfwPollEvents()
+    local now = glfwGetTime()
+    local dt  = (@float32)(now - _nebula_ml_prev_time)
+    _nebula_ml_prev_time = now
+    nebula_collect_input(_nebula_window, _nebula_ml_input, dt)
+    nebula_frame_render(_nebula_ml_renderer, #[app_ptr]#, _nebula_ml_input, dt,
+      _nebula_ml_clear_r, _nebula_ml_clear_g, _nebula_ml_clear_b)
+  end
   emscripten_set_main_loop(_nebula_wasm_frame, 0, 1)
-  -- ★ 审计修复: emscripten_set_main_loop with simulate_infinite_loop=1 不会返回，
-  -- 但如果未来改为 0，需要在此处 deinit。目前通过 emscripten_set_main_loop_arg + atexit 保证清理。
+  -- ★ emscripten_set_main_loop with simulate_infinite_loop=1 不会返回
   #[app_ptr]#:deinit()
   ## else
   -- Native: 传统阻塞循环
