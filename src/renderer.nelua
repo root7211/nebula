@@ -117,11 +117,13 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   }
   ## else
   -- Web (Wasm): 标准 WebGPU API，无需 wgpu-native 扩展
-  local inst_desc = WGPUInstanceDescriptor{
-    nextInChain = nilptr
-  }
+  -- Emscripten 要求 descriptor 为 nullptr（浏览器已有 WebGPU 实例）
   ## end
+## if NEBULA_TARGET ~= 'wasm' then
   self.instance = wgpuCreateInstance(&inst_desc)
+## else
+  self.instance = wgpuCreateInstance(nilptr)
+## end
   if self.instance == nilptr then
     printf("wgpu: failed to create instance\n")
     return false
