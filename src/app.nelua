@@ -375,6 +375,7 @@ global function nebula_frame_render(
 ## else
   local clear_color = WGPURenderPassColorAttachment{
     view          = view,
+    depthSlice    = 0xFFFFFFFF,
     resolveTarget = nilptr,
     loadOp        = WGPULoadOp_Clear,
     storeOp       = WGPUStoreOp_Store,
@@ -405,7 +406,9 @@ global function nebula_frame_render(
   wgpuQueueSubmit(renderer.queue, 1, &cmd)
   wgpuCommandBufferRelease(cmd)
 
+## if NEBULA_TARGET ~= 'wasm' then
   wgpuSurfacePresent(renderer.surface)
+## end
   wgpuTextureViewRelease(view)
   wgpuTextureRelease(surface_tex.texture)
 end
@@ -498,6 +501,7 @@ global function nebula_frame_render_multipass(
 ## else
   local clear_color = WGPURenderPassColorAttachment{
     view          = view,
+    depthSlice    = 0xFFFFFFFF,
     resolveTarget = nilptr,
     loadOp        = WGPULoadOp_Clear,
     storeOp       = WGPUStoreOp_Store,
@@ -528,7 +532,9 @@ global function nebula_frame_render_multipass(
   wgpuQueueSubmit(renderer.queue, 1, &cmd)
   wgpuCommandBufferRelease(cmd)
 
+## if NEBULA_TARGET ~= 'wasm' then
   wgpuSurfacePresent(renderer.surface)
+## end
   wgpuTextureViewRelease(view)
   wgpuTextureRelease(surface_tex.texture)
 end

@@ -135,7 +135,11 @@ global WGPUShaderStage_Fragment <comptime> = (@WGPUShaderStage)(0x00000002)
 global WGPUBufferBindingType = @uint32
 global WGPUBufferBindingType_Uniform <comptime> = (@WGPUBufferBindingType)(0x00000001)
 global WGPUBufferBindingType_Storage <comptime> = (@WGPUBufferBindingType)(0x00000002)
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPUBufferBindingType_ReadOnlyStorage <comptime> = (@WGPUBufferBindingType)(0x00000004)
+## else
+global WGPUBufferBindingType_ReadOnlyStorage <comptime> = (@WGPUBufferBindingType)(0x00000003)
+## end
 
 global WGPUPrimitiveTopology = @uint32
 global WGPUPrimitiveTopology_TriangleList  <comptime> = (@WGPUPrimitiveTopology)(0x00000004)
@@ -224,9 +228,10 @@ global WGPURenderPassColorAttachment <cimport, nodecl> = @record{
   clearValue:    WGPUColor,
 }
 ## else
--- WASM (Emscripten): no nextInChain, no depthSlice in this struct
+-- WASM (Emscripten): no nextInChain, but depthSlice is present in this struct
 global WGPURenderPassColorAttachment <cimport, nodecl> = @record{
   view:          WGPUTextureView,
+  depthSlice:    uint32,
   resolveTarget: WGPUTextureView,
   loadOp:        WGPULoadOp,
   storeOp:       WGPUStoreOp,
