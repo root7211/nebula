@@ -54,6 +54,7 @@ local shell = read_file("web/shell.html")
 assert(shell, "web/shell.html not found")
 assert_contains(shell, 'id="nebula-canvas"', "web/shell.html", "canvas element")
 assert_contains(shell, "navigator.gpu", "web/shell.html", "WebGPU feature detection")
-assert_contains(shell, "{{{ SCRIPT }}}", "web/shell.html", "Emscripten script placeholder")
+assert_contains(shell, "preinitializedWebGPUDevice", "web/shell.html", "WebGPU device pre-initialization")
+assert_contains(shell, "callMain", "web/shell.html", "Emscripten callMain invocation")
 
 print("verify_wasm_codegen: ALL 5 checks passed")
