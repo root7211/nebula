@@ -623,7 +623,6 @@ global WGPURenderPipelineDescriptor <cimport, nodecl> = @record{
     stripIndexFormat: uint32,
     frontFace:    uint32,
     cullMode:     uint32,
-    unclippedDepth: uint32,
   },
   depthStencil: pointer,
   multisample:  record{

@@ -470,6 +470,7 @@ local function _nebula_build_render_pipeline(
   end
 
   -- 5. RenderPipeline
+## if NEBULA_TARGET ~= 'wasm' then
   local rp_desc = WGPURenderPipelineDescriptor{
     nextInChain = nilptr,
     label       = wgpu_str(label),
@@ -500,6 +501,37 @@ local function _nebula_build_render_pipeline(
     },
     fragment = &frag_state,
   }
+## else
+  local rp_desc = WGPURenderPipelineDescriptor{
+    nextInChain = nilptr,
+    label       = wgpu_str(label),
+    layout      = pipeline_layout,
+    vertex      = {
+      nextInChain   = nilptr,
+      module        = shader,
+      entryPoint    = wgpu_str("vs_main"),
+      constantCount = 0,
+      constants     = nilptr,
+      bufferCount   = buf_count,
+      buffers       = buf_ptr,
+    },
+    primitive = {
+      nextInChain       = nilptr,
+      topology          = WGPUPrimitiveTopology_TriangleList,
+      stripIndexFormat  = 0,
+      frontFace         = 0,
+      cullMode          = 0,
+    },
+    depthStencil = nilptr,
+    multisample  = {
+      nextInChain             = nilptr,
+      count                   = 1,
+      mask                    = 0xFFFFFFFF,
+      alphaToCoverageEnabled  = 0,
+    },
+    fragment = &frag_state,
+  }
+## end
   $out_pipeline = wgpuDeviceCreateRenderPipeline(device, &rp_desc)
   wgpuShaderModuleRelease(shader)
   wgpuPipelineLayoutRelease(pipeline_layout)
