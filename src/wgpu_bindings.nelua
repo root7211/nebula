@@ -276,17 +276,19 @@ global WGPUSurfaceConfiguration <cimport, nodecl> = @record{
   presentMode:     WGPUPresentMode,
 }
 ## else
--- WASM (Emscripten): WGPUTextureUsageFlags = uint32_t (not uint64 like wgpu-native)
+-- WASM (Emscripten): field order differs from wgpu-native.
+-- Emscripten layout: nextInChain(+0) device(+4) format(+8) usage(+12)
+--   viewFormatCount(+16) viewFormats(+20) alphaMode(+24) width(+28) height(+32) presentMode(+36)
 global WGPUSurfaceConfiguration <cimport, nodecl> = @record{
   nextInChain:     pointer,
   device:          WGPUDevice,
   format:          WGPUTextureFormat,
   usage:           uint32,
-  width:           uint32,
-  height:          uint32,
   viewFormatCount: csize,
   viewFormats:     pointer,
   alphaMode:       uint32,
+  width:           uint32,
+  height:          uint32,
   presentMode:     WGPUPresentMode,
 }
 ## end
