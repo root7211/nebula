@@ -262,6 +262,7 @@ global WGPUSurfaceTexture <cimport, nodecl> = @record{
   status:     WGPUSurfaceGetCurrentTextureStatus,
 }
 
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPUSurfaceConfiguration <cimport, nodecl> = @record{
   nextInChain:     pointer,
   device:          WGPUDevice,
@@ -274,6 +275,21 @@ global WGPUSurfaceConfiguration <cimport, nodecl> = @record{
   alphaMode:       uint32,
   presentMode:     WGPUPresentMode,
 }
+## else
+-- WASM (Emscripten): WGPUTextureUsageFlags = uint32_t (not uint64 like wgpu-native)
+global WGPUSurfaceConfiguration <cimport, nodecl> = @record{
+  nextInChain:     pointer,
+  device:          WGPUDevice,
+  format:          WGPUTextureFormat,
+  usage:           uint32,
+  width:           uint32,
+  height:          uint32,
+  viewFormatCount: csize,
+  viewFormats:     pointer,
+  alphaMode:       uint32,
+  presentMode:     WGPUPresentMode,
+}
+## end
 
 ## if NEBULA_TARGET ~= 'wasm' then
 global WGPUInstanceDescriptor <cimport, nodecl> = @record{
@@ -399,10 +415,11 @@ global WGPUBufferDescriptor <cimport, nodecl> = @record{
   mappedAtCreation: uint32,
 }
 ## else
+-- WASM (Emscripten): WGPUBufferUsageFlags = uint32_t
 global WGPUBufferDescriptor <cimport, nodecl> = @record{
   nextInChain:      pointer,
   label:            cstring,
-  usage:            uint64,
+  usage:            uint32,
   size:             uint64,
   mappedAtCreation: uint32,
 }
@@ -928,10 +945,11 @@ global WGPUTextureDescriptor <cimport, nodecl> = @record{
   viewFormats:     pointer,
 }
 ## else
+-- WASM (Emscripten): WGPUTextureUsageFlags = uint32_t
 global WGPUTextureDescriptor <cimport, nodecl> = @record{
   nextInChain:     pointer,
   label:           cstring,
-  usage:           uint64,
+  usage:           uint32,
   dimension:       WGPUTextureDimension,
   size:            WGPUExtent3D,
   format:          WGPUTextureFormat,

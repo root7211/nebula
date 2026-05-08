@@ -313,6 +313,29 @@ global function nebula_frame_render(
   clear_g:   float64,
   clear_b:   float64
 ): void
+  -- 0. Surface 重配置：当窗口尺寸变化时，需重新配置 Surface 以匹配新尺寸
+  if input.viewport_resized then
+    local new_w = (@uint32)(input.viewport_w)
+    local new_h = (@uint32)(input.viewport_h)
+    if new_w > 0 and new_h > 0 then
+      renderer.width  = new_w
+      renderer.height = new_h
+      local surf_cfg = WGPUSurfaceConfiguration{
+        nextInChain     = nilptr,
+        device          = renderer.device,
+        format          = renderer.format,
+        usage           = 0x00000010, -- WGPUTextureUsage_RenderAttachment
+        width           = new_w,
+        height          = new_h,
+        viewFormatCount = 0,
+        viewFormats     = nilptr,
+        alphaMode       = 1, -- WGPUCompositeAlphaMode_Auto
+        presentMode     = WGPUPresentMode_Fifo,
+      }
+      wgpuSurfaceConfigure(renderer.surface, &surf_cfg)
+    end
+  end
+
   -- 1. 获取 Surface 当前纹理
   local surface_tex: WGPUSurfaceTexture
   wgpuSurfaceGetCurrentTexture(renderer.surface, &surface_tex)
@@ -403,6 +426,29 @@ global function nebula_frame_render_multipass(
   clear_g:   float64,
   clear_b:   float64
 ): void
+  -- 0. Surface 重配置：当窗口尺寸变化时，需重新配置 Surface 以匹配新尺寸
+  if input.viewport_resized then
+    local new_w = (@uint32)(input.viewport_w)
+    local new_h = (@uint32)(input.viewport_h)
+    if new_w > 0 and new_h > 0 then
+      renderer.width  = new_w
+      renderer.height = new_h
+      local surf_cfg = WGPUSurfaceConfiguration{
+        nextInChain     = nilptr,
+        device          = renderer.device,
+        format          = renderer.format,
+        usage           = 0x00000010, -- WGPUTextureUsage_RenderAttachment
+        width           = new_w,
+        height          = new_h,
+        viewFormatCount = 0,
+        viewFormats     = nilptr,
+        alphaMode       = 1, -- WGPUCompositeAlphaMode_Auto
+        presentMode     = WGPUPresentMode_Fifo,
+      }
+      wgpuSurfaceConfigure(renderer.surface, &surf_cfg)
+    end
+  end
+
   -- 1. 获取 Surface 当前纹理
   local surface_tex: WGPUSurfaceTexture
   wgpuSurfaceGetCurrentTexture(renderer.surface, &surface_tex)
