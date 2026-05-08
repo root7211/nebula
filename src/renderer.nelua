@@ -342,7 +342,7 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
     height          = self.height,
     viewFormatCount = 0,
     viewFormats     = nilptr,
-    alphaMode       = 1, -- WGPUCompositeAlphaMode_Auto
+    alphaMode       = 0, -- WGPUCompositeAlphaMode_Auto
     presentMode     = WGPUPresentMode_Fifo,
   }
   wgpuSurfaceConfigure(self.surface, &surf_cfg)
