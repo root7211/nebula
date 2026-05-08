@@ -279,7 +279,7 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   printf("wgpu: surface format = %u (non-sRGB)\n", self.format)
   wgpuSurfaceCapabilitiesFreeMembers(caps)
 
-  ## else
+  ## elseif NEBULA_TARGET == 'wasm' then
   -- =========================================================================
   -- WASM 路径：使用 emscripten_webgpu_get_device() 获取 JS 预初始化的 Device
   --
