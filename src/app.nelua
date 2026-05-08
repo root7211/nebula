@@ -341,7 +341,8 @@ global function nebula_frame_render(
   wgpuSurfaceGetCurrentTexture(renderer.surface, &surface_tex)
   local status = surface_tex.status
   if status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal and
-     status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal then
+     status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal and
+     status ~= WGPUSurfaceGetCurrentTextureStatus_Success then
     return  -- 跳帧：Surface 暂时不可用（最小化、resize 等）
   end
 
@@ -454,7 +455,8 @@ global function nebula_frame_render_multipass(
   wgpuSurfaceGetCurrentTexture(renderer.surface, &surface_tex)
   local status = surface_tex.status
   if status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal and
-     status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal then
+     status ~= WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal and
+     status ~= WGPUSurfaceGetCurrentTextureStatus_Success then
     return  -- 跳帧：Surface 暂时不可用
   end
 
