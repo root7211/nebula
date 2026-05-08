@@ -66,9 +66,15 @@ fi
 # -sUSE_GLFW=3           — 使用 Emscripten 内置 GLFW3 实现
 # -sALLOW_MEMORY_GROWTH=1 — 允许 WASM 线性内存动态增长
 # -sASSERTIONS=1         — 开发时保留断言（发布时改为 0）
-# -sSTACK_SIZE=1048576   — 1MB 栈（足够 Nebula 的栈分配 arena）
+# -sSTACK_SIZE=16777216  — 16MB 栈（足够 Nebula 的栈分配 arena）
 # --preload-file          — 打包 assets 到 .data 文件（模拟 fopen/fread）
-# --shell-file            — 自定义 HTML 模板
+#
+# ★ FIX: 不使用 --shell-file。Emscripten 4.0.6 + -sUSE_WEBGPU=1 会在模块
+#   启动阶段将 WebGPU 初始化作为 async dependency。如果 shell.html 中通过
+#   onRuntimeInitialized 才设置 preinitializedWebGPUDevice，会导致时序死锁
+#   （Emscripten 等 device → onRuntimeInitialized 不触发 → device 永远不设置）。
+#   改为：输出 .js，再用 web/shell.html（纯静态 HTML）动态加载 .js，
+#   在脚本加载前完成 WebGPU device 创建。
 EMCC_FLAGS=""
 EMCC_FLAGS="$EMCC_FLAGS -sUSE_WEBGPU=1"
 EMCC_FLAGS="$EMCC_FLAGS -sUSE_GLFW=3"
@@ -80,10 +86,10 @@ EMCC_FLAGS="$EMCC_FLAGS -sINVOKE_RUN=0"
 EMCC_FLAGS="$EMCC_FLAGS -sEXPORTED_FUNCTIONS=['_main','_malloc','_free']"
 EMCC_FLAGS="$EMCC_FLAGS -sEXPORTED_RUNTIME_METHODS=['callMain']"
 EMCC_FLAGS="$EMCC_FLAGS --preload-file $SCRIPT_DIR/assets/generated@/assets/generated"
-EMCC_FLAGS="$EMCC_FLAGS --shell-file $SCRIPT_DIR/web/shell.html"
 EMCC_FLAGS="$EMCC_FLAGS -O2"
 
-# 输出路径
+# 输出路径：输出 .html（emcc 同时生成 .html + .js + .wasm + .data）
+# emcc 默认 shell 生成的 .html 会被覆盖，我们只需要 .js / .wasm / .data。
 OUTPUT="$BUILD_DIR/${DEMO_TARGET}.html"
 
 echo "[nebula-wasm] Compiling with Nelua + Emscripten..."
@@ -92,6 +98,12 @@ nelua $NELUA_FLAGS $EXTRA_FLAGS \
   --ldflags="$EMCC_FLAGS" \
   -o "$OUTPUT" \
   "$SCRIPT_DIR/examples/${DEMO_TARGET}.nelua"
+
+# ★ FIX: 用自定义 HTML 加载器覆盖 Emscripten 默认生成的 HTML
+# 该 HTML 先完成 WebGPU 设备创建，再动态加载 Emscripten .js，
+# 确保 Module.preinitializedWebGPUDevice 在脚本执行前就绑定好。
+# （解决 Emscripten 4.0.6 + -sUSE_WEBGPU=1 的 onRuntimeInitialized 时序死锁）
+cp "$SCRIPT_DIR/web/shell.html" "$BUILD_DIR/${DEMO_TARGET}.html"
 
 echo ""
 echo "[nebula-wasm] Build complete!"
