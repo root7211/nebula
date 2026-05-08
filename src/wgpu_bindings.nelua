@@ -88,19 +88,43 @@ global WGPUTextureFormat_RGBA8Unorm <comptime> = (@WGPUTextureFormat)(0x00000012
 global WGPUTextureFormat_BGRA8Unorm <comptime> = (@WGPUTextureFormat)(0x00000017)
 
 global WGPUPresentMode = @uint32
-global WGPUPresentMode_Undefined <comptime> = (@WGPUPresentMode)(0x00000000)
-global WGPUPresentMode_Fifo      <comptime> = (@WGPUPresentMode)(0x00000001)
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native (wgpu-native v29): Undefined=0, Fifo=1, FifoRelaxed=2, Immediate=3, Mailbox=4
+global WGPUPresentMode_Undefined   <comptime> = (@WGPUPresentMode)(0x00000000)
+global WGPUPresentMode_Fifo        <comptime> = (@WGPUPresentMode)(0x00000001)
 global WGPUPresentMode_FifoRelaxed <comptime> = (@WGPUPresentMode)(0x00000002)
-global WGPUPresentMode_Immediate <comptime> = (@WGPUPresentMode)(0x00000003)
-global WGPUPresentMode_Mailbox   <comptime> = (@WGPUPresentMode)(0x00000004)
+global WGPUPresentMode_Immediate   <comptime> = (@WGPUPresentMode)(0x00000003)
+global WGPUPresentMode_Mailbox     <comptime> = (@WGPUPresentMode)(0x00000004)
+## else
+-- WASM (Emscripten/Dawn): Immediate=0, Mailbox=1, Fifo=2
+global WGPUPresentMode_Undefined   <comptime> = (@WGPUPresentMode)(0x00000000)
+global WGPUPresentMode_Fifo        <comptime> = (@WGPUPresentMode)(0x00000002)
+global WGPUPresentMode_FifoRelaxed <comptime> = (@WGPUPresentMode)(0x00000002)
+global WGPUPresentMode_Immediate   <comptime> = (@WGPUPresentMode)(0x00000000)
+global WGPUPresentMode_Mailbox     <comptime> = (@WGPUPresentMode)(0x00000001)
+## end
 
 global WGPULoadOp = @uint32
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native (wgpu-native v29): Clear=2, Load=3
 global WGPULoadOp_Clear <comptime> = (@WGPULoadOp)(0x00000002)
 global WGPULoadOp_Load  <comptime> = (@WGPULoadOp)(0x00000003)
+## else
+-- WASM (Emscripten/Dawn): Clear=1, Load=2
+global WGPULoadOp_Clear <comptime> = (@WGPULoadOp)(0x00000001)
+global WGPULoadOp_Load  <comptime> = (@WGPULoadOp)(0x00000002)
+## end
 
 global WGPUStoreOp = @uint32
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native (wgpu-native v29): Store=2, Discard=3
 global WGPUStoreOp_Store   <comptime> = (@WGPUStoreOp)(0x00000002)
 global WGPUStoreOp_Discard <comptime> = (@WGPUStoreOp)(0x00000003)
+## else
+-- WASM (Emscripten/Dawn): Store=1, Discard=2
+global WGPUStoreOp_Store   <comptime> = (@WGPUStoreOp)(0x00000001)
+global WGPUStoreOp_Discard <comptime> = (@WGPUStoreOp)(0x00000002)
+## end
 
 global WGPUBufferUsage = @uint32
 global WGPUBufferUsage_None         <comptime> = (@WGPUBufferUsage)(0x00000000)
@@ -120,9 +144,17 @@ global WGPUVertexFormat_Float32x2 <comptime> = (@WGPUVertexFormat)(0x0000001D)
 global WGPUVertexFormat_Float32x4 <comptime> = (@WGPUVertexFormat)(0x0000001F)
 
 global WGPUVertexStepMode = @uint32
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native (wgpu-native v29): Undefined=1, Vertex=2, Instance=3
 global WGPUVertexStepMode_Undefined <comptime> = (@WGPUVertexStepMode)(0x00000001)
 global WGPUVertexStepMode_Vertex    <comptime> = (@WGPUVertexStepMode)(0x00000002)
 global WGPUVertexStepMode_Instance  <comptime> = (@WGPUVertexStepMode)(0x00000003)
+## else
+-- WASM (Emscripten/Dawn): Vertex=0, Instance=1, VertexBufferNotUsed=2
+global WGPUVertexStepMode_Undefined <comptime> = (@WGPUVertexStepMode)(0x00000002)
+global WGPUVertexStepMode_Vertex    <comptime> = (@WGPUVertexStepMode)(0x00000000)
+global WGPUVertexStepMode_Instance  <comptime> = (@WGPUVertexStepMode)(0x00000001)
+## end
 
 ## if NEBULA_TARGET ~= 'wasm' then
 global WGPUShaderStage = @uint64
@@ -142,17 +174,39 @@ global WGPUBufferBindingType_ReadOnlyStorage <comptime> = (@WGPUBufferBindingTyp
 ## end
 
 global WGPUPrimitiveTopology = @uint32
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native (wgpu-native v29): TriangleList=4, TriangleStrip=5
 global WGPUPrimitiveTopology_TriangleList  <comptime> = (@WGPUPrimitiveTopology)(0x00000004)
 global WGPUPrimitiveTopology_TriangleStrip <comptime> = (@WGPUPrimitiveTopology)(0x00000005)
+## else
+-- WASM (Emscripten/Dawn): TriangleList=3, TriangleStrip=4
+global WGPUPrimitiveTopology_TriangleList  <comptime> = (@WGPUPrimitiveTopology)(0x00000003)
+global WGPUPrimitiveTopology_TriangleStrip <comptime> = (@WGPUPrimitiveTopology)(0x00000004)
+## end
 
 global WGPUBlendOperation = @uint32
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native (wgpu-native v29): Add=1
 global WGPUBlendOperation_Add <comptime> = (@WGPUBlendOperation)(0x00000001)
+## else
+-- WASM (Emscripten/Dawn): Add=0
+global WGPUBlendOperation_Add <comptime> = (@WGPUBlendOperation)(0x00000000)
+## end
 
 global WGPUBlendFactor = @uint32
-global WGPUBlendFactor_One              <comptime> = (@WGPUBlendFactor)(0x00000002)
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native (wgpu-native v29): Zero=1, One=2, SrcAlpha=5, OneMinusSrcAlpha=6
 global WGPUBlendFactor_Zero             <comptime> = (@WGPUBlendFactor)(0x00000001)
+global WGPUBlendFactor_One              <comptime> = (@WGPUBlendFactor)(0x00000002)
 global WGPUBlendFactor_SrcAlpha         <comptime> = (@WGPUBlendFactor)(0x00000005)
 global WGPUBlendFactor_OneMinusSrcAlpha <comptime> = (@WGPUBlendFactor)(0x00000006)
+## else
+-- WASM (Emscripten/Dawn): Zero=0, One=1, SrcAlpha=4, OneMinusSrcAlpha=5
+global WGPUBlendFactor_Zero             <comptime> = (@WGPUBlendFactor)(0x00000000)
+global WGPUBlendFactor_One              <comptime> = (@WGPUBlendFactor)(0x00000001)
+global WGPUBlendFactor_SrcAlpha         <comptime> = (@WGPUBlendFactor)(0x00000004)
+global WGPUBlendFactor_OneMinusSrcAlpha <comptime> = (@WGPUBlendFactor)(0x00000005)
+## end
 
 global WGPUColorWriteMask = @uint32
 global WGPUColorWriteMask_All <comptime> = (@WGPUColorWriteMask)(0x0000000F)
@@ -848,7 +902,13 @@ global WGPUTextureUsage_RenderAttachment <comptime> = (@WGPUTextureUsage)(0x0000
 
 -- ===== 纹理维度 =====
 global WGPUTextureDimension = @uint32
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native (wgpu-native v29): Undefined=0, 1D=1, 2D=2, 3D=3
 global WGPUTextureDimension_2D <comptime> = (@WGPUTextureDimension)(0x00000002)
+## else
+-- WASM (Emscripten/Dawn): 1D=0, 2D=1, 3D=2
+global WGPUTextureDimension_2D <comptime> = (@WGPUTextureDimension)(0x00000001)
+## end
 
 -- ===== 纹理视图维度 =====
 global WGPUTextureViewDimension = @uint32
@@ -856,8 +916,15 @@ global WGPUTextureViewDimension_2D <comptime> = (@WGPUTextureViewDimension)(0x00
 
 -- ===== 纹理 Aspect =====
 global WGPUTextureAspect = @uint32
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native (wgpu-native v29): Undefined=0, All=1
 global WGPUTextureAspect_Undefined <comptime> = (@WGPUTextureAspect)(0x00000000)
 global WGPUTextureAspect_All       <comptime> = (@WGPUTextureAspect)(0x00000001)
+## else
+-- WASM (Emscripten/Dawn): All=0, StencilOnly=1, DepthOnly=2
+global WGPUTextureAspect_Undefined <comptime> = (@WGPUTextureAspect)(0x00000000)
+global WGPUTextureAspect_All       <comptime> = (@WGPUTextureAspect)(0x00000000)
+## end
 
 -- ===== 采样器绑定类型 =====
 global WGPUSamplerBindingType = @uint32
@@ -873,8 +940,15 @@ global WGPUAddressMode_ClampToEdge <comptime> = (@WGPUAddressMode)(0x00000002)
 
 -- ===== 过滤模式 =====
 global WGPUFilterMode = @uint32
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native (wgpu-native v29): Undefined=0, Nearest=1, Linear=2
 global WGPUFilterMode_Nearest <comptime> = (@WGPUFilterMode)(0x00000001)
 global WGPUFilterMode_Linear  <comptime> = (@WGPUFilterMode)(0x00000002)
+## else
+-- WASM (Emscripten/Dawn): Nearest=0, Linear=1
+global WGPUFilterMode_Nearest <comptime> = (@WGPUFilterMode)(0x00000000)
+global WGPUFilterMode_Linear  <comptime> = (@WGPUFilterMode)(0x00000001)
+## end
 
 -- ===== Mipmap 过滤模式 =====
 global WGPUMipmapFilterMode = @uint32
