@@ -44,6 +44,8 @@ global NebulaRenderer = @record{
 
 -- 回调函数：Adapter 请求完成
 local adapter_result: WGPUAdapter = nilptr
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native (v29): callback(status, adapter, message, userdata1, userdata2)
 local function on_adapter(status: uint32, adapter: WGPUAdapter, msg: WGPUStringView, ud1: pointer, ud2: pointer): void
   if status == 1 then -- WGPURequestAdapterStatus_Success
     adapter_result = adapter
@@ -51,9 +53,21 @@ local function on_adapter(status: uint32, adapter: WGPUAdapter, msg: WGPUStringV
     printf("wgpu: adapter request failed\n")
   end
 end
+## else
+-- WASM (Emscripten): callback(status, adapter, message, userdata)
+local function on_adapter(status: uint32, adapter: WGPUAdapter, msg: cstring, ud: pointer): void
+  if status == 0 then -- WGPURequestAdapterStatus_Success (Emscripten: 0 = success)
+    adapter_result = adapter
+  else
+    printf("wgpu: adapter request failed (status=%u)\n", status)
+  end
+end
+## end
 
 -- 回调函数：Device 请求完成
 local device_result: WGPUDevice = nilptr
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native (v29): callback(status, device, message, userdata1, userdata2)
 local function on_device(status: uint32, device: WGPUDevice, msg: WGPUStringView, ud1: pointer, ud2: pointer): void
   if status == 1 then -- WGPURequestDeviceStatus_Success
     device_result = device
@@ -61,6 +75,16 @@ local function on_device(status: uint32, device: WGPUDevice, msg: WGPUStringView
     printf("wgpu: device request failed\n")
   end
 end
+## else
+-- WASM (Emscripten): callback(status, device, message, userdata)
+local function on_device(status: uint32, device: WGPUDevice, msg: cstring, ud: pointer): void
+  if status == 0 then -- WGPURequestDeviceStatus_Success (Emscripten: 0 = success)
+    device_result = device
+  else
+    printf("wgpu: device request failed (status=%u)\n", status)
+  end
+end
+## end
 
 function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   -- ★ MEM-1 fix: 防止重复初始化导致 GPU 资源泄漏
@@ -162,7 +186,7 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   }
   local surf_desc = WGPUSurfaceDescriptor{
     nextInChain = (@*WGPUChainedStruct)(&canvas_src),
-    label       = wgpu_str_null(),
+    label       = nilptr,
   }
   ## end
   self.surface = wgpuInstanceCreateSurface(self.instance, &surf_desc)
@@ -172,6 +196,7 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   end
 
   -- 3. 请求 Adapter
+## if NEBULA_TARGET ~= 'wasm' then
   local adapter_opts = WGPURequestAdapterOptions{
     nextInChain          = nilptr,
     featureLevel         = 0,
@@ -189,6 +214,17 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   }
   adapter_result = nilptr
   wgpuInstanceRequestAdapter(self.instance, &adapter_opts, adapter_cb)
+## else
+  local adapter_opts = WGPURequestAdapterOptions{
+    nextInChain          = nilptr,
+    compatibleSurface    = self.surface,
+    powerPreference      = 0,
+    backendType          = 0,
+    forceFallbackAdapter = 0,
+  }
+  adapter_result = nilptr
+  wgpuInstanceRequestAdapter(self.instance, &adapter_opts, (@pointer)(&on_adapter), nilptr)
+## end
   self.adapter = adapter_result
   if self.adapter == nilptr then
     printf("wgpu: no adapter\n")
@@ -196,6 +232,7 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   end
 
   -- 4. 请求 Device
+## if NEBULA_TARGET ~= 'wasm' then
   local dev_desc = WGPUDeviceDescriptor{
     nextInChain          = nilptr,
     label                = wgpu_str("nebula-device"),
@@ -226,6 +263,20 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   }
   device_result = nilptr
   wgpuAdapterRequestDevice(self.adapter, &dev_desc, device_cb)
+## else
+  local dev_desc = WGPUDeviceDescriptor{
+    nextInChain          = nilptr,
+    label                = "nebula-device",
+    requiredFeatureCount = 0,
+    requiredFeatures     = nilptr,
+    requiredLimits       = nilptr,
+    defaultQueue         = {nextInChain = nilptr, label = nilptr},
+    deviceLostCallback   = nilptr,
+    deviceLostUserdata   = nilptr,
+  }
+  device_result = nilptr
+  wgpuAdapterRequestDevice(self.adapter, &dev_desc, (@pointer)(&on_device), nilptr)
+## end
   self.device = device_result
   if self.device == nilptr then
     printf("wgpu: no device\n")
@@ -234,7 +285,8 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
 
   self.queue = wgpuDeviceGetQueue(self.device)
 
-  -- 5. 动态查询 Surface 支持的格式
+  -- 5. 查询 Surface 支持的格式
+## if NEBULA_TARGET ~= 'wasm' then
   --    wgpu-native v29 要求通过 wgpuSurfaceGetCapabilities 查询，不可硬编码
   local caps: WGPUSurfaceCapabilities = {}
   local caps_status = wgpuSurfaceGetCapabilities(self.surface, self.adapter, &caps)
@@ -277,6 +329,14 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
 
   printf("wgpu: surface format = %u (non-sRGB)\n", self.format)
   wgpuSurfaceCapabilitiesFreeMembers(caps)
+## else
+  -- WASM: 使用 wgpuSurfaceGetPreferredFormat（浏览器自动协商最佳格式）
+  self.format = wgpuSurfaceGetPreferredFormat(self.surface, self.adapter)
+  if self.format == WGPUTextureFormat_Undefined then
+    self.format = WGPUTextureFormat_BGRA8Unorm
+  end
+  printf("wgpu: surface format = %u (browser preferred)\n", self.format)
+## end
 
   -- 6. 配置 Surface
   local surf_cfg = WGPUSurfaceConfiguration{
@@ -459,7 +519,7 @@ local function _nebula_make_textured_bgl_entries(
   entries[0] = WGPUBindGroupLayoutEntry{
     nextInChain = nilptr,
     binding     = 0,
-    visibility  = (@uint64)(WGPUShaderStage_Vertex) | (@uint64)(WGPUShaderStage_Fragment),
+    visibility  = (@WGPUShaderStage)(WGPUShaderStage_Vertex) | (@WGPUShaderStage)(WGPUShaderStage_Fragment),
     buffer      = {
       nextInChain      = nilptr,
       type             = (@uint32)(WGPUBufferBindingType_Uniform),
@@ -474,7 +534,7 @@ local function _nebula_make_textured_bgl_entries(
   entries[1] = WGPUBindGroupLayoutEntry{
     nextInChain = nilptr,
     binding     = 1,
-    visibility  = (@uint64)(WGPUShaderStage_Fragment),
+    visibility  = (@WGPUShaderStage)(WGPUShaderStage_Fragment),
     buffer      = {nextInChain = nilptr, type = 0, hasDynamicOffset = 0, minBindingSize = 0},
     sampler     = {nextInChain = nilptr, type = 0},
     texture     = {
@@ -489,7 +549,7 @@ local function _nebula_make_textured_bgl_entries(
   entries[2] = WGPUBindGroupLayoutEntry{
     nextInChain = nilptr,
     binding     = 2,
-    visibility  = (@uint64)(WGPUShaderStage_Fragment),
+    visibility  = (@WGPUShaderStage)(WGPUShaderStage_Fragment),
     buffer      = {nextInChain = nilptr, type = 0, hasDynamicOffset = 0, minBindingSize = 0},
     sampler     = {nextInChain = nilptr, type = (@uint32)(WGPUSamplerBindingType_Filtering)},
     texture     = {nextInChain = nilptr, sampleType = 0, viewDimension = 0, multisampled = 0},
@@ -544,7 +604,7 @@ global function nebula_pipeline_base_init(
   local entry = WGPUBindGroupLayoutEntry{
     nextInChain = nilptr,
     binding     = 0,
-    visibility  = (@uint64)(WGPUShaderStage_Vertex) | (@uint64)(WGPUShaderStage_Fragment),
+    visibility  = (@WGPUShaderStage)(WGPUShaderStage_Vertex) | (@WGPUShaderStage)(WGPUShaderStage_Fragment),
     buffer      = {
       nextInChain      = nilptr,
       type             = (@uint32)(WGPUBufferBindingType_Uniform),
@@ -1115,7 +1175,7 @@ global function nebula_bgl_entry_uniform(out: *WGPUBindGroupLayoutEntry, binding
   $out = WGPUBindGroupLayoutEntry{
     nextInChain = nilptr,
     binding     = binding,
-    visibility  = (@uint64)(WGPUShaderStage_Vertex) | (@uint64)(WGPUShaderStage_Fragment),
+    visibility  = (@WGPUShaderStage)(WGPUShaderStage_Vertex) | (@WGPUShaderStage)(WGPUShaderStage_Fragment),
     buffer      = {
       nextInChain      = nilptr,
       type             = (@uint32)(WGPUBufferBindingType_Uniform),
@@ -1133,7 +1193,7 @@ global function nebula_bgl_entry_storage_ro(out: *WGPUBindGroupLayoutEntry, bind
   $out = WGPUBindGroupLayoutEntry{
     nextInChain = nilptr,
     binding     = binding,
-    visibility  = (@uint64)(WGPUShaderStage_Vertex) | (@uint64)(WGPUShaderStage_Fragment),
+    visibility  = (@WGPUShaderStage)(WGPUShaderStage_Vertex) | (@WGPUShaderStage)(WGPUShaderStage_Fragment),
     buffer      = {
       nextInChain      = nilptr,
       type             = (@uint32)(WGPUBufferBindingType_ReadOnlyStorage),

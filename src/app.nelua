@@ -338,6 +338,7 @@ global function nebula_frame_render(
 
   -- 3. 创建 CommandEncoder 和 RenderPass
   local encoder = wgpuDeviceCreateCommandEncoder(renderer.device, nilptr)
+## if NEBULA_TARGET ~= 'wasm' then
   local clear_color = WGPURenderPassColorAttachment{
     nextInChain   = nilptr,
     view          = view,
@@ -347,6 +348,15 @@ global function nebula_frame_render(
     storeOp       = WGPUStoreOp_Store,
     clearValue    = WGPUColor{ r = clear_r, g = clear_g, b = clear_b, a = 1.0 },
   }
+## else
+  local clear_color = WGPURenderPassColorAttachment{
+    view          = view,
+    resolveTarget = nilptr,
+    loadOp        = WGPULoadOp_Clear,
+    storeOp       = WGPUStoreOp_Store,
+    clearValue    = WGPUColor{ r = clear_r, g = clear_g, b = clear_b, a = 1.0 },
+  }
+## end
   local pass_desc = WGPURenderPassDescriptor{
     nextInChain             = nilptr,
     label                   = wgpu_str_null(),
@@ -427,6 +437,7 @@ global function nebula_frame_render_multipass(
   app:draw_pre_pass(encoder, renderer)
 
   -- 6. Surface 主 Pass（Pass 4）
+## if NEBULA_TARGET ~= 'wasm' then
   local clear_color = WGPURenderPassColorAttachment{
     nextInChain   = nilptr,
     view          = view,
@@ -436,6 +447,15 @@ global function nebula_frame_render_multipass(
     storeOp       = WGPUStoreOp_Store,
     clearValue    = WGPUColor{ r = clear_r, g = clear_g, b = clear_b, a = 1.0 },
   }
+## else
+  local clear_color = WGPURenderPassColorAttachment{
+    view          = view,
+    resolveTarget = nilptr,
+    loadOp        = WGPULoadOp_Clear,
+    storeOp       = WGPUStoreOp_Store,
+    clearValue    = WGPUColor{ r = clear_r, g = clear_g, b = clear_b, a = 1.0 },
+  }
+## end
   local pass_desc = WGPURenderPassDescriptor{
     nextInChain             = nilptr,
     label                   = wgpu_str_null(),

@@ -40,13 +40,24 @@ global WGPUTexture          <cimport, nodecl> = @pointer
 
 -- =============================================================================
 -- WGPUStringView（v25+ 引入，替代裸 cstring）
+-- Native: 使用 wgpu-native 的 WGPUStringView
+-- WASM: Emscripten 不定义此类型，我们自行声明供内部使用
 -- =============================================================================
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPUStringView <cimport, nodecl> = @record{
   data:   cstring,
   length: csize,
 }
+## else
+-- WASM: 自定义 WGPUStringView（不从 C 导入，Emscripten 无此定义）
+global WGPUStringView = @record{
+  data:   cstring,
+  length: csize,
+}
+## end
 
--- 辅助函数：从 Nelua 字符串创建 WGPUStringView
+## if NEBULA_TARGET ~= 'wasm' then
+-- 辅助函数：从 Nelua 字符串创建 WGPUStringView (Native)
 global function wgpu_str(s: string): WGPUStringView
   return WGPUStringView{ data = s.data, length = #s }
 end
@@ -55,6 +66,17 @@ end
 global function wgpu_str_null(): WGPUStringView
   return WGPUStringView{ data = nilptr, length = 0 }
 end
+## else
+-- WASM: Emscripten 使用 cstring 作为 label，不使用 WGPUStringView
+-- wgpu_str / wgpu_str_null 返回 cstring 以匹配 WASM 结构体定义
+global function wgpu_str(s: string): cstring
+  return s.data
+end
+
+global function wgpu_str_null(): cstring
+  return nilptr
+end
+## end
 
 -- =============================================================================
 -- 枚举类型（仅绑定 Phase 0 所需）
@@ -102,7 +124,11 @@ global WGPUVertexStepMode_Undefined <comptime> = (@WGPUVertexStepMode)(0x0000000
 global WGPUVertexStepMode_Vertex    <comptime> = (@WGPUVertexStepMode)(0x00000002)
 global WGPUVertexStepMode_Instance  <comptime> = (@WGPUVertexStepMode)(0x00000003)
 
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPUShaderStage = @uint64
+## else
+global WGPUShaderStage = @uint32
+## end
 global WGPUShaderStage_Vertex   <comptime> = (@WGPUShaderStage)(0x00000001)
 global WGPUShaderStage_Fragment <comptime> = (@WGPUShaderStage)(0x00000002)
 
@@ -128,12 +154,20 @@ global WGPUColorWriteMask = @uint32
 global WGPUColorWriteMask_All <comptime> = (@WGPUColorWriteMask)(0x0000000F)
 
 global WGPUSType = @uint32
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native: wgpu-native v29 SType values
 global WGPUSType_ShaderSourceWGSL        <comptime> = (@WGPUSType)(0x00000002)
 global WGPUSType_SurfaceSourceMetalLayer           <comptime> = (@WGPUSType)(0x00000004)
 global WGPUSType_SurfaceSourceWindowsHWND          <comptime> = (@WGPUSType)(0x00000005)
 global WGPUSType_SurfaceSourceXlibWindow           <comptime> = (@WGPUSType)(0x00000006)
 global WGPUSType_SurfaceSourceWaylandSurface       <comptime> = (@WGPUSType)(0x00000007)
 global WGPUSType_SurfaceSourceCanvasHTMLSelector   <comptime> = (@WGPUSType)(0x0000000F)
+## else
+-- WASM (Emscripten): uses WGPUSType_ShaderModuleWGSLDescriptor = 6
+-- and WGPUSType_SurfaceDescriptorFromCanvasHTMLSelector = 4
+global WGPUSType_ShaderSourceWGSL        <comptime> = (@WGPUSType)(0x00000006)
+global WGPUSType_SurfaceSourceCanvasHTMLSelector   <comptime> = (@WGPUSType)(0x00000004)
+## end
 ## if NEBULA_TARGET ~= 'wasm' then
 global WGPUSType_InstanceExtras                    <comptime> = (@WGPUSType)(0x00030006)
 
@@ -179,6 +213,7 @@ global WGPUColor <cimport, nodecl> = @record{
   a: float64,
 }
 
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPURenderPassColorAttachment <cimport, nodecl> = @record{
   nextInChain:   pointer,
   view:          WGPUTextureView,
@@ -188,7 +223,18 @@ global WGPURenderPassColorAttachment <cimport, nodecl> = @record{
   storeOp:       WGPUStoreOp,
   clearValue:    WGPUColor,
 }
+## else
+-- WASM (Emscripten): no nextInChain, no depthSlice in this struct
+global WGPURenderPassColorAttachment <cimport, nodecl> = @record{
+  view:          WGPUTextureView,
+  resolveTarget: WGPUTextureView,
+  loadOp:        WGPULoadOp,
+  storeOp:       WGPUStoreOp,
+  clearValue:    WGPUColor,
+}
+## end
 
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPURenderPassDescriptor <cimport, nodecl> = @record{
   nextInChain:          pointer,
   label:                WGPUStringView,
@@ -198,6 +244,17 @@ global WGPURenderPassDescriptor <cimport, nodecl> = @record{
   occlusionQuerySet:    pointer,
   timestampWrites:      pointer,
 }
+## else
+global WGPURenderPassDescriptor <cimport, nodecl> = @record{
+  nextInChain:          pointer,
+  label:                cstring,
+  colorAttachmentCount: csize,
+  colorAttachments:     *WGPURenderPassColorAttachment,
+  depthStencilAttachment: pointer,
+  occlusionQuerySet:    pointer,
+  timestampWrites:      pointer,
+}
+## end
 
 global WGPUSurfaceTexture <cimport, nodecl> = @record{
   texture:    WGPUTexture,
@@ -218,12 +275,19 @@ global WGPUSurfaceConfiguration <cimport, nodecl> = @record{
   presentMode:     WGPUPresentMode,
 }
 
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPUInstanceDescriptor <cimport, nodecl> = @record{
   nextInChain:          pointer,
   requiredFeatureCount: csize,
   requiredFeatures:     pointer,
   requiredLimits:       pointer,
 }
+## else
+-- WASM (Emscripten): only nextInChain
+global WGPUInstanceDescriptor <cimport, nodecl> = @record{
+  nextInChain: pointer,
+}
+## end
 
 -- wgpu-native v29 扩展：实例附加信息（仅 Native 端使用）
 ## if NEBULA_TARGET ~= 'wasm' then
@@ -241,6 +305,8 @@ global WGPUInstanceExtras <cimport, nodecl> = @record{
 }
 ## end
 
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native (wgpu-native v29): includes featureLevel field
 global WGPURequestAdapterOptions <cimport, nodecl> = @record{
   nextInChain:          pointer,
   featureLevel:         uint32,
@@ -249,7 +315,19 @@ global WGPURequestAdapterOptions <cimport, nodecl> = @record{
   backendType:          uint32,
   compatibleSurface:    WGPUSurface,
 }
+## else
+-- WASM (Emscripten): no featureLevel, different field order
+global WGPURequestAdapterOptions <cimport, nodecl> = @record{
+  nextInChain:          pointer,
+  compatibleSurface:    WGPUSurface,
+  powerPreference:      uint32,
+  backendType:          uint32,
+  forceFallbackAdapter: uint32,
+}
+## end
 
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native (wgpu-native v29): structured callback info
 global WGPURequestAdapterCallbackInfo <cimport, nodecl> = @record{
   nextInChain: pointer,
   mode:        WGPUCallbackMode,
@@ -265,7 +343,29 @@ global WGPURequestDeviceCallbackInfo <cimport, nodecl> = @record{
   userdata1:   pointer,
   userdata2:   pointer,
 }
+## else
+-- WASM (Emscripten): uses old-style callback + userdata (no CallbackInfo struct)
+-- We define these as internal records (not cimported) for Nelua code to remain uniform,
+-- but the actual wgpu function calls are different (see renderer.nelua).
+global WGPURequestAdapterCallbackInfo = @record{
+  nextInChain: pointer,
+  mode:        WGPUCallbackMode,
+  callback:    pointer,
+  userdata1:   pointer,
+  userdata2:   pointer,
+}
 
+global WGPURequestDeviceCallbackInfo = @record{
+  nextInChain: pointer,
+  mode:        WGPUCallbackMode,
+  callback:    pointer,
+  userdata1:   pointer,
+  userdata2:   pointer,
+}
+## end
+
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native (wgpu-native v29): full descriptor with callback infos
 global WGPUDeviceDescriptor <cimport, nodecl> = @record{
   nextInChain:                  pointer,
   label:                        WGPUStringView,
@@ -276,7 +376,21 @@ global WGPUDeviceDescriptor <cimport, nodecl> = @record{
   deviceLostCallbackInfo:       record{ nextInChain: pointer, mode: WGPUCallbackMode, callback: pointer, userdata1: pointer, userdata2: pointer },
   uncapturedErrorCallbackInfo:  record{ nextInChain: pointer, callback: pointer, userdata1: pointer, userdata2: pointer },
 }
+## else
+-- WASM (Emscripten): simpler descriptor, labels are cstring
+global WGPUDeviceDescriptor <cimport, nodecl> = @record{
+  nextInChain:                  pointer,
+  label:                        cstring,
+  requiredFeatureCount:         csize,
+  requiredFeatures:             pointer,
+  requiredLimits:               pointer,
+  defaultQueue:                 record{ nextInChain: pointer, label: cstring },
+  deviceLostCallback:           pointer,
+  deviceLostUserdata:           pointer,
+}
+## end
 
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPUBufferDescriptor <cimport, nodecl> = @record{
   nextInChain:      pointer,
   label:            WGPUStringView,
@@ -284,7 +398,18 @@ global WGPUBufferDescriptor <cimport, nodecl> = @record{
   size:             uint64,
   mappedAtCreation: uint32,
 }
+## else
+global WGPUBufferDescriptor <cimport, nodecl> = @record{
+  nextInChain:      pointer,
+  label:            cstring,
+  usage:            uint64,
+  size:             uint64,
+  mappedAtCreation: uint32,
+}
+## end
 
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native (wgpu-native v29): includes bindingArraySize and explicit padding
 global WGPUBindGroupLayoutEntry <cimport, nodecl> = @record{
   nextInChain:      pointer,
   binding:          uint32,
@@ -302,13 +427,39 @@ global WGPUBindGroupLayoutEntry <cimport, nodecl> = @record{
   texture:          record{ nextInChain: pointer, sampleType: uint32, viewDimension: uint32, multisampled: uint32, _pad: uint32 },
   storageTexture:   record{ nextInChain: pointer, access: uint32, format: WGPUTextureFormat, viewDimension: uint32 },
 }
+## else
+-- WASM (Emscripten): no bindingArraySize, simpler layout (32-bit pointers)
+global WGPUBindGroupLayoutEntry <cimport, nodecl> = @record{
+  nextInChain:      pointer,
+  binding:          uint32,
+  visibility:       uint32,  -- WGPUShaderStageFlags = uint32 on WASM
+  buffer:           record{
+    nextInChain:      pointer,
+    type:             uint32,
+    hasDynamicOffset: uint32,
+    minBindingSize:   uint64,
+  },
+  sampler:          record{ nextInChain: pointer, type: uint32 },
+  texture:          record{ nextInChain: pointer, sampleType: uint32, viewDimension: uint32, multisampled: uint32 },
+  storageTexture:   record{ nextInChain: pointer, access: uint32, format: WGPUTextureFormat, viewDimension: uint32 },
+}
+## end
 
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPUBindGroupLayoutDescriptor <cimport, nodecl> = @record{
   nextInChain: pointer,
   label:       WGPUStringView,
   entryCount:  csize,
   entries:     *WGPUBindGroupLayoutEntry,
 }
+## else
+global WGPUBindGroupLayoutDescriptor <cimport, nodecl> = @record{
+  nextInChain: pointer,
+  label:       cstring,
+  entryCount:  csize,
+  entries:     *WGPUBindGroupLayoutEntry,
+}
+## end
 
 global WGPUBindGroupEntry <cimport, nodecl> = @record{
   nextInChain: pointer,
@@ -320,6 +471,7 @@ global WGPUBindGroupEntry <cimport, nodecl> = @record{
   textureView: pointer,
 }
 
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPUBindGroupDescriptor <cimport, nodecl> = @record{
   nextInChain: pointer,
   label:       WGPUStringView,
@@ -327,7 +479,17 @@ global WGPUBindGroupDescriptor <cimport, nodecl> = @record{
   entryCount:  csize,
   entries:     *WGPUBindGroupEntry,
 }
+## else
+global WGPUBindGroupDescriptor <cimport, nodecl> = @record{
+  nextInChain: pointer,
+  label:       cstring,
+  layout:      WGPUBindGroupLayout,
+  entryCount:  csize,
+  entries:     *WGPUBindGroupEntry,
+}
+## end
 
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPUPipelineLayoutDescriptor <cimport, nodecl> = @record{
   nextInChain:          pointer,
   label:                WGPUStringView,
@@ -335,17 +497,37 @@ global WGPUPipelineLayoutDescriptor <cimport, nodecl> = @record{
   bindGroupLayouts:     *WGPUBindGroupLayout,
   immediateSize:        uint32,
 }
+## else
+-- WASM: no immediateSize field, label is cstring
+global WGPUPipelineLayoutDescriptor <cimport, nodecl> = @record{
+  nextInChain:          pointer,
+  label:                cstring,
+  bindGroupLayoutCount: csize,
+  bindGroupLayouts:     *WGPUBindGroupLayout,
+}
+## end
 
 -- 着色器模块结构体
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPUShaderSourceWGSL <cimport, nodecl> = @record{
   chain: WGPUChainedStruct,
   code:  WGPUStringView,
 }
-
 global WGPUShaderModuleDescriptor <cimport, nodecl> = @record{
   nextInChain: *WGPUChainedStruct,
   label:       WGPUStringView,
 }
+## else
+-- WASM: Emscripten 命名为 WGPUShaderModuleWGSLDescriptor，code 类型为 cstring
+global WGPUShaderSourceWGSL <cimport "WGPUShaderModuleWGSLDescriptor", nodecl> = @record{
+  chain: WGPUChainedStruct,
+  code:  cstring,
+}
+global WGPUShaderModuleDescriptor <cimport, nodecl> = @record{
+  nextInChain: *WGPUChainedStruct,
+  label:       cstring,
+}
+## end
 
 global WGPUBlendComponent <cimport, nodecl> = @record{
   operation: WGPUBlendOperation,
@@ -365,6 +547,7 @@ global WGPUColorTargetState <cimport, nodecl> = @record{
   writeMask:   uint32,
 }
 
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPUFragmentState <cimport, nodecl> = @record{
   nextInChain: pointer,
   module:      WGPUShaderModule,
@@ -374,7 +557,19 @@ global WGPUFragmentState <cimport, nodecl> = @record{
   targetCount: csize,
   targets:     *WGPUColorTargetState,
 }
+## else
+global WGPUFragmentState <cimport, nodecl> = @record{
+  nextInChain: pointer,
+  module:      WGPUShaderModule,
+  entryPoint:  cstring,
+  constantCount: csize,
+  constants:   pointer,
+  targetCount: csize,
+  targets:     *WGPUColorTargetState,
+}
+## end
 
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPURenderPipelineDescriptor <cimport, nodecl> = @record{
   nextInChain: pointer,
   label:       WGPUStringView,
@@ -405,6 +600,38 @@ global WGPURenderPipelineDescriptor <cimport, nodecl> = @record{
   },
   fragment:     *WGPUFragmentState,
 }
+## else
+global WGPURenderPipelineDescriptor <cimport, nodecl> = @record{
+  nextInChain: pointer,
+  label:       cstring,
+  layout:      WGPUPipelineLayout,
+  vertex:      record{
+    nextInChain:   pointer,
+    module:        WGPUShaderModule,
+    entryPoint:    cstring,
+    constantCount: csize,
+    constants:     pointer,
+    bufferCount:   csize,
+    buffers:       pointer,
+  },
+  primitive:   record{
+    nextInChain:  pointer,
+    topology:     WGPUPrimitiveTopology,
+    stripIndexFormat: uint32,
+    frontFace:    uint32,
+    cullMode:     uint32,
+    unclippedDepth: uint32,
+  },
+  depthStencil: pointer,
+  multisample:  record{
+    nextInChain:            pointer,
+    count:                  uint32,
+    mask:                   uint32,
+    alphaToCoverageEnabled: uint32,
+  },
+  fragment:     *WGPUFragmentState,
+}
+## end
 
 -- =============================================================================
 -- ★ Phase 4.2.1: Surface 来源结构体（五端）
@@ -437,18 +664,27 @@ global WGPUSurfaceSourceWindowsHWND <cimport, nodecl> = @record{
 }
 ## else
 -- Web (WASM) 的 Surface 来源
-global WGPUSurfaceSourceCanvasHTMLSelector <cimport, nodecl> = @record{
+-- Emscripten 使用名称 WGPUSurfaceDescriptorFromCanvasHTMLSelector
+global WGPUSurfaceSourceCanvasHTMLSelector <cimport "WGPUSurfaceDescriptorFromCanvasHTMLSelector", nodecl> = @record{
   chain:    WGPUChainedStruct,
   selector: cstring,
 }
 ## end
 
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPUSurfaceDescriptor <cimport, nodecl> = @record{
   nextInChain: *WGPUChainedStruct,
   label:       WGPUStringView,
 }
+## else
+global WGPUSurfaceDescriptor <cimport, nodecl> = @record{
+  nextInChain: *WGPUChainedStruct,
+  label:       cstring,
+}
+## end
 
--- Surface 能力查询（v29 动态格式查询）
+## if NEBULA_TARGET ~= 'wasm' then
+-- Surface 能力查询（v29 动态格式查询）— Native only
 global WGPUSurfaceCapabilities <cimport, nodecl> = @record{
   nextInChain:      pointer,
   usages:           uint32,
@@ -459,7 +695,9 @@ global WGPUSurfaceCapabilities <cimport, nodecl> = @record{
   alphaModeCount:   csize,
   alphaModes:       pointer,
 }
+## end
 
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPUTextureViewDescriptor <cimport, nodecl> = @record{
   nextInChain:     pointer,
   label:           WGPUStringView,
@@ -472,18 +710,44 @@ global WGPUTextureViewDescriptor <cimport, nodecl> = @record{
   aspect:          uint32,
   usage:           uint64,
 }
+## else
+global WGPUTextureViewDescriptor <cimport, nodecl> = @record{
+  nextInChain:     pointer,
+  label:           cstring,
+  format:          WGPUTextureFormat,
+  dimension:       uint32,
+  baseMipLevel:    uint32,
+  mipLevelCount:   uint32,
+  baseArrayLayer:  uint32,
+  arrayLayerCount: uint32,
+  aspect:          uint32,
+}
+## end
 
 -- =============================================================================
 -- wgpu-native C 函数绑定
 -- =============================================================================
 global function wgpuCreateInstance(desc: *WGPUInstanceDescriptor): WGPUInstance <cimport, nodecl> end
 global function wgpuInstanceCreateSurface(instance: WGPUInstance, desc: *WGPUSurfaceDescriptor): WGPUSurface <cimport, nodecl> end
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native (v29): CallbackInfo struct-based API
 global function wgpuInstanceRequestAdapter(instance: WGPUInstance, options: *WGPURequestAdapterOptions, callbackInfo: WGPURequestAdapterCallbackInfo): uint64 <cimport, nodecl> end
 global function wgpuAdapterRequestDevice(adapter: WGPUAdapter, desc: *WGPUDeviceDescriptor, callbackInfo: WGPURequestDeviceCallbackInfo): uint64 <cimport, nodecl> end
+## else
+-- WASM (Emscripten): old-style callback + userdata
+global function wgpuInstanceRequestAdapter(instance: WGPUInstance, options: *WGPURequestAdapterOptions, callback: pointer, userdata: pointer): void <cimport, nodecl> end
+global function wgpuAdapterRequestDevice(adapter: WGPUAdapter, desc: *WGPUDeviceDescriptor, callback: pointer, userdata: pointer): void <cimport, nodecl> end
+## end
 global function wgpuDeviceGetQueue(device: WGPUDevice): WGPUQueue <cimport, nodecl> end
 global function wgpuSurfaceConfigure(surface: WGPUSurface, config: *WGPUSurfaceConfiguration): void <cimport, nodecl> end
+## if NEBULA_TARGET ~= 'wasm' then
 global function wgpuSurfaceGetCapabilities(surface: WGPUSurface, adapter: WGPUAdapter, caps: *WGPUSurfaceCapabilities): uint32 <cimport, nodecl> end
 global function wgpuSurfaceCapabilitiesFreeMembers(caps: WGPUSurfaceCapabilities): void <cimport, nodecl> end
+## else
+-- WASM: wgpuSurfaceGetCapabilities exists in newer Emscripten but with different signature
+-- We use wgpuSurfaceGetPreferredFormat instead (simpler)
+global function wgpuSurfaceGetPreferredFormat(surface: WGPUSurface, adapter: WGPUAdapter): WGPUTextureFormat <cimport, nodecl> end
+## end
 global function wgpuSurfaceGetCurrentTexture(surface: WGPUSurface, surfaceTexture: *WGPUSurfaceTexture): void <cimport, nodecl> end
 global function wgpuSurfacePresent(surface: WGPUSurface): void <cimport, nodecl> end
 global function wgpuTextureCreateView(texture: WGPUTexture, desc: *WGPUTextureViewDescriptor): WGPUTextureView <cimport, nodecl> end
@@ -496,10 +760,17 @@ global function wgpuDeviceCreateBindGroup(device: WGPUDevice, desc: *WGPUBindGro
 global function wgpuDeviceCreatePipelineLayout(device: WGPUDevice, desc: *WGPUPipelineLayoutDescriptor): WGPUPipelineLayout <cimport, nodecl> end
 global function wgpuDeviceCreateShaderModule(device: WGPUDevice, desc: *WGPUShaderModuleDescriptor): WGPUShaderModule <cimport, nodecl> end
 global function wgpuDeviceCreateRenderPipeline(device: WGPUDevice, desc: *WGPURenderPipelineDescriptor): WGPURenderPipeline <cimport, nodecl> end
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPUCommandEncoderDescriptor <cimport, nodecl> = @record{
   nextInChain: pointer,
   label:       WGPUStringView,
 }
+## else
+global WGPUCommandEncoderDescriptor <cimport, nodecl> = @record{
+  nextInChain: pointer,
+  label:       cstring,
+}
+## end
 global function wgpuDeviceCreateCommandEncoder(device: WGPUDevice, desc: *WGPUCommandEncoderDescriptor): WGPUCommandEncoder <cimport, nodecl> end
 global function wgpuCommandEncoderBeginRenderPass(encoder: WGPUCommandEncoder, desc: *WGPURenderPassDescriptor): WGPURenderPassEncoder <cimport, nodecl> end
 global function wgpuRenderPassEncoderSetPipeline(pass: WGPURenderPassEncoder, pipeline: WGPURenderPipeline): void <cimport, nodecl> end
@@ -509,10 +780,17 @@ global function wgpuRenderPassEncoderDraw(pass: WGPURenderPassEncoder, vertexCou
 global function wgpuRenderPassEncoderSetScissorRect(pass: WGPURenderPassEncoder, x: uint32, y: uint32, width: uint32, height: uint32): void <cimport, nodecl> end
 global function wgpuRenderPassEncoderEnd(pass: WGPURenderPassEncoder): void <cimport, nodecl> end
 global function wgpuRenderPassEncoderRelease(pass: WGPURenderPassEncoder): void <cimport, nodecl> end
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPUCommandBufferDescriptor <cimport, nodecl> = @record{
   nextInChain: pointer,
   label:       WGPUStringView,
 }
+## else
+global WGPUCommandBufferDescriptor <cimport, nodecl> = @record{
+  nextInChain: pointer,
+  label:       cstring,
+}
+## end
 global function wgpuCommandEncoderFinish(encoder: WGPUCommandEncoder, desc: *WGPUCommandBufferDescriptor): WGPUCommandBuffer <cimport, nodecl> end
 global function wgpuCommandEncoderRelease(encoder: WGPUCommandEncoder): void <cimport, nodecl> end
 global function wgpuQueueSubmit(queue: WGPUQueue, commandCount: csize, commands: *WGPUCommandBuffer): void <cimport, nodecl> end
@@ -586,12 +864,23 @@ global WGPUOrigin3D <cimport, nodecl> = @record{
   z: uint32,
 }
 
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPUTexelCopyBufferLayout <cimport, nodecl> = @record{
   offset:       uint64,
   bytesPerRow:  uint32,
   rowsPerImage: uint32,
 }
+## else
+-- WASM: Emscripten uses WGPUTextureDataLayout
+global WGPUTexelCopyBufferLayout <cimport "WGPUTextureDataLayout", nodecl> = @record{
+  nextInChain:  pointer,
+  offset:       uint64,
+  bytesPerRow:  uint32,
+  rowsPerImage: uint32,
+}
+## end
 
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPUVertexAttribute <cimport, nodecl> = @record{
   nextInChain:    pointer,
   format:         WGPUVertexFormat,
@@ -606,8 +895,24 @@ global WGPUVertexBufferLayout <cimport, nodecl> = @record{
   attributeCount: csize,
   attributes:     *WGPUVertexAttribute,
 }
+## else
+-- WASM (Emscripten): no nextInChain on vertex attributes/layouts
+global WGPUVertexAttribute <cimport, nodecl> = @record{
+  format:         WGPUVertexFormat,
+  offset:         uint64,
+  shaderLocation: uint32,
+}
+
+global WGPUVertexBufferLayout <cimport, nodecl> = @record{
+  arrayStride:    uint64,
+  stepMode:       WGPUVertexStepMode,
+  attributeCount: csize,
+  attributes:     *WGPUVertexAttribute,
+}
+## end
 
 -- ===== 纹理描述符 =====
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPUTextureDescriptor <cimport, nodecl> = @record{
   nextInChain:     pointer,
   label:           WGPUStringView,
@@ -620,15 +925,41 @@ global WGPUTextureDescriptor <cimport, nodecl> = @record{
   viewFormatCount: csize,
   viewFormats:     pointer,
 }
+## else
+global WGPUTextureDescriptor <cimport, nodecl> = @record{
+  nextInChain:     pointer,
+  label:           cstring,
+  usage:           uint64,
+  dimension:       WGPUTextureDimension,
+  size:            WGPUExtent3D,
+  format:          WGPUTextureFormat,
+  mipLevelCount:   uint32,
+  sampleCount:     uint32,
+  viewFormatCount: csize,
+  viewFormats:     pointer,
+}
+## end
 
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPUTexelCopyTextureInfo <cimport, nodecl> = @record{
   texture:  WGPUTexture,
   mipLevel: uint32,
   origin:   WGPUOrigin3D,
   aspect:   WGPUTextureAspect,
 }
+## else
+-- WASM: Emscripten uses WGPUImageCopyTexture
+global WGPUTexelCopyTextureInfo <cimport "WGPUImageCopyTexture", nodecl> = @record{
+  nextInChain: pointer,
+  texture:  WGPUTexture,
+  mipLevel: uint32,
+  origin:   WGPUOrigin3D,
+  aspect:   WGPUTextureAspect,
+}
+## end
 
 -- ===== 采样器描述符 =====
+## if NEBULA_TARGET ~= 'wasm' then
 global WGPUSamplerDescriptor <cimport, nodecl> = @record{
   nextInChain:   pointer,
   label:         WGPUStringView,
@@ -643,11 +974,32 @@ global WGPUSamplerDescriptor <cimport, nodecl> = @record{
   compare:       uint32,
   maxAnisotropy: uint16,
 }
+## else
+global WGPUSamplerDescriptor <cimport, nodecl> = @record{
+  nextInChain:   pointer,
+  label:         cstring,
+  addressModeU:  WGPUAddressMode,
+  addressModeV:  WGPUAddressMode,
+  addressModeW:  WGPUAddressMode,
+  magFilter:     WGPUFilterMode,
+  minFilter:     WGPUFilterMode,
+  mipmapFilter:  WGPUMipmapFilterMode,
+  lodMinClamp:   float32,
+  lodMaxClamp:   float32,
+  compare:       uint32,
+  maxAnisotropy: uint16,
+}
+## end
 
 -- ===== Phase 2.5 / 3.2.2 额外函数绑定 =====
 global function wgpuDeviceCreateTexture(device: WGPUDevice, desc: *WGPUTextureDescriptor): WGPUTexture <cimport, nodecl> end
 global function wgpuDeviceCreateSampler(device: WGPUDevice, desc: *WGPUSamplerDescriptor): WGPUSampler <cimport, nodecl> end
+## if NEBULA_TARGET ~= 'wasm' then
 global function wgpuQueueWriteTexture(queue: WGPUQueue, destination: *WGPUTexelCopyTextureInfo, data: pointer, dataSize: csize, dataLayout: *WGPUTexelCopyBufferLayout, writeSize: *WGPUExtent3D): void <cimport, nodecl> end
+## else
+-- WASM: same function name, but our Nelua types are aliased to Emscripten names via cimport
+global function wgpuQueueWriteTexture(queue: WGPUQueue, destination: *WGPUTexelCopyTextureInfo, data: pointer, dataSize: csize, dataLayout: *WGPUTexelCopyBufferLayout, writeSize: *WGPUExtent3D): void <cimport, nodecl> end
+## end
 
 global function wgpuSamplerRelease(sampler: WGPUSampler): void <cimport, nodecl> end
 global function wgpuShaderModuleRelease(shaderModule: WGPUShaderModule): void <cimport, nodecl> end
