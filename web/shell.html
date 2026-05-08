@@ -63,36 +63,7 @@
   <canvas id="nebula-canvas" width="800" height="600" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
 
   <script>
-    // Check WebGPU support before loading WASM
-    (async function() {
-      const statusEl = document.getElementById('status');
-      const errorEl = document.getElementById('error-overlay');
-
-      if (!navigator.gpu) {
-        errorEl.style.display = 'block';
-        errorEl.textContent = 'WebGPU is not supported in this browser.\n\n' +
-          'Requirements:\n' +
-          '  - Chrome 113+ / Edge 113+ / Firefox Nightly (with flags)\n' +
-          '  - Hardware GPU acceleration enabled\n\n' +
-          'Please update your browser or enable WebGPU.';
-        document.getElementById('loading').classList.add('hidden');
-        return;
-      }
-
-      const adapter = await navigator.gpu.requestAdapter();
-      if (!adapter) {
-        errorEl.style.display = 'block';
-        errorEl.textContent = 'WebGPU: Failed to get GPU adapter.\n\n' +
-          'Your browser supports WebGPU but no compatible GPU was found.\n' +
-          'Ensure hardware acceleration is enabled in browser settings.';
-        document.getElementById('loading').classList.add('hidden');
-        return;
-      }
-
-      statusEl.textContent = 'Loading WASM module...';
-    })();
-
-    // Emscripten Module configuration
+    // Emscripten Module configuration — must be defined before {{{ SCRIPT }}}
     var Module = {
       canvas: (function() { return document.getElementById('nebula-canvas'); })(),
       onRuntimeInitialized: function() {
@@ -101,7 +72,6 @@
       print: function(text) { console.log('[nebula]', text); },
       printErr: function(text) {
         console.error('[nebula]', text);
-        // Show fatal errors in overlay
         if (text.includes('Aborted') || text.includes('RuntimeError')) {
           var el = document.getElementById('error-overlay');
           el.style.display = 'block';
@@ -112,7 +82,51 @@
         if (text) {
           document.getElementById('status').textContent = text;
         }
-      }
+      },
+      // Pre-initialize WebGPU device in JS (async) before WASM main() runs
+      preRun: [function() {
+        Module.addRunDependency('webgpu-init');
+        (async function() {
+          const statusEl = document.getElementById('status');
+          const errorEl = document.getElementById('error-overlay');
+
+          if (!navigator.gpu) {
+            errorEl.style.display = 'block';
+            errorEl.textContent = 'WebGPU is not supported in this browser.\n\n' +
+              'Requirements:\n' +
+              '  - Chrome 113+ / Edge 113+ / Firefox Nightly (with flags)\n' +
+              '  - Hardware GPU acceleration enabled\n\n' +
+              'Please update your browser or enable WebGPU.';
+            document.getElementById('loading').classList.add('hidden');
+            return;
+          }
+
+          statusEl.textContent = 'Requesting GPU adapter...';
+          const adapter = await navigator.gpu.requestAdapter();
+          if (!adapter) {
+            errorEl.style.display = 'block';
+            errorEl.textContent = 'WebGPU: Failed to get GPU adapter.\n\n' +
+              'Your browser supports WebGPU but no compatible GPU was found.\n' +
+              'Ensure hardware acceleration is enabled in browser settings.';
+            document.getElementById('loading').classList.add('hidden');
+            return;
+          }
+
+          statusEl.textContent = 'Creating GPU device...';
+          const device = await adapter.requestDevice();
+          if (!device) {
+            errorEl.style.display = 'block';
+            errorEl.textContent = 'WebGPU: Failed to create GPU device.';
+            document.getElementById('loading').classList.add('hidden');
+            return;
+          }
+
+          // Store for Emscripten's WebGPU integration
+          Module.preinitializedWebGPUDevice = device;
+          statusEl.textContent = 'Loading WASM module...';
+          Module.removeRunDependency('webgpu-init');
+        })();
+      }]
     };
   </script>
   {{{ SCRIPT }}}

@@ -115,24 +115,14 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   local inst_desc = WGPUInstanceDescriptor{
     nextInChain = (@pointer)(&inst_extras)
   }
-  ## else
-  -- Web (Wasm): 标准 WebGPU API，无需 wgpu-native 扩展
-  -- Emscripten 要求 descriptor 为 nullptr（浏览器已有 WebGPU 实例）
-  ## end
-## if NEBULA_TARGET ~= 'wasm' then
   self.instance = wgpuCreateInstance(&inst_desc)
-## else
-  self.instance = wgpuCreateInstance(nilptr)
-## end
   if self.instance == nilptr then
     printf("wgpu: failed to create instance\n")
     return false
   end
 
-  -- 2. 创建 Surface（★ Phase 4.2.1: 四路跨平台条件编译）
-  --    公理 A 合规：平台分支在 S1 阶段全部消解，生成代码中仅包含目标平台的单一路径。
-  --    SType 均来自 webgpu-headers 官方规范。
-  ## if NEBULA_TARGET == 'linux' and NEBULA_LINUX_DISPLAY ~= 'wayland' then
+  -- 2. 创建 Surface
+  ## if NEBULA_LINUX_DISPLAY ~= 'wayland' then
   -- Linux (X11) 路径
   local xlib_src = WGPUSurfaceSourceXlibWindow{
     chain   = WGPUChainedStruct{
@@ -146,7 +136,7 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
     nextInChain = (@*WGPUChainedStruct)(&xlib_src),
     label       = wgpu_str_null(),
   }
-  ## elseif NEBULA_TARGET == 'linux' and NEBULA_LINUX_DISPLAY == 'wayland' then
+  ## elseif NEBULA_LINUX_DISPLAY == 'wayland' then
   -- Linux (Wayland) 路径
   local wl_src = WGPUSurfaceSourceWaylandSurface{
     chain   = WGPUChainedStruct{
@@ -160,10 +150,9 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
     nextInChain = (@*WGPUChainedStruct)(&wl_src),
     label       = wgpu_str_null(),
   }
-  ## elseif NEBULA_TARGET == 'windows' then
+  ## end
+  ## if NEBULA_TARGET == 'windows' then
   -- Windows (HWND) 路径
-  -- hinstance 使用 Win32 API GetModuleHandleA，而非 GLFW 函数
-  -- （GLFW 未提供获取 HINSTANCE 的公开 API）
   local hwnd_src = WGPUSurfaceSourceWindowsHWND{
     chain = WGPUChainedStruct{
       next  = nilptr,
@@ -176,20 +165,6 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
     nextInChain = (@*WGPUChainedStruct)(&hwnd_src),
     label       = wgpu_str_null(),
   }
-  ## elseif NEBULA_TARGET == 'wasm' then
-  -- Web (Canvas HTML Selector) 路径
-  -- selector 对应 HTML 中 <canvas id="nebula-canvas"> 元素
-  local canvas_src = WGPUSurfaceSourceCanvasHTMLSelector{
-    chain = WGPUChainedStruct{
-      next  = nilptr,
-      sType = WGPUSType_SurfaceSourceCanvasHTMLSelector,
-    },
-    selector = "#nebula-canvas",
-  }
-  local surf_desc = WGPUSurfaceDescriptor{
-    nextInChain = (@*WGPUChainedStruct)(&canvas_src),
-    label       = nilptr,
-  }
   ## end
   self.surface = wgpuInstanceCreateSurface(self.instance, &surf_desc)
   if self.surface == nilptr then
@@ -198,7 +173,6 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   end
 
   -- 3. 请求 Adapter
-## if NEBULA_TARGET ~= 'wasm' then
   local adapter_opts = WGPURequestAdapterOptions{
     nextInChain          = nilptr,
     featureLevel         = 0,
@@ -216,17 +190,6 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   }
   adapter_result = nilptr
   wgpuInstanceRequestAdapter(self.instance, &adapter_opts, adapter_cb)
-## else
-  local adapter_opts = WGPURequestAdapterOptions{
-    nextInChain          = nilptr,
-    compatibleSurface    = self.surface,
-    powerPreference      = 0,
-    backendType          = 0,
-    forceFallbackAdapter = 0,
-  }
-  adapter_result = nilptr
-  wgpuInstanceRequestAdapter(self.instance, &adapter_opts, (@pointer)(&on_adapter), nilptr)
-## end
   self.adapter = adapter_result
   if self.adapter == nilptr then
     printf("wgpu: no adapter\n")
@@ -234,7 +197,6 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   end
 
   -- 4. 请求 Device
-## if NEBULA_TARGET ~= 'wasm' then
   local dev_desc = WGPUDeviceDescriptor{
     nextInChain          = nilptr,
     label                = wgpu_str("nebula-device"),
@@ -265,20 +227,6 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   }
   device_result = nilptr
   wgpuAdapterRequestDevice(self.adapter, &dev_desc, device_cb)
-## else
-  local dev_desc = WGPUDeviceDescriptor{
-    nextInChain          = nilptr,
-    label                = "nebula-device",
-    requiredFeatureCount = 0,
-    requiredFeatures     = nilptr,
-    requiredLimits       = nilptr,
-    defaultQueue         = {nextInChain = nilptr, label = nilptr},
-    deviceLostCallback   = nilptr,
-    deviceLostUserdata   = nilptr,
-  }
-  device_result = nilptr
-  wgpuAdapterRequestDevice(self.adapter, &dev_desc, (@pointer)(&on_device), nilptr)
-## end
   self.device = device_result
   if self.device == nilptr then
     printf("wgpu: no device\n")
@@ -288,7 +236,6 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   self.queue = wgpuDeviceGetQueue(self.device)
 
   -- 5. 查询 Surface 支持的格式
-## if NEBULA_TARGET ~= 'wasm' then
   --    wgpu-native v29 要求通过 wgpuSurfaceGetCapabilities 查询，不可硬编码
   local caps: WGPUSurfaceCapabilities = {}
   local caps_status = wgpuSurfaceGetCapabilities(self.surface, self.adapter, &caps)
@@ -331,14 +278,59 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
 
   printf("wgpu: surface format = %u (non-sRGB)\n", self.format)
   wgpuSurfaceCapabilitiesFreeMembers(caps)
-## else
-  -- WASM: 使用 wgpuSurfaceGetPreferredFormat（浏览器自动协商最佳格式）
+
+  ## else
+  -- =========================================================================
+  -- WASM 路径：使用 emscripten_webgpu_get_device() 获取 JS 预初始化的 Device
+  --
+  -- Emscripten 4.0.6 的 wgpuInstanceRequestAdapter 是异步的（Promise-based），
+  -- C 端无法同步等待。正确做法是在 JS 层 (shell.html) 通过
+  -- Module.preinitializedWebGPUDevice 预先创建好 device，然后在 C 端直接获取。
+  -- =========================================================================
+  self.device = emscripten_webgpu_get_device()
+  if self.device == nilptr then
+    printf("wgpu: emscripten_webgpu_get_device() returned null\n")
+    return false
+  end
+  printf("wgpu: got pre-initialized device from JS\n")
+
+  self.queue = wgpuDeviceGetQueue(self.device)
+
+  -- 在 WASM 端，创建 instance 和 surface 仍然需要（用于 surface configure）
+  self.instance = wgpuCreateInstance(nilptr)
+  if self.instance == nilptr then
+    printf("wgpu: failed to create instance\n")
+    return false
+  end
+
+  -- Canvas surface
+  local canvas_src = WGPUSurfaceSourceCanvasHTMLSelector{
+    chain = WGPUChainedStruct{
+      next  = nilptr,
+      sType = WGPUSType_SurfaceSourceCanvasHTMLSelector,
+    },
+    selector = "#nebula-canvas",
+  }
+  local surf_desc = WGPUSurfaceDescriptor{
+    nextInChain = (@*WGPUChainedStruct)(&canvas_src),
+    label       = nilptr,
+  }
+  self.surface = wgpuInstanceCreateSurface(self.instance, &surf_desc)
+  if self.surface == nilptr then
+    printf("wgpu: failed to create surface\n")
+    return false
+  end
+
+  -- adapter 在 WASM 端不需要保存（已由 JS 处理），设为 nil
+  self.adapter = nilptr
+
+  -- Surface 格式：浏览器通常使用 BGRA8Unorm
   self.format = wgpuSurfaceGetPreferredFormat(self.surface, self.adapter)
   if self.format == WGPUTextureFormat_Undefined then
     self.format = WGPUTextureFormat_BGRA8Unorm
   end
   printf("wgpu: surface format = %u (browser preferred)\n", self.format)
-## end
+  ## end
 
   -- 6. 配置 Surface
   local surf_cfg = WGPUSurfaceConfiguration{

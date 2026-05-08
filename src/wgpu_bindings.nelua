@@ -768,6 +768,9 @@ global function wgpuSurfaceCapabilitiesFreeMembers(caps: WGPUSurfaceCapabilities
 -- WASM: wgpuSurfaceGetCapabilities exists in newer Emscripten but with different signature
 -- We use wgpuSurfaceGetPreferredFormat instead (simpler)
 global function wgpuSurfaceGetPreferredFormat(surface: WGPUSurface, adapter: WGPUAdapter): WGPUTextureFormat <cimport, nodecl> end
+-- Emscripten WebGPU helper: get pre-initialized device from JS (Module.preinitializedWebGPUDevice)
+## cinclude "<emscripten/html5_webgpu.h>"
+global function emscripten_webgpu_get_device(): WGPUDevice <cimport, nodecl> end
 ## end
 global function wgpuSurfaceGetCurrentTexture(surface: WGPUSurface, surfaceTexture: *WGPUSurfaceTexture): void <cimport, nodecl> end
 global function wgpuSurfacePresent(surface: WGPUSurface): void <cimport, nodecl> end
