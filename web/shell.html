@@ -65,10 +65,8 @@
   <script>
     // Emscripten Module configuration — must be defined before {{{ SCRIPT }}}
     var Module = {
-      canvas: (function() { return document.getElementById('nebula-canvas'); })(),
-      onRuntimeInitialized: function() {
-        document.getElementById('loading').classList.add('hidden');
-      },
+      canvas: document.getElementById('nebula-canvas'),
+      noInitialRun: true,
       print: function(text) { console.log('[nebula]', text); },
       printErr: function(text) {
         console.error('[nebula]', text);
@@ -83,26 +81,24 @@
           document.getElementById('status').textContent = text;
         }
       },
-      // Pre-initialize WebGPU device in JS (async) before WASM main() runs
-      preRun: [function() {
-        Module.addRunDependency('webgpu-init');
+      onRuntimeInitialized: function() {
+        // Runtime ready — now do async WebGPU init, then call main
         (async function() {
-          const statusEl = document.getElementById('status');
-          const errorEl = document.getElementById('error-overlay');
+          var statusEl = document.getElementById('status');
+          var errorEl = document.getElementById('error-overlay');
 
           if (!navigator.gpu) {
             errorEl.style.display = 'block';
             errorEl.textContent = 'WebGPU is not supported in this browser.\n\n' +
               'Requirements:\n' +
               '  - Chrome 113+ / Edge 113+ / Firefox Nightly (with flags)\n' +
-              '  - Hardware GPU acceleration enabled\n\n' +
-              'Please update your browser or enable WebGPU.';
+              '  - Hardware GPU acceleration enabled';
             document.getElementById('loading').classList.add('hidden');
             return;
           }
 
           statusEl.textContent = 'Requesting GPU adapter...';
-          const adapter = await navigator.gpu.requestAdapter();
+          var adapter = await navigator.gpu.requestAdapter();
           if (!adapter) {
             errorEl.style.display = 'block';
             errorEl.textContent = 'WebGPU: Failed to get GPU adapter.\n\n' +
@@ -113,7 +109,7 @@
           }
 
           statusEl.textContent = 'Creating GPU device...';
-          const device = await adapter.requestDevice();
+          var device = await adapter.requestDevice();
           if (!device) {
             errorEl.style.display = 'block';
             errorEl.textContent = 'WebGPU: Failed to create GPU device.';
@@ -121,12 +117,12 @@
             return;
           }
 
-          // Store for Emscripten's WebGPU integration
           Module.preinitializedWebGPUDevice = device;
-          statusEl.textContent = 'Loading WASM module...';
-          Module.removeRunDependency('webgpu-init');
+          statusEl.textContent = 'Starting...';
+          document.getElementById('loading').classList.add('hidden');
+          Module.callMain();
         })();
-      }]
+      }
     };
   </script>
   {{{ SCRIPT }}}
