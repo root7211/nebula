@@ -428,7 +428,10 @@ global WGPUBindGroupLayoutEntry <cimport, nodecl> = @record{
   storageTexture:   record{ nextInChain: pointer, access: uint32, format: WGPUTextureFormat, viewDimension: uint32 },
 }
 ## else
--- WASM (Emscripten): no bindingArraySize, simpler layout (32-bit pointers)
+-- WASM (Emscripten): no bindingArraySize, simpler layout (32-bit pointers, wasm32 ABI)
+-- We use <cimport, nodecl, packed> and let Nelua verify against C layout.
+-- Sub-structs match Emscripten's WGPUBufferBindingLayout / WGPUSamplerBindingLayout /
+-- WGPUTextureBindingLayout / WGPUStorageTextureBindingLayout exactly.
 global WGPUBindGroupLayoutEntry <cimport, nodecl> = @record{
   nextInChain:      pointer,
   binding:          uint32,

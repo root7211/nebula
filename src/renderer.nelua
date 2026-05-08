@@ -705,7 +705,9 @@ global function nebula_upload_texture(
     baseArrayLayer  = 0,
     arrayLayerCount = 1,
     aspect          = (@uint32)(WGPUTextureAspect_All),
+  ## if NEBULA_TARGET ~= 'wasm' then
     usage           = 0,
+  ## end
   }
   $out_view = wgpuTextureCreateView($out_texture, &view_desc)
   if $out_view == nilptr then
@@ -824,7 +826,9 @@ global function nebula_create_render_target(
     baseArrayLayer  = 0,
     arrayLayerCount = 1,
     aspect          = (@uint32)(WGPUTextureAspect_All),
+  ## if NEBULA_TARGET ~= 'wasm' then
     usage           = 0,
+  ## end
   }
   $out_view = wgpuTextureCreateView($out_texture, &view_desc)
   if $out_view == nilptr then
