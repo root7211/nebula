@@ -96,12 +96,12 @@ global WGPUPresentMode_FifoRelaxed <comptime> = (@WGPUPresentMode)(0x00000002)
 global WGPUPresentMode_Immediate   <comptime> = (@WGPUPresentMode)(0x00000003)
 global WGPUPresentMode_Mailbox     <comptime> = (@WGPUPresentMode)(0x00000004)
 ## else
--- WASM (Emscripten/Dawn): Immediate=0, Mailbox=1, Fifo=2
+-- WASM (Emscripten 4.0.6): Fifo=1, Immediate=3, Mailbox=4
 global WGPUPresentMode_Undefined   <comptime> = (@WGPUPresentMode)(0x00000000)
-global WGPUPresentMode_Fifo        <comptime> = (@WGPUPresentMode)(0x00000002)
-global WGPUPresentMode_FifoRelaxed <comptime> = (@WGPUPresentMode)(0x00000002)
-global WGPUPresentMode_Immediate   <comptime> = (@WGPUPresentMode)(0x00000000)
-global WGPUPresentMode_Mailbox     <comptime> = (@WGPUPresentMode)(0x00000001)
+global WGPUPresentMode_Fifo        <comptime> = (@WGPUPresentMode)(0x00000001)
+global WGPUPresentMode_FifoRelaxed <comptime> = (@WGPUPresentMode)(0x00000001)
+global WGPUPresentMode_Immediate   <comptime> = (@WGPUPresentMode)(0x00000003)
+global WGPUPresentMode_Mailbox     <comptime> = (@WGPUPresentMode)(0x00000004)
 ## end
 
 global WGPULoadOp = @uint32
@@ -150,10 +150,10 @@ global WGPUVertexStepMode_Undefined <comptime> = (@WGPUVertexStepMode)(0x0000000
 global WGPUVertexStepMode_Vertex    <comptime> = (@WGPUVertexStepMode)(0x00000002)
 global WGPUVertexStepMode_Instance  <comptime> = (@WGPUVertexStepMode)(0x00000003)
 ## else
--- WASM (Emscripten/Dawn): Vertex=0, Instance=1, VertexBufferNotUsed=2
-global WGPUVertexStepMode_Undefined <comptime> = (@WGPUVertexStepMode)(0x00000002)
-global WGPUVertexStepMode_Vertex    <comptime> = (@WGPUVertexStepMode)(0x00000000)
-global WGPUVertexStepMode_Instance  <comptime> = (@WGPUVertexStepMode)(0x00000001)
+-- WASM (Emscripten 4.0.6): Undefined=0, VertexBufferNotUsed=1, Vertex=2, Instance=3
+global WGPUVertexStepMode_Undefined <comptime> = (@WGPUVertexStepMode)(0x00000000)
+global WGPUVertexStepMode_Vertex    <comptime> = (@WGPUVertexStepMode)(0x00000002)
+global WGPUVertexStepMode_Instance  <comptime> = (@WGPUVertexStepMode)(0x00000003)
 ## end
 
 ## if NEBULA_TARGET ~= 'wasm' then
@@ -179,9 +179,9 @@ global WGPUPrimitiveTopology = @uint32
 global WGPUPrimitiveTopology_TriangleList  <comptime> = (@WGPUPrimitiveTopology)(0x00000004)
 global WGPUPrimitiveTopology_TriangleStrip <comptime> = (@WGPUPrimitiveTopology)(0x00000005)
 ## else
--- WASM (Emscripten/Dawn): TriangleList=3, TriangleStrip=4
-global WGPUPrimitiveTopology_TriangleList  <comptime> = (@WGPUPrimitiveTopology)(0x00000003)
-global WGPUPrimitiveTopology_TriangleStrip <comptime> = (@WGPUPrimitiveTopology)(0x00000004)
+-- WASM (Emscripten 4.0.6): TriangleList=4, TriangleStrip=5
+global WGPUPrimitiveTopology_TriangleList  <comptime> = (@WGPUPrimitiveTopology)(0x00000004)
+global WGPUPrimitiveTopology_TriangleStrip <comptime> = (@WGPUPrimitiveTopology)(0x00000005)
 ## end
 
 global WGPUBlendOperation = @uint32
@@ -189,8 +189,8 @@ global WGPUBlendOperation = @uint32
 -- Native (wgpu-native v29): Add=1
 global WGPUBlendOperation_Add <comptime> = (@WGPUBlendOperation)(0x00000001)
 ## else
--- WASM (Emscripten/Dawn): Add=0
-global WGPUBlendOperation_Add <comptime> = (@WGPUBlendOperation)(0x00000000)
+-- WASM (Emscripten 4.0.6): Add=1
+global WGPUBlendOperation_Add <comptime> = (@WGPUBlendOperation)(0x00000001)
 ## end
 
 global WGPUBlendFactor = @uint32
@@ -201,11 +201,11 @@ global WGPUBlendFactor_One              <comptime> = (@WGPUBlendFactor)(0x000000
 global WGPUBlendFactor_SrcAlpha         <comptime> = (@WGPUBlendFactor)(0x00000005)
 global WGPUBlendFactor_OneMinusSrcAlpha <comptime> = (@WGPUBlendFactor)(0x00000006)
 ## else
--- WASM (Emscripten/Dawn): Zero=0, One=1, SrcAlpha=4, OneMinusSrcAlpha=5
-global WGPUBlendFactor_Zero             <comptime> = (@WGPUBlendFactor)(0x00000000)
-global WGPUBlendFactor_One              <comptime> = (@WGPUBlendFactor)(0x00000001)
-global WGPUBlendFactor_SrcAlpha         <comptime> = (@WGPUBlendFactor)(0x00000004)
-global WGPUBlendFactor_OneMinusSrcAlpha <comptime> = (@WGPUBlendFactor)(0x00000005)
+-- WASM (Emscripten 4.0.6): Zero=1, One=2, SrcAlpha=5, OneMinusSrcAlpha=6
+global WGPUBlendFactor_Zero             <comptime> = (@WGPUBlendFactor)(0x00000001)
+global WGPUBlendFactor_One              <comptime> = (@WGPUBlendFactor)(0x00000002)
+global WGPUBlendFactor_SrcAlpha         <comptime> = (@WGPUBlendFactor)(0x00000005)
+global WGPUBlendFactor_OneMinusSrcAlpha <comptime> = (@WGPUBlendFactor)(0x00000006)
 ## end
 
 global WGPUColorWriteMask = @uint32
