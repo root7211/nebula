@@ -695,6 +695,7 @@ global function nebula_upload_texture(
     return false
   end
 
+## if NEBULA_TARGET ~= 'wasm' then
   local view_desc = WGPUTextureViewDescriptor{
     nextInChain     = nilptr,
     label           = wgpu_str(label),
@@ -705,10 +706,21 @@ global function nebula_upload_texture(
     baseArrayLayer  = 0,
     arrayLayerCount = 1,
     aspect          = (@uint32)(WGPUTextureAspect_All),
-  ## if NEBULA_TARGET ~= 'wasm' then
     usage           = 0,
-  ## end
   }
+## else
+  local view_desc = WGPUTextureViewDescriptor{
+    nextInChain     = nilptr,
+    label           = wgpu_str(label),
+    format          = format,
+    dimension       = (@uint32)(WGPUTextureViewDimension_2D),
+    baseMipLevel    = 0,
+    mipLevelCount   = 1,
+    baseArrayLayer  = 0,
+    arrayLayerCount = 1,
+    aspect          = (@uint32)(WGPUTextureAspect_All),
+  }
+## end
   $out_view = wgpuTextureCreateView($out_texture, &view_desc)
   if $out_view == nilptr then
     printf("wgpu: failed to create upload texture view (%s)\n", label)
@@ -816,6 +828,7 @@ global function nebula_create_render_target(
     return false
   end
 
+## if NEBULA_TARGET ~= 'wasm' then
   local view_desc = WGPUTextureViewDescriptor{
     nextInChain     = nilptr,
     label           = wgpu_str(label),
@@ -826,10 +839,21 @@ global function nebula_create_render_target(
     baseArrayLayer  = 0,
     arrayLayerCount = 1,
     aspect          = (@uint32)(WGPUTextureAspect_All),
-  ## if NEBULA_TARGET ~= 'wasm' then
     usage           = 0,
-  ## end
   }
+## else
+  local view_desc = WGPUTextureViewDescriptor{
+    nextInChain     = nilptr,
+    label           = wgpu_str(label),
+    format          = renderer.format,
+    dimension       = (@uint32)(WGPUTextureViewDimension_2D),
+    baseMipLevel    = 0,
+    mipLevelCount   = 1,
+    baseArrayLayer  = 0,
+    arrayLayerCount = 1,
+    aspect          = (@uint32)(WGPUTextureAspect_All),
+  }
+## end
   $out_view = wgpuTextureCreateView($out_texture, &view_desc)
   if $out_view == nilptr then
     printf("wgpu: failed to create render target view (%s)\n", label)
