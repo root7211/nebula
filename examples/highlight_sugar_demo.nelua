@@ -282,14 +282,26 @@ end
 
 -- =============================================================================
 -- ★ Phase 4.5 S2: 统一生命周期（nebula_init + nebula_should_close + nebula_shutdown）
---
--- 旧写法（~15 行手动 GLFW/WGPU 初始化）：
---   glfwInit() → glfwWindowHint × 2 → glfwCreateWindow → nebula_input_install_callbacks
---   → renderer:init → app:init → ... → glfwDestroyWindow → glfwTerminate
---
--- 新写法（3 行）：
---   nebula_init → nebula_should_close → nebula_shutdown
+-- ★ WASM fix: 添加 emscripten_set_main_loop 支持
 -- =============================================================================
+
+## if NEBULA_TARGET == 'wasm' then
+global _wasm_hlsugar_renderer: *NebulaRenderer = nilptr
+global _wasm_hlsugar_app: *HighlightSugarApp = nilptr
+global _wasm_hlsugar_input: NebulaInputState
+global _wasm_hlsugar_prev_time: float64 = 0.0
+
+global function _wasm_hlsugar_frame(): void
+  glfwPollEvents()
+  local now = glfwGetTime()
+  local dt = (@float32)(now - _wasm_hlsugar_prev_time)
+  _wasm_hlsugar_prev_time = now
+  nebula_collect_input(_nebula_window, &_wasm_hlsugar_input, dt)
+  _wasm_hlsugar_app.editor.visual.content_height = (@float32)(_wasm_hlsugar_app.editor.line_count) * (EDIT_CELL_H + 2.0)
+  nebula_frame_render(_wasm_hlsugar_renderer, _wasm_hlsugar_app, &_wasm_hlsugar_input, dt, 0.04, 0.04, 0.06)
+end
+## end
+
 local function main(): int32
   local renderer: NebulaRenderer
   local app: HighlightSugarApp
@@ -365,6 +377,12 @@ local function main(): int32
   local input: NebulaInputState
   local prev_time = glfwGetTime()
 
+  ## if NEBULA_TARGET == 'wasm' then
+  _wasm_hlsugar_renderer = &renderer
+  _wasm_hlsugar_app = &app
+  _wasm_hlsugar_prev_time = glfwGetTime()
+  emscripten_set_main_loop(_wasm_hlsugar_frame, 0, 1)
+  ## else
   while not nebula_should_close() do
     nebula_poll_events()
     local now = glfwGetTime()
@@ -376,6 +394,7 @@ local function main(): int32
 
     nebula_frame_render(&renderer, &app, &input, dt, 0.04, 0.04, 0.06)
   end
+  ## end
 
   app:deinit()
   nebula_shutdown(&renderer)

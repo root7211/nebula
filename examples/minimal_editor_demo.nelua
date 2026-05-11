@@ -16,6 +16,24 @@ require "nebula"
 ##   },
 ## })
 
+-- ★ WASM: 全局变量 + 帧回调
+## if NEBULA_TARGET == 'wasm' then
+global _wasm_minied_renderer: *NebulaRenderer = nilptr
+global _wasm_minied_app: *EditorApp = nilptr
+global _wasm_minied_input: NebulaInputState
+global _wasm_minied_prev_time: float64 = 0.0
+
+global function _wasm_minied_frame(): void
+  glfwPollEvents()
+  local now = glfwGetTime()
+  local dt = (@float32)(now - _wasm_minied_prev_time)
+  _wasm_minied_prev_time = now
+  nebula_collect_input(_nebula_window, &_wasm_minied_input, dt)
+  _wasm_minied_app.editor.visual.content_height = (@float32)(_wasm_minied_app.editor.line_count) * 18.0
+  nebula_frame_render(_wasm_minied_renderer, _wasm_minied_app, &_wasm_minied_input, dt, 0.09, 0.09, 0.10)
+end
+## end
+
 local function main(): int32
   local renderer: NebulaRenderer
   local app: EditorApp
@@ -25,11 +43,19 @@ local function main(): int32
   app.editor:init_themed(Vec2{x = 0.0, y = 0.0}, Vec2{x = (@float32)(EditorApp_WIN_WIDTH), y = (@float32)(EditorApp_WIN_HEIGHT)}, 0.0)
 
   local input: NebulaInputState
+
+  ## if NEBULA_TARGET == 'wasm' then
+  _wasm_minied_renderer = &renderer
+  _wasm_minied_app = &app
+  _wasm_minied_prev_time = glfwGetTime()
+  emscripten_set_main_loop(_wasm_minied_frame, 0, 1)
+  ## else
   while not nebula_should_close() do
     local dt = nebula_frame_begin(&input)
     app.editor.visual.content_height = (@float32)(app.editor.line_count) * 18.0
     nebula_frame_render(&renderer, &app, &input, dt, 0.09, 0.09, 0.10)
   end
+  ## end
   app:deinit()
   nebula_shutdown(&renderer)
   printf("minimal_editor: clean exit\n")

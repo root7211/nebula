@@ -179,7 +179,7 @@ jobs:
 
       - name: Build demos for WASM
         run: |
-          WASM_DEMOS="button_v2_demo layout_demo form_demo"
+          WASM_DEMOS="button_v2_demo layout_demo form_demo text_editor_demo_v3 minimal_editor_demo highlight_sugar_demo"
           for demo in $WASM_DEMOS; do
             echo "--- Building $demo ---"
             bash build_wasm.sh "$demo" || echo "::warning::$demo build failed, skipping"
@@ -240,16 +240,28 @@ jobs:
             <p class="subtitle">Shape-Is paradigm: compile-time derivation engine + wgpu-native v29 SDF renderer</p>
             <ul class="demo-list">
               <li>
-                <a href="button_v2_demo.html">button_v2_demo</a>
-                <div class="desc">Phase 4.5-S3 sugar API — single button with hover/press animations (18 lines of Nelua)</div>
+                <a href="text_editor_demo_v3.html">text_editor_demo_v3</a>
+                <div class="desc">Full text editor — syntax highlighting, search/replace, undo/redo, clipboard</div>
+              </li>
+              <li>
+                <a href="highlight_sugar_demo.html">highlight_sugar_demo</a>
+                <div class="desc">Syntax highlighting editor — sugar API (nebula_component + auto pipeline)</div>
+              </li>
+              <li>
+                <a href="minimal_editor_demo.html">minimal_editor_demo</a>
+                <div class="desc">Minimal editor — 12 lines of framework code</div>
+              </li>
+              <li>
+                <a href="form_demo.html">form_demo</a>
+                <div class="desc">Form with text input, buttons, and keyboard interaction</div>
               </li>
               <li>
                 <a href="layout_demo.html">layout_demo</a>
                 <div class="desc">Multi-component flexbox layout with responsive resize</div>
               </li>
               <li>
-                <a href="form_demo.html">form_demo</a>
-                <div class="desc">Form with text input, buttons, and keyboard interaction</div>
+                <a href="button_v2_demo.html">button_v2_demo</a>
+                <div class="desc">Phase 4.5-S3 sugar API — single button with hover/press animations (18 lines of Nelua)</div>
               </li>
             </ul>
             <div class="req">
