@@ -179,7 +179,7 @@ jobs:
 
       - name: Build demos for WASM
         run: |
-          WASM_DEMOS="button_v2_demo button_demo layout_demo form_demo"
+          WASM_DEMOS="button_v2_demo layout_demo form_demo"
           for demo in $WASM_DEMOS; do
             echo "--- Building $demo ---"
             bash build_wasm.sh "$demo" || echo "::warning::$demo build failed, skipping"
@@ -242,10 +242,6 @@ jobs:
               <li>
                 <a href="button_v2_demo.html">button_v2_demo</a>
                 <div class="desc">Phase 4.5-S3 sugar API — single button with hover/press animations (18 lines of Nelua)</div>
-              </li>
-              <li>
-                <a href="button_demo.html">button_demo</a>
-                <div class="desc">Original button demo — low-level API showcase</div>
               </li>
               <li>
                 <a href="layout_demo.html">layout_demo</a>
