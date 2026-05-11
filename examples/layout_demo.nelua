@@ -286,15 +286,10 @@ local function main(): int32
   local input: NebulaInputState
   local prev_time = glfwGetTime()
 
-  -- ★ Phase 3.11: 主循环使用 nebula_should_close
-  while not nebula_should_close() do
-    nebula_poll_events()
-    local now = glfwGetTime()
-    local dt  = (@float32)(now - prev_time)
-    prev_time = now
-    nebula_collect_input(_nebula_window, &input, dt)
-    nebula_frame_render(&renderer, &app, &input, dt, 0.09, 0.09, 0.10)
-  end
+  -- ★ Phase 4.2.1: 使用 nebula_main_loop 跨平台宏
+  --   Native: 阻塞式 while 循环
+  --   WASM:   emscripten_set_main_loop 回调式
+  ## nebula_main_loop(&renderer, &app, &input, &prev_time, 0.09, 0.09, 0.10)
 
   -- ★ Phase 3.11: 一行清理
   nebula_shutdown(&renderer)

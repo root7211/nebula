@@ -206,7 +206,35 @@ nebula_annotate("TextVisual", {
 -- 主程序
 -- ★ Phase 3.11: 使用 nebula_init / nebula_should_close / nebula_shutdown
 --   消除 GLFW/WGPU 样板代码，main() 收缩到 ~25 行
+-- ★ WASM fix: 添加 emscripten_set_main_loop 支持，避免阻塞式循环冻结浏览器
 -- =============================================================================
+
+-- ★ WASM: 全局变量必须在顶层作用域声明（Nelua 限制）
+## if NEBULA_TARGET == 'wasm' then
+global _wasm_form_renderer: *NebulaRenderer = nilptr
+global _wasm_form_app: *FormApp = nilptr
+global _wasm_form_input: NebulaInputState
+global _wasm_form_prev_time: float64 = 0.0
+
+global function _wasm_form_frame(): void
+  glfwPollEvents()
+  local now = glfwGetTime()
+  local dt = (@float32)(now - _wasm_form_prev_time)
+  _wasm_form_prev_time = now
+  nebula_collect_input(_nebula_window, &_wasm_form_input, dt)
+
+  -- 业务逻辑：Enter 键打印表单内容
+  if _wasm_form_input.key_pressed == NebulaKey.Enter then
+    local flat_email: [256]uint8
+    printf("email: %s\n", _wasm_form_app.email_input:get_text(&flat_email[0], 255))
+    printf("password: [%d chars]\n", (@uint32)(_wasm_form_app.password_input:get_text_len()))
+    printf("remember_me: %s\n", _wasm_form_app.remember_me.toggle.is_on and "true" or "false")
+  end
+
+  nebula_frame_render(_wasm_form_renderer, _wasm_form_app, &_wasm_form_input, dt, 0.09, 0.09, 0.10)
+end
+## end
+
 local function main(): int32
   local renderer: NebulaRenderer
   local form: FormApp
@@ -296,7 +324,14 @@ local function main(): int32
   local input: NebulaInputState
   local prev_time = glfwGetTime()
 
-  -- ★ Phase 3.11: 主循环使用 nebula_should_close（消除 glfwWindowShouldClose 样板）
+  ## if NEBULA_TARGET == 'wasm' then
+  -- Web: 设置全局状态，注册帧回调，交出控制权
+  _wasm_form_renderer = &renderer
+  _wasm_form_app = &form
+  _wasm_form_prev_time = glfwGetTime()
+  emscripten_set_main_loop(_wasm_form_frame, 0, 1)
+  ## else
+  -- Native: 传统阻塞循环
   while not nebula_should_close() do
     nebula_poll_events()
     local now = glfwGetTime()
@@ -314,6 +349,7 @@ local function main(): int32
 
     nebula_frame_render(&renderer, &form, &input, dt, 0.09, 0.09, 0.10)
   end
+  ## end
 
   -- ★ Phase 3.11: 一行清理（封装 WGPU/GLFW 资源释放）
   nebula_shutdown(&renderer)
