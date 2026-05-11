@@ -197,7 +197,26 @@ nebula_annotate("ButtonVisual", {
 -- 主程序
 -- ★ Phase 3.11: 使用 nebula_init / nebula_should_close / nebula_shutdown
 --   消除 GLFW/WGPU 样板代码，main() 收缩到 ~30 行
+-- ★ WASM fix: 添加 emscripten_set_main_loop 支持，避免阻塞式循环冻结浏览器
 -- =============================================================================
+
+-- ★ WASM: 全局变量必须在顶层作用域声明（Nelua 限制）
+## if NEBULA_TARGET == 'wasm' then
+global _wasm_layout_renderer: *NebulaRenderer = nilptr
+global _wasm_layout_app: *LayoutApp = nilptr
+global _wasm_layout_input: NebulaInputState
+global _wasm_layout_prev_time: float64 = 0.0
+
+global function _wasm_layout_frame(): void
+  glfwPollEvents()
+  local now = glfwGetTime()
+  local dt = (@float32)(now - _wasm_layout_prev_time)
+  _wasm_layout_prev_time = now
+  nebula_collect_input(_nebula_window, &_wasm_layout_input, dt)
+  nebula_frame_render(_wasm_layout_renderer, _wasm_layout_app, &_wasm_layout_input, dt, 0.09, 0.09, 0.10)
+end
+## end
+
 local function main(): int32
   local renderer: NebulaRenderer
   local app: LayoutApp
@@ -286,10 +305,23 @@ local function main(): int32
   local input: NebulaInputState
   local prev_time = glfwGetTime()
 
-  -- ★ Phase 4.2.1: 使用 nebula_main_loop 跨平台宏
-  --   Native: 阻塞式 while 循环
-  --   WASM:   emscripten_set_main_loop 回调式
-  ## nebula_main_loop(&renderer, &app, &input, &prev_time, 0.09, 0.09, 0.10)
+  ## if NEBULA_TARGET == 'wasm' then
+  -- Web: 设置全局状态，注册帧回调，交出控制权
+  _wasm_layout_renderer = &renderer
+  _wasm_layout_app = &app
+  _wasm_layout_prev_time = glfwGetTime()
+  emscripten_set_main_loop(_wasm_layout_frame, 0, 1)
+  ## else
+  -- Native: 传统阻塞循环
+  while not nebula_should_close() do
+    nebula_poll_events()
+    local now = glfwGetTime()
+    local dt  = (@float32)(now - prev_time)
+    prev_time = now
+    nebula_collect_input(_nebula_window, &input, dt)
+    nebula_frame_render(&renderer, &app, &input, dt, 0.09, 0.09, 0.10)
+  end
+  ## end
 
   -- ★ Phase 3.11: 一行清理
   nebula_shutdown(&renderer)
