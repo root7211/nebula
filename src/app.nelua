@@ -329,7 +329,11 @@ global function nebula_frame_render(
         height          = new_h,
         viewFormatCount = 0,
         viewFormats     = nilptr,
-        alphaMode       = 1, -- WGPUCompositeAlphaMode_Auto
+        ## if NEBULA_TARGET ~= 'wasm' then
+        alphaMode       = 1, -- WGPUCompositeAlphaMode_Auto (native)
+        ## else
+        alphaMode       = 0, -- WGPUCompositeAlphaMode_Auto (WASM/Emscripten 4.0.6)
+        ## end
         presentMode     = WGPUPresentMode_Fifo,
       }
       wgpuSurfaceConfigure(renderer.surface, &surf_cfg)
@@ -446,7 +450,11 @@ global function nebula_frame_render_multipass(
         height          = new_h,
         viewFormatCount = 0,
         viewFormats     = nilptr,
-        alphaMode       = 1, -- WGPUCompositeAlphaMode_Auto
+        ## if NEBULA_TARGET ~= 'wasm' then
+        alphaMode       = 1, -- WGPUCompositeAlphaMode_Auto (native)
+        ## else
+        alphaMode       = 0, -- WGPUCompositeAlphaMode_Auto (WASM/Emscripten 4.0.6)
+        ## end
         presentMode     = WGPUPresentMode_Fifo,
       }
       wgpuSurfaceConfigure(renderer.surface, &surf_cfg)
