@@ -140,8 +140,15 @@ global WGPUBufferUsage_Indirect     <comptime> = (@WGPUBufferUsage)(0x00000100)
 global WGPUBufferUsage_QueryResolve <comptime> = (@WGPUBufferUsage)(0x00000200)
 
 global WGPUVertexFormat = @uint32
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native (wgpu-native v29): Float32x2=0x1D, Float32x4=0x1F
 global WGPUVertexFormat_Float32x2 <comptime> = (@WGPUVertexFormat)(0x0000001D)
 global WGPUVertexFormat_Float32x4 <comptime> = (@WGPUVertexFormat)(0x0000001F)
+## else
+-- WASM (Emscripten 4.0.6): Float32x2=0x14, Float32x4=0x16
+global WGPUVertexFormat_Float32x2 <comptime> = (@WGPUVertexFormat)(0x00000014)
+global WGPUVertexFormat_Float32x4 <comptime> = (@WGPUVertexFormat)(0x00000016)
+## end
 
 global WGPUVertexStepMode = @uint32
 ## if NEBULA_TARGET ~= 'wasm' then
@@ -902,13 +909,8 @@ global WGPUTextureUsage_RenderAttachment <comptime> = (@WGPUTextureUsage)(0x0000
 
 -- ===== 纹理维度 =====
 global WGPUTextureDimension = @uint32
-## if NEBULA_TARGET ~= 'wasm' then
--- Native (wgpu-native v29): Undefined=0, 1D=1, 2D=2, 3D=3
+-- Native 与 WASM (Emscripten 4.0.6) 值一致：2D=0x02
 global WGPUTextureDimension_2D <comptime> = (@WGPUTextureDimension)(0x00000002)
-## else
--- WASM (Emscripten/Dawn): 1D=0, 2D=1, 3D=2
-global WGPUTextureDimension_2D <comptime> = (@WGPUTextureDimension)(0x00000001)
-## end
 
 -- ===== 纹理视图维度 =====
 global WGPUTextureViewDimension = @uint32
@@ -916,39 +918,45 @@ global WGPUTextureViewDimension_2D <comptime> = (@WGPUTextureViewDimension)(0x00
 
 -- ===== 纹理 Aspect =====
 global WGPUTextureAspect = @uint32
-## if NEBULA_TARGET ~= 'wasm' then
--- Native (wgpu-native v29): Undefined=0, All=1
+-- Native 与 WASM (Emscripten 4.0.6) 值一致：Undefined=0, All=1
 global WGPUTextureAspect_Undefined <comptime> = (@WGPUTextureAspect)(0x00000000)
 global WGPUTextureAspect_All       <comptime> = (@WGPUTextureAspect)(0x00000001)
-## else
--- WASM (Emscripten/Dawn): All=0, StencilOnly=1, DepthOnly=2
-global WGPUTextureAspect_Undefined <comptime> = (@WGPUTextureAspect)(0x00000000)
-global WGPUTextureAspect_All       <comptime> = (@WGPUTextureAspect)(0x00000000)
-## end
 
 -- ===== 采样器绑定类型 =====
 global WGPUSamplerBindingType = @uint32
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native (wgpu-native v29): Filtering=0x02
 global WGPUSamplerBindingType_Filtering <comptime> = (@WGPUSamplerBindingType)(0x00000002)
+## else
+-- WASM (Emscripten 4.0.6): Filtering=0x01
+global WGPUSamplerBindingType_Filtering <comptime> = (@WGPUSamplerBindingType)(0x00000001)
+## end
 
 -- ===== 纹理采样类型 =====
 global WGPUTextureSampleType = @uint32
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native (wgpu-native v29): Float=0x02
 global WGPUTextureSampleType_Float <comptime> = (@WGPUTextureSampleType)(0x00000002)
+## else
+-- WASM (Emscripten 4.0.6): Float=0x01
+global WGPUTextureSampleType_Float <comptime> = (@WGPUTextureSampleType)(0x00000001)
+## end
 
 -- ===== 地址模式 =====
 global WGPUAddressMode = @uint32
+## if NEBULA_TARGET ~= 'wasm' then
+-- Native (wgpu-native v29): ClampToEdge=0x02
 global WGPUAddressMode_ClampToEdge <comptime> = (@WGPUAddressMode)(0x00000002)
+## else
+-- WASM (Emscripten 4.0.6): ClampToEdge=0x01
+global WGPUAddressMode_ClampToEdge <comptime> = (@WGPUAddressMode)(0x00000001)
+## end
 
 -- ===== 过滤模式 =====
 global WGPUFilterMode = @uint32
-## if NEBULA_TARGET ~= 'wasm' then
--- Native (wgpu-native v29): Undefined=0, Nearest=1, Linear=2
+-- Native 与 WASM (Emscripten 4.0.6) 值一致：Nearest=1, Linear=2
 global WGPUFilterMode_Nearest <comptime> = (@WGPUFilterMode)(0x00000001)
 global WGPUFilterMode_Linear  <comptime> = (@WGPUFilterMode)(0x00000002)
-## else
--- WASM (Emscripten/Dawn): Nearest=0, Linear=1
-global WGPUFilterMode_Nearest <comptime> = (@WGPUFilterMode)(0x00000000)
-global WGPUFilterMode_Linear  <comptime> = (@WGPUFilterMode)(0x00000001)
-## end
 
 -- ===== Mipmap 过滤模式 =====
 global WGPUMipmapFilterMode = @uint32
