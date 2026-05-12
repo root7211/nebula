@@ -179,7 +179,7 @@ jobs:
 
       - name: Build demos for WASM
         run: |
-          WASM_DEMOS="button_v2_demo layout_demo form_demo"
+          WASM_DEMOS="button_v2_demo layout_demo form_demo text_editor_demo_v3 minimal_editor_demo"
           for demo in $WASM_DEMOS; do
             echo "--- Building $demo ---"
             bash build_wasm.sh "$demo" || echo "::warning::$demo build failed, skipping"
@@ -250,6 +250,14 @@ jobs:
               <li>
                 <a href="form_demo.html">form_demo</a>
                 <div class="desc">Form with text input, buttons, and keyboard interaction</div>
+              </li>
+              <li>
+                <a href="text_editor_demo_v3.html">text_editor_demo_v3</a>
+                <div class="desc">Full text editor with multi-language syntax highlighting, search/replace, undo/redo, line numbers</div>
+              </li>
+              <li>
+                <a href="minimal_editor_demo.html">minimal_editor_demo</a>
+                <div class="desc">Minimal editor — framework code in 12 lines of Nelua</div>
               </li>
             </ul>
             <div class="req">
