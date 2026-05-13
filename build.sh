@@ -79,6 +79,7 @@ if [ "$NEBULA_TARGET" == "linux" ]; then
   fi
   if [ "$DEMO_TARGET" == "code_browser_demo" ]; then
     NELUA_FLAGS="$NELUA_FLAGS -L $SCRIPT_DIR/examples/code_browser"
+    CFLAGS="$CFLAGS -I$SCRIPT_DIR/examples/code_browser"
   fi
   
 elif [ "$NEBULA_TARGET" == "windows" ]; then
