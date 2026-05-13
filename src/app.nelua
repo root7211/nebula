@@ -87,23 +87,23 @@ global function _nebula_key_callback(
 
   -- ★ Phase 4.X: Ctrl 组合键优先（剪贴板 + 全选）
   if ctrl_down then
-    if     key == 67 then nk = NebulaKey.Copy      -- Ctrl+C (GLFW_KEY_C = 67)
-    elseif key == 86 then nk = NebulaKey.Paste     -- Ctrl+V (GLFW_KEY_V = 86)
-    elseif key == 88 then nk = NebulaKey.Cut       -- Ctrl+X (GLFW_KEY_X = 88)
-    elseif key == 65 then nk = NebulaKey.SelectAll -- Ctrl+A (GLFW_KEY_A = 65)
+    if     key == GLFW_KEY_C then nk = NebulaKey.Copy      -- Ctrl+C
+    elseif key == GLFW_KEY_V then nk = NebulaKey.Paste     -- Ctrl+V
+    elseif key == GLFW_KEY_X then nk = NebulaKey.Cut       -- Ctrl+X
+    elseif key == GLFW_KEY_A then nk = NebulaKey.SelectAll -- Ctrl+A
     -- ★ Phase 4.7-S5: Undo/Redo
-    elseif key == 90 then                          -- Ctrl+Z (GLFW_KEY_Z = 90)
+    elseif key == GLFW_KEY_Z then                          -- Ctrl+Z
       if shift_down then
-        nk = NebulaKey.Redo                        -- Ctrl+Shift+Z = Redo
+        nk = NebulaKey.Redo                                -- Ctrl+Shift+Z = Redo
       else
-        nk = NebulaKey.Undo                        -- Ctrl+Z = Undo
+        nk = NebulaKey.Undo                                -- Ctrl+Z = Undo
       end
-    elseif key == 89 then nk = NebulaKey.Redo      -- Ctrl+Y (GLFW_KEY_Y = 89)
+    elseif key == GLFW_KEY_Y then nk = NebulaKey.Redo      -- Ctrl+Y
     -- ★ Phase 4.7-S7: Save
-    elseif key == 83 then nk = NebulaKey.Save      -- Ctrl+S (GLFW_KEY_S = 83)
+    elseif key == GLFW_KEY_S then nk = NebulaKey.Save      -- Ctrl+S
     -- ★ Phase 4.8-S2: Find / Replace
-    elseif key == 70 then nk = NebulaKey.Find       -- Ctrl+F (GLFW_KEY_F = 70)
-    elseif key == 72 then nk = NebulaKey.Replace    -- Ctrl+H (GLFW_KEY_H = 72)
+    elseif key == GLFW_KEY_F then nk = NebulaKey.Find      -- Ctrl+F
+    elseif key == GLFW_KEY_H then nk = NebulaKey.Replace   -- Ctrl+H
     end
   end
 
@@ -123,7 +123,7 @@ global function _nebula_key_callback(
   elseif key == GLFW_KEY_UP    then nk = shift_down and NebulaKey.ShiftUp    or NebulaKey.Up
   elseif key == GLFW_KEY_DOWN  then nk = shift_down and NebulaKey.ShiftDown  or NebulaKey.Down
   -- ★ Phase 4.8-S2: F3 = FindNext (non-ctrl key)
-  elseif key == 292            then nk = NebulaKey.FindNext  -- GLFW_KEY_F3 = 292
+  elseif key == GLFW_KEY_F3    then nk = NebulaKey.FindNext  -- F3
   end
   end -- close: if nk == NebulaKey.None
 
