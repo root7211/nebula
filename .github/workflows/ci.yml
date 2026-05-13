@@ -62,29 +62,60 @@ jobs:
       - name: Download wgpu-native
         run: bash tools/setup_wgpu.sh
 
-      - name: Compile demos (C generation only)
+      - name: Compile all demos (full coverage, 32 targets)
         run: |
-          DEMOS="button_demo layout_demo login_demo form_demo dynamic_list_demo shadow_demo text_demo slider_demo scrollable_demo dropdown_demo multiline_editable_demo slug_bench cjk_text_demo dense_text_demo text_editor_demo_v3 button_v2_demo dynamic_list_v2_demo"
-          FAIL=0
+          # All demo targets from build.sh case statement
+          DEMOS="button_demo button_sugar_demo button_v2_demo
+                 cjk_editor_demo cjk_text_demo code_browser_demo
+                 dense_editor_demo dense_text_demo dropdown_demo
+                 dynamic_list_demo dynamic_list_v2_demo
+                 editor_with_lines_demo form_demo
+                 highlight_editor_demo highlight_sugar_demo
+                 json_viewer_demo json_viewer_demo_v2
+                 layout_demo login_demo minimal_editor_demo
+                 multiline_editable_demo multiline_sugar_demo
+                 scrollable_demo shadow_demo slider_demo slug_bench
+                 term_demo term_demo_v2 text_demo
+                 text_editor_demo text_editor_demo_v2 text_editor_demo_v3"
+          FAIL=0; PASS_COUNT=0; TOTAL=0
           for demo in $DEMOS; do
-            echo "--- Compiling $demo ---"
+            TOTAL=$((TOTAL + 1))
+            echo "--- [$TOTAL] Compiling $demo ---"
             EXTRA_FLAGS=""
-            if [ "$demo" = "json_viewer_demo" ] || [ "$demo" = "json_viewer_demo_v2" ]; then
-              EXTRA_FLAGS="-L examples/json_viewer"
-            fi
+            EXTRA_CFLAGS=""
+            EXTRA_LDFLAGS=""
+            # Per-demo search paths and flags
+            case "$demo" in
+              json_viewer_demo|json_viewer_demo_v2)
+                EXTRA_FLAGS="-L examples/json_viewer" ;;
+              code_browser_demo)
+                EXTRA_FLAGS="-L examples/code_browser"
+                EXTRA_CFLAGS="-Iexamples/code_browser" ;;
+              term_demo|term_demo_v2)
+                EXTRA_FLAGS="-L examples/term"
+                EXTRA_LDFLAGS="-lutil" ;;
+            esac
             if nelua -c -L src -L assets/generated --add-path . --add-path examples --add-path assets/generated \
               $EXTRA_FLAGS \
-              --cflags="-I./vendor/wgpu-native/include" \
-              --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib" \
+              --cflags="-I./vendor/wgpu-native/include $EXTRA_CFLAGS" \
+              --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl -Wl,-rpath,./vendor/wgpu-native/lib $EXTRA_LDFLAGS" \
               "examples/${demo}.nelua" -o "/tmp/${demo}" 2>&1; then
               echo "[PASS] $demo"
+              PASS_COUNT=$((PASS_COUNT + 1))
             else
               echo "::error::COMPILE FAIL: $demo"
               FAIL=$((FAIL + 1))
             fi
           done
-          echo "Compile results: $(($(echo $DEMOS | wc -w) - FAIL))/$(echo $DEMOS | wc -w) passed"
+          echo ""
+          echo "Compile results: $PASS_COUNT/$TOTAL passed, $FAIL failed"
           if [ "$FAIL" -gt 0 ]; then exit 1; fi
+
+      - name: Run C unit tests
+        run: |
+          echo "--- Compiling test_fs_tree.c ---"
+          gcc -o /tmp/test_fs_tree tests/test_fs_tree.c -Wall -Wextra
+          /tmp/test_fs_tree
 
   # ============================================================
   # Job 3: Windows 交叉编译验证（nelua -c --target=windows）
