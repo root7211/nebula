@@ -1,0 +1,88 @@
+-- =============================================================================
+-- fs_bindings.nelua
+-- Nebula Code Browser — POSIX Filesystem C FFI Bindings
+--
+-- Provides opendir/readdir/closedir + stat for directory traversal.
+-- Follows pty_bindings.nelua pattern: minimal C FFI, zero framework dependency.
+--
+-- Axiom compliance:
+--   A: All bindings declared at S1, zero runtime overhead
+--   B: L0 resources (DIR*) managed explicitly by caller
+-- =============================================================================
+
+## cinclude "<dirent.h>"
+## cinclude "<sys/stat.h>"
+## cinclude "<string.h>"
+## cinclude "<stdlib.h>"
+
+-- Inline C helper: stat-based directory check (avoids binding struct stat)
+-- Use cdefine to emit at file scope
+## cdefine "NEBULA_FS_IS_DIR_DEFINED"
+## cemitdecl "static int _nebula_c_is_dir(const char* path) { struct stat sb; if (lstat(path, &sb) != 0) return 0; return S_ISDIR(sb.st_mode); }"
+
+-- Opaque DIR handle
+global DIR <cimport, nodecl, forwarddecl> = @record{}
+
+-- dirent structure (simplified — we only need d_name and d_type)
+global dirent <cimport, nodecl, ctypedef> = @record{
+  d_ino:    culong,
+  d_off:    clong,
+  d_reclen: uint16,
+  d_type:   uint8,
+  d_name:   [256]cchar,
+}
+
+-- d_type constants
+global DT_UNKNOWN: uint8 = 0
+global DT_DIR:     uint8 = 4
+global DT_REG:     uint8 = 8
+global DT_LNK:     uint8 = 10
+
+-- POSIX directory API
+global function opendir(name: cstring): *DIR <cimport, nodecl> end
+global function readdir(dirp: *DIR): *dirent <cimport, nodecl> end
+global function closedir(dirp: *DIR): cint <cimport, nodecl> end
+
+-- String helpers
+global function strlen(s: cstring): csize <cimport, nodecl> end
+global function strcmp(s1: cstring, s2: cstring): cint <cimport, nodecl> end
+global function strcpy(dest: cstring, src: cstring): cstring <cimport, nodecl> end
+global function strncpy(dest: cstring, src: cstring, n: csize): cstring <cimport, nodecl> end
+global function realpath(path: cstring, resolved: cstring): cstring <cimport, nodecl> end
+
+-- C helper wrapper
+local function _nebula_c_is_dir(path: cstring): cint <cimport, nodecl> end
+
+-- =============================================================================
+-- Helper: check if a path is a directory (fallback for d_type == DT_UNKNOWN)
+-- =============================================================================
+global function nebula_fs_is_dir(path: cstring): boolean
+  return _nebula_c_is_dir(path) ~= 0
+end
+
+-- =============================================================================
+-- Helper: check if filename should be hidden (starts with '.')
+-- =============================================================================
+global function nebula_fs_is_hidden(name: cstring): boolean
+  local p = (@*[0]uint8)(name)
+  return p[0] == 46  -- '.'
+end
+
+-- =============================================================================
+-- Helper: check file extension match
+-- Returns true if `name` ends with `ext` (e.g., ".nelua", ".lua")
+-- =============================================================================
+global function nebula_fs_has_ext(name: cstring, ext: cstring): boolean
+  local name_len = strlen(name)
+  local ext_len  = strlen(ext)
+  if ext_len > name_len then return false end
+  local np = (@*[0]uint8)(name)
+  local ep = (@*[0]uint8)(ext)
+  local offset = name_len - ext_len
+  local i: csize = 0
+  while i < ext_len do
+    if np[offset + i] ~= ep[i] then return false end
+    i = i + 1
+  end
+  return true
+end

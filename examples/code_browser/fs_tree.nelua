@@ -1,0 +1,553 @@
+-- =============================================================================
+-- fs_tree.nelua
+-- Nebula Code Browser — File Tree Data Structure
+--
+-- Flat-array tree representation for filesystem hierarchy.
+-- Reuses json_tree.nelua's fold/unfold + visible-line pattern.
+--
+-- NO framework dependency — uses only fs_bindings types.
+-- Separation: lives in examples/code_browser/ (application, not framework).
+-- =============================================================================
+
+require "fs_bindings"
+
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+global function snprintf(buf: cstring, size: csize, fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+
+-- =============================================================================
+-- Constants
+-- =============================================================================
+global FS_MAX_NODES    <comptime> = 2048
+global FS_MAX_VISIBLE  <comptime> = 2048
+global FS_MAX_PATH_LEN <comptime> = 512
+global FS_MAX_NAME_LEN <comptime> = 128
+global FS_INDENT_WIDTH <comptime> = 2
+global FS_MAX_LINE_LEN <comptime> = 200
+
+-- =============================================================================
+-- File tree node
+-- =============================================================================
+global FsNodeKind = @enum(uint8){
+  Directory = 0,
+  File      = 1,
+}
+
+global FsNode = @record{
+  name:          [FS_MAX_NAME_LEN]uint8,   -- filename (not full path)
+  name_len:      uint16,
+  kind:          FsNodeKind,
+  depth:         uint8,
+  folded:        boolean,
+
+  -- Tree links (flat-array with indices, -1 = null)
+  parent:        int32,
+  first_child:   int32,
+  next_sibling:  int32,
+  child_count:   uint16,
+  children_loaded: boolean,  -- lazy load: directory contents scanned?
+
+  -- Full path for file open (built on demand)
+  -- We store path_start/path_len into a shared path buffer
+  path_start:    uint32,
+  path_len:      uint16,
+}
+
+-- =============================================================================
+-- Visible line entry (same pattern as JsonVisibleLine)
+-- =============================================================================
+global FsVisibleLine = @record{
+  node_idx: int32,
+}
+
+-- =============================================================================
+-- Per-character colored output for tree rendering
+-- =============================================================================
+global FsLineChar = @record{
+  ch: uint32,
+  fg: uint32,
+}
+
+global FsFormattedLine = @record{
+  chars: [FS_MAX_LINE_LEN]FsLineChar,
+  len:   uint32,
+}
+
+-- =============================================================================
+-- One Dark color palette for file tree (packed RGBA8)
+-- =============================================================================
+global function fs_color_dir(): uint32       return 0xFFEFAF61 end  -- #61AFEF blue
+global function fs_color_file(): uint32      return 0xFFBFB2AB end  -- #ABB2BF light grey
+global function fs_color_nelua(): uint32     return 0xFF79C398 end  -- #98C379 green
+global function fs_color_lua(): uint32       return 0xFF669AD1 end  -- #D19A66 orange
+global function fs_color_fold(): uint32      return 0xFF7BC0E5 end  -- #E5C07B yellow
+global function fs_color_selected(): uint32  return 0xFF463E37 end  -- selection bg
+global function fs_color_bg(): uint32        return 0xFF342C28 end  -- #282C34
+global function fs_color_separator(): uint32 return 0xFF40383C end  -- border
+
+-- =============================================================================
+-- File tree state (L1 persistent)
+-- =============================================================================
+global FsTree = @record{
+  nodes:       [FS_MAX_NODES]FsNode,
+  node_count:  uint32,
+
+  -- Shared path buffer (concatenated full paths)
+  path_buf:    [65536]uint8,
+  path_used:   uint32,
+
+  -- Root directory path
+  root_path:   [FS_MAX_PATH_LEN]uint8,
+  root_len:    uint16,
+
+  -- Visible lines (recomputed on fold changes)
+  lines:       [FS_MAX_VISIBLE]FsVisibleLine,
+  line_count:  uint32,
+
+  -- Selection
+  selected_line: int32,   -- index into lines[], -1 = none
+}
+
+-- =============================================================================
+-- Internal: store a path in the shared buffer
+-- =============================================================================
+local function _store_path(tree: *FsTree, path: *[0]uint8, len: uint16): uint32
+  local start = tree.path_used
+  if start + len >= 65536 then return start end
+  local i: uint16 = 0
+  while i < len do
+    tree.path_buf[start + i] = path[i]
+    i = i + 1
+  end
+  tree.path_used = start + (@uint32)(len)
+  return start
+end
+
+-- =============================================================================
+-- Internal: build full path for a node into a buffer
+-- Returns the length written.
+-- =============================================================================
+global function fs_tree_get_path(tree: *FsTree, node_idx: int32, buf: *[0]uint8, buf_size: uint32): uint32
+  if node_idx < 0 or (@uint32)(node_idx) >= tree.node_count then return 0 end
+  local node = &tree.nodes[node_idx]
+
+  -- If path is already stored, use it
+  if node.path_len > 0 then
+    local i: uint16 = 0
+    while i < node.path_len and i < (@uint16)(buf_size - 1) do
+      buf[i] = tree.path_buf[node.path_start + i]
+      i = i + 1
+    end
+    buf[i] = 0
+    return (@uint32)(i)
+  end
+
+  -- Build path by walking up the parent chain
+  -- Collect ancestors into a stack
+  local stack: [64]int32
+  local stack_len: uint32 = 0
+  local cur = node_idx
+  while cur >= 0 and stack_len < 64 do
+    stack[stack_len] = cur
+    stack_len = stack_len + 1
+    cur = tree.nodes[cur].parent
+  end
+
+  -- Write root path first
+  local pos: uint32 = 0
+  local ri: uint16 = 0
+  while ri < tree.root_len and pos < buf_size - 1 do
+    buf[pos] = tree.root_path[ri]
+    pos = pos + 1
+    ri = ri + 1
+  end
+
+  -- Write each ancestor's name (reverse order, skip root node idx 0)
+  local si: int32 = (@int32)(stack_len) - 2  -- skip root (it is the root dir itself)
+  while si >= 0 do
+    -- Add separator
+    if pos < buf_size - 1 and pos > 0 and buf[pos - 1] ~= 47 then
+      buf[pos] = 47  -- '/'
+      pos = pos + 1
+    end
+    local n = &tree.nodes[stack[si]]
+    local ni: uint16 = 0
+    while ni < n.name_len and pos < buf_size - 1 do
+      buf[pos] = n.name[ni]
+      pos = pos + 1
+      ni = ni + 1
+    end
+    si = si - 1
+  end
+  buf[pos] = 0
+
+  -- Cache the path
+  if pos > 0 then
+    node.path_start = _store_path(tree, buf, (@uint16)(pos))
+    node.path_len = (@uint16)(pos)
+  end
+
+  return pos
+end
+
+-- =============================================================================
+-- Internal: insertion sort helper for children ordering
+-- Directories first, then alphabetical within each group.
+-- We don't sort in-place (flat array), instead we sort child indices
+-- during scan and link them in order.
+-- =============================================================================
+
+-- Comparison: directories before files, then alphabetical
+local function _name_cmp(a: *FsNode, b: *FsNode): boolean
+  -- Directories first
+  if a.kind ~= b.kind then
+    return a.kind == FsNodeKind.Directory
+  end
+  -- Alphabetical comparison (case-insensitive)
+  local i: uint16 = 0
+  while i < a.name_len and i < b.name_len do
+    local ca = a.name[i]
+    local cb = b.name[i]
+    -- Lowercase for comparison
+    if ca >= 65 and ca <= 90 then ca = ca + 32 end
+    if cb >= 65 and cb <= 90 then cb = cb + 32 end
+    if ca ~= cb then return ca < cb end
+    i = i + 1
+  end
+  return a.name_len < b.name_len
+end
+
+-- =============================================================================
+-- Scan a directory and populate child nodes (lazy load)
+-- =============================================================================
+global function fs_tree_scan_dir(tree: *FsTree, parent_idx: int32): boolean
+  if parent_idx < 0 or (@uint32)(parent_idx) >= tree.node_count then return false end
+  local parent = &tree.nodes[parent_idx]
+  if parent.kind ~= FsNodeKind.Directory then return false end
+  if parent.children_loaded then return true end
+
+  -- Build parent's full path
+  local path_buf: [FS_MAX_PATH_LEN]uint8
+  local path_len = fs_tree_get_path(tree, parent_idx, &path_buf[0], FS_MAX_PATH_LEN)
+  if path_len == 0 then return false end
+
+  local dir = opendir((@cstring)(&path_buf[0]))
+  if dir == nilptr then return false end
+
+  -- Collect child indices so we can sort them
+  local child_indices: [512]int32
+  local child_count: uint32 = 0
+
+  while true do
+    local entry = readdir(dir)
+    if entry == nilptr then break end
+    if tree.node_count >= FS_MAX_NODES then break end
+    if child_count >= 512 then break end
+
+    local name = (@cstring)(&entry.d_name[0])
+    -- Skip . and ..
+    local np = (@*[0]uint8)(name)
+    if np[0] == 46 then  -- '.'
+      if np[1] == 0 then continue end
+      if np[1] == 46 and np[2] == 0 then continue end
+      -- Skip hidden files/dirs (starting with .)
+      continue
+    end
+
+    -- Determine kind
+    local is_dir = false
+    if entry.d_type == DT_DIR then
+      is_dir = true
+    elseif entry.d_type == DT_REG then
+      is_dir = false
+    elseif entry.d_type == DT_UNKNOWN then
+      -- Build full child path for stat fallback
+      local child_path: [FS_MAX_PATH_LEN]uint8
+      local cp: uint32 = 0
+      local pi: uint32 = 0
+      while pi < path_len and cp < FS_MAX_PATH_LEN - 2 do
+        child_path[cp] = path_buf[pi]
+        cp = cp + 1; pi = pi + 1
+      end
+      if cp > 0 and child_path[cp - 1] ~= 47 then
+        child_path[cp] = 47; cp = cp + 1
+      end
+      local ni2: uint32 = 0
+      while np[ni2] ~= 0 and cp < FS_MAX_PATH_LEN - 1 do
+        child_path[cp] = np[ni2]
+        cp = cp + 1; ni2 = ni2 + 1
+      end
+      child_path[cp] = 0
+      is_dir = nebula_fs_is_dir((@cstring)(&child_path[0]))
+    else
+      -- Symlink or other — skip for now
+      continue
+    end
+
+    -- Create node
+    local idx = (@int32)(tree.node_count)
+    local node = &tree.nodes[idx]
+
+    -- Copy name
+    local name_i: uint16 = 0
+    while np[name_i] ~= 0 and name_i < FS_MAX_NAME_LEN - 1 do
+      node.name[name_i] = np[name_i]
+      name_i = name_i + 1
+    end
+    node.name[name_i] = 0
+    node.name_len = name_i
+
+    node.kind = is_dir and FsNodeKind.Directory or FsNodeKind.File
+    node.depth = parent.depth + 1
+    node.folded = true   -- directories start folded
+    node.parent = parent_idx
+    node.first_child = -1
+    node.next_sibling = -1
+    node.child_count = 0
+    node.children_loaded = false
+    node.path_start = 0
+    node.path_len = 0
+
+    tree.node_count = tree.node_count + 1
+    child_indices[child_count] = idx
+    child_count = child_count + 1
+  end
+
+  closedir(dir)
+
+  -- Insertion sort children (directories first, then alphabetical)
+  local ci: uint32 = 1
+  while ci < child_count do
+    local key = child_indices[ci]
+    local j: int32 = (@int32)(ci) - 1
+    while j >= 0 and not _name_cmp(&tree.nodes[child_indices[j]], &tree.nodes[key]) do
+      child_indices[j + 1] = child_indices[j]
+      j = j - 1
+    end
+    child_indices[j + 1] = key
+    ci = ci + 1
+  end
+
+  -- Link sorted children
+  if child_count > 0 then
+    parent.first_child = child_indices[0]
+    parent.child_count = (@uint16)(child_count)
+    local i: uint32 = 0
+    while i < child_count - 1 do
+      tree.nodes[child_indices[i]].next_sibling = child_indices[i + 1]
+      i = i + 1
+    end
+    tree.nodes[child_indices[child_count - 1]].next_sibling = -1
+  end
+
+  parent.children_loaded = true
+  return true
+end
+
+-- =============================================================================
+-- Visible line computation (DFS walk, skip folded subtrees)
+-- Same pattern as json_tree.nelua
+-- (Placed before fs_tree_init so it's available for the call)
+-- =============================================================================
+local function _compute_visible_rec(tree: *FsTree, node_idx: int32): void
+  if node_idx < 0 or tree.line_count >= FS_MAX_VISIBLE then return end
+
+  local node = &tree.nodes[node_idx]
+
+  -- Emit this node as a visible line
+  tree.lines[tree.line_count] = FsVisibleLine{ node_idx = node_idx }
+  tree.line_count = tree.line_count + 1
+
+  -- If it's an expanded directory, recurse into children
+  if node.kind == FsNodeKind.Directory and not node.folded then
+    local child = node.first_child
+    while child >= 0 and tree.line_count < FS_MAX_VISIBLE do
+      _compute_visible_rec(tree, child)
+      child = tree.nodes[child].next_sibling
+    end
+  end
+end
+
+global function fs_tree_compute_visible(tree: *FsTree): void
+  tree.line_count = 0
+  if tree.node_count == 0 then return end
+  _compute_visible_rec(tree, 0)
+end
+
+-- =============================================================================
+-- Initialize tree from a root directory path
+-- =============================================================================
+global function fs_tree_init(tree: *FsTree, root_path: cstring): boolean
+  -- Reset
+  tree.node_count = 0
+  tree.path_used = 0
+  tree.line_count = 0
+  tree.selected_line = -1
+
+  -- Resolve and store root path
+  local resolved: [FS_MAX_PATH_LEN]uint8
+  local rp = realpath(root_path, (@cstring)(&resolved[0]))
+  if rp == nilptr then return false end
+
+  local ri: uint16 = 0
+  while resolved[ri] ~= 0 and ri < FS_MAX_PATH_LEN - 2 do
+    tree.root_path[ri] = resolved[ri]
+    ri = ri + 1
+  end
+  -- Ensure trailing slash
+  if ri > 0 and tree.root_path[ri - 1] ~= 47 then
+    tree.root_path[ri] = 47
+    ri = ri + 1
+  end
+  tree.root_path[ri] = 0
+  tree.root_len = ri
+
+  -- Create root node
+  local root = &tree.nodes[0]
+  -- Extract last directory name from root path for display
+  -- e.g., "/home/user/nebula/" → "nebula"
+  local last_slash: int32 = -1
+  local second_last: int32 = -1
+  local pi: uint16 = 0
+  while pi < ri do
+    if tree.root_path[pi] == 47 and pi < ri - 1 then
+      second_last = last_slash
+      last_slash = (@int32)(pi)
+    end
+    pi = pi + 1
+  end
+  -- The display name is between second_last and last_slash
+  local name_start: uint16 = 0
+  if second_last >= 0 then name_start = (@uint16)(second_last + 1) end
+  local name_i: uint16 = 0
+  while name_start + name_i < ri and name_i < FS_MAX_NAME_LEN - 1 do
+    local ch = tree.root_path[name_start + name_i]
+    if ch == 47 then break end  -- stop at trailing slash
+    root.name[name_i] = ch
+    name_i = name_i + 1
+  end
+  root.name[name_i] = 0
+  root.name_len = name_i
+
+  root.kind = FsNodeKind.Directory
+  root.depth = 0
+  root.folded = false  -- root starts expanded
+  root.parent = -1
+  root.first_child = -1
+  root.next_sibling = -1
+  root.child_count = 0
+  root.children_loaded = false
+  root.path_start = 0
+  root.path_len = 0
+
+  tree.node_count = 1
+
+  -- Scan root directory immediately
+  fs_tree_scan_dir(tree, 0)
+
+  -- Compute initial visible lines
+  fs_tree_compute_visible(tree)
+
+  return true
+end
+
+-- =============================================================================
+-- Toggle fold on a directory node
+-- =============================================================================
+global function fs_tree_toggle_fold(tree: *FsTree, node_idx: int32): boolean
+  if node_idx < 0 or (@uint32)(node_idx) >= tree.node_count then return false end
+  local node = &tree.nodes[node_idx]
+  if node.kind ~= FsNodeKind.Directory then return false end
+
+  if node.folded then
+    -- Expanding: lazy-load children if not yet scanned
+    if not node.children_loaded then
+      fs_tree_scan_dir(tree, node_idx)
+    end
+    node.folded = false
+  else
+    node.folded = true
+  end
+
+  fs_tree_compute_visible(tree)
+  return true
+end
+
+-- =============================================================================
+-- Format a single visible line for DenseText rendering
+-- =============================================================================
+
+-- Internal: emit helpers (same pattern as json_tree)
+local function _emit(line: *FsFormattedLine, ch: uint32, fg: uint32): void
+  if line.len >= FS_MAX_LINE_LEN then return end
+  line.chars[line.len] = FsLineChar{ ch = ch, fg = fg }
+  line.len = line.len + 1
+end
+
+local function _emit_spaces(line: *FsFormattedLine, n: uint32, fg: uint32): void
+  local i: uint32 = 0
+  while i < n do
+    _emit(line, 32, fg)
+    i = i + 1
+  end
+end
+
+-- File color based on extension
+local function _file_color(node: *FsNode): uint32
+  if nebula_fs_has_ext((@cstring)(&node.name[0]), ".nelua") then
+    return fs_color_nelua()
+  elseif nebula_fs_has_ext((@cstring)(&node.name[0]), ".lua") then
+    return fs_color_lua()
+  end
+  return fs_color_file()
+end
+
+global function fs_tree_format_line(tree: *FsTree, line_idx: uint32,
+                                    is_selected: boolean,
+                                    out: *FsFormattedLine): void
+  out.len = 0
+  if line_idx >= tree.line_count then return end
+
+  local vline = &tree.lines[line_idx]
+  local node = &tree.nodes[vline.node_idx]
+  local indent = (@uint32)(node.depth) * FS_INDENT_WIDTH
+
+  -- Indentation
+  _emit_spaces(out, indent, fs_color_file())
+
+  -- Fold indicator for directories
+  if node.kind == FsNodeKind.Directory then
+    if node.folded then
+      _emit(out, 0x25B6, fs_color_fold())  -- ▶ (will render as '>' in ASCII)
+    else
+      _emit(out, 0x25BC, fs_color_fold())  -- ▼ (will render as 'v' in ASCII)
+    end
+  else
+    _emit(out, 32, fs_color_file())  -- space for files (alignment)
+  end
+  _emit(out, 32, fs_color_file())  -- separator space
+
+  -- Icon character
+  if node.kind == FsNodeKind.Directory then
+    -- Use simple ASCII: [D] for dir
+    _emit(out, 47, fs_color_dir())  -- '/'
+  end
+
+  -- Name
+  local fg = node.kind == FsNodeKind.Directory and fs_color_dir() or _file_color(node)
+  local ni: uint16 = 0
+  while ni < node.name_len and out.len < FS_MAX_LINE_LEN do
+    _emit(out, (@uint32)(node.name[ni]), fg)
+    ni = ni + 1
+  end
+
+  -- Child count hint for folded directories
+  if node.kind == FsNodeKind.Directory and node.folded and node.children_loaded and node.child_count > 0 then
+    _emit(out, 32, fs_color_file())
+    _emit(out, 40, fs_color_separator())  -- '('
+    local count = (@uint32)(node.child_count)
+    if count >= 100 then _emit(out, 48 + (count / 100) % 10, fs_color_separator()) end
+    if count >= 10 then _emit(out, 48 + (count / 10) % 10, fs_color_separator()) end
+    _emit(out, 48 + count % 10, fs_color_separator())
+    _emit(out, 41, fs_color_separator())  -- ')'
+  end
+end
