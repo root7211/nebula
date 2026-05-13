@@ -14,12 +14,13 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era III | Phase 5.0 Slot Layout 自动定位 | 19/19 新增测试全绿 | wgpu-native v29 绑定修正（2026-05-07）**
+**Era III | Code Browser Demo + CI 全量覆盖 32 demo | 编辑器 19 行极限形态 | wgpu-native v29（2026-05-13）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
+| **Code Browser Demo** | Monaco 风格代码浏览器——文件树面板（DenseText + POSIX C FFI + 懒加载扫描）+ 语法高亮编辑器（6 语言）+ 搜索/替换；可移植 `NebulaDirIter` C helper API（绕过 `struct dirent` 布局差异）；路径缓存溢出安全修复；CI 全量覆盖 32 demo + C 单元测试 | `df52377` |
 | **Phase 5.0 Slot Layout** | `nebula_app_register_slot` 新增 `layout` 声明（direction/gap/padding/item_size/scroll_var）；`app_factory.lua` 编译期生成单态化定位循环（常量内联，零运行时分支）；Producer 不再手算坐标——框架自动覆写 pos/size；`dynamic_list_v2_demo.nelua` 验证通过；19/19 冒烟测试全绿 | — |
 | **wgpu-native v29 绑定修正** | 恢复 `WGPUBindGroupLayoutEntry.bindingArraySize` + `WGPUVertexAttribute/WGPUVertexBufferLayout.nextInChain`；`WGPUShaderStage` uint32→uint64；所有 demo 编译通过 | — |
 | **Era III 模块化拆分** | 5 个 builtin Producer 工厂 (`nebula_builtin_*`) 从 `nebula_core` 提取到 `nebula_builtins.nelua`；`nebula_editor_main` / `nebula_terminal_main` 提取到 `nebula_apps.nelua`；内置 `_nebula_builtins` 编译期注册表替代 if-else 分发链；`nebula_core` 净减少 930 行 → 497 行；24/24 demo 编译通过 | `634a362` |
@@ -165,7 +166,8 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 | **4.6** | **语法统一化** | **已完成**（S1: `nebula_main()` + S2: builtin 隐含 dense + S3: spec 缓存，button 18 行，term 16 行，editor 19 行） | **85** |
 | 4.6-I | Indirect Drawing | 规划中（文档预研，等待组件数>100 触发） | 78 |
 | 4.7 | 文本编辑器原型 | **S1-S7 已完成**（S7: text_editor_demo 全集成验收） | — |
-| 5.0 | 生态与 CI/CD | 规划中 | — |
+| **4.X-CB** | **Code Browser** | **已完成**（文件树 + 语法高亮编辑器 + POSIX FFI + 懒加载目录扫描 + `code_browser_demo`） | 83 |
+| 5.0 | 生态与 CI/CD | **进行中**（CI 全量覆盖 32 demo + C 单元测试 + GitHub Pages 部署） | — |
 
 > 重要度评分基于五个维度加权综合评分（满分 100），详见 [`docs/PHASE_IMPORTANCE_SCORECARD.md`](docs/PHASE_IMPORTANCE_SCORECARD.md)。
 
