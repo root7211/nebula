@@ -1,0 +1,103 @@
+-- =============================================================================
+-- fs_bindings.nelua
+-- Nebula Code Browser — POSIX Filesystem C FFI Bindings
+--
+-- Provides opendir/readdir/closedir + stat for directory traversal.
+-- Follows pty_bindings.nelua pattern: minimal C FFI, zero framework dependency.
+--
+-- Axiom compliance:
+--   A: All bindings declared at S1, zero runtime overhead
+--   B: L0 resources (DIR*) managed explicitly by caller
+-- =============================================================================
+
+## cinclude "<string.h>"
+## cinclude "<stdlib.h>"
+## cinclude '"nebula_fs_helpers.h"'
+
+-- =============================================================================
+-- C helpers: avoid binding struct dirent / struct stat directly.
+-- struct dirent layout varies across libc implementations (glibc vs musl)
+-- and architectures (x86_64 vs aarch64), so we use C helper functions
+-- (defined in nebula_fs_helpers.h) to extract d_name / d_type.
+-- =============================================================================
+
+-- Opaque directory iterator (mirrors C struct NebulaDirIter, 2 pointers)
+global NebulaDirIter = @record{ dp: pointer, entry: pointer }
+
+-- d_type constants (match POSIX DT_* values)
+global DT_UNKNOWN: uint8 = 0
+global DT_DIR:     uint8 = 4
+global DT_REG:     uint8 = 8
+global DT_LNK:     uint8 = 10
+
+-- C helper wrappers
+local function _nebula_c_is_dir(path: cstring): cint <cimport, nodecl> end
+local function _nebula_c_dir_open(it: *NebulaDirIter, path: cstring): cint <cimport, nodecl> end
+local function _nebula_c_dir_next(it: *NebulaDirIter): cint <cimport, nodecl> end
+local function _nebula_c_dir_name(it: *NebulaDirIter): cstring <cimport, nodecl> end
+local function _nebula_c_dir_type(it: *NebulaDirIter): uint8 <cimport, nodecl> end
+local function _nebula_c_dir_close(it: *NebulaDirIter): void <cimport, nodecl> end
+
+-- =============================================================================
+-- High-level Nelua API for directory iteration
+-- =============================================================================
+global function nebula_dir_open(it: *NebulaDirIter, path: cstring): boolean
+  return _nebula_c_dir_open(it, path) ~= 0
+end
+
+global function nebula_dir_next(it: *NebulaDirIter): boolean
+  return _nebula_c_dir_next(it) ~= 0
+end
+
+global function nebula_dir_name(it: *NebulaDirIter): cstring
+  return _nebula_c_dir_name(it)
+end
+
+global function nebula_dir_type(it: *NebulaDirIter): uint8
+  return _nebula_c_dir_type(it)
+end
+
+global function nebula_dir_close(it: *NebulaDirIter): void
+  _nebula_c_dir_close(it)
+end
+
+-- String helpers
+global function strlen(s: cstring): csize <cimport, nodecl> end
+global function strcmp(s1: cstring, s2: cstring): cint <cimport, nodecl> end
+global function strcpy(dest: cstring, src: cstring): cstring <cimport, nodecl> end
+global function strncpy(dest: cstring, src: cstring, n: csize): cstring <cimport, nodecl> end
+global function realpath(path: cstring, resolved: cstring): cstring <cimport, nodecl> end
+
+-- =============================================================================
+-- Helper: check if a path is a directory (follows symlinks via stat())
+-- =============================================================================
+global function nebula_fs_is_dir(path: cstring): boolean
+  return _nebula_c_is_dir(path) ~= 0
+end
+
+-- =============================================================================
+-- Helper: check if filename should be hidden (starts with '.')
+-- =============================================================================
+global function nebula_fs_is_hidden(name: cstring): boolean
+  local p = (@*[0]uint8)(name)
+  return p[0] == 46  -- '.'
+end
+
+-- =============================================================================
+-- Helper: check file extension match
+-- Returns true if `name` ends with `ext` (e.g., ".nelua", ".lua")
+-- =============================================================================
+global function nebula_fs_has_ext(name: cstring, ext: cstring): boolean
+  local name_len = strlen(name)
+  local ext_len  = strlen(ext)
+  if ext_len > name_len then return false end
+  local np = (@*[0]uint8)(name)
+  local ep = (@*[0]uint8)(ext)
+  local offset = name_len - ext_len
+  local i: csize = 0
+  while i < ext_len do
+    if np[offset + i] ~= ep[i] then return false end
+    i = i + 1
+  end
+  return true
+end

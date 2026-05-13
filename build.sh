@@ -47,7 +47,7 @@ done
 
 # 验证 Demo 目标
 case "$DEMO_TARGET" in
-  button_demo|layout_demo|login_demo|form_demo|dynamic_list_demo|dynamic_list_v2_demo|shadow_demo|text_demo|slider_demo|scrollable_demo|dropdown_demo|multiline_editable_demo|slug_bench|cjk_text_demo|dense_text_demo|term_demo|term_demo_v2|cjk_editor_demo|dense_editor_demo|editor_with_lines_demo|button_sugar_demo|multiline_sugar_demo|json_viewer_demo|json_viewer_demo_v2|highlight_editor_demo|highlight_sugar_demo|text_editor_demo|button_v2_demo|minimal_editor_demo|text_editor_demo_v2|text_editor_demo_v3)
+  button_demo|layout_demo|login_demo|form_demo|dynamic_list_demo|dynamic_list_v2_demo|shadow_demo|text_demo|slider_demo|scrollable_demo|dropdown_demo|multiline_editable_demo|slug_bench|cjk_text_demo|dense_text_demo|term_demo|term_demo_v2|cjk_editor_demo|dense_editor_demo|editor_with_lines_demo|button_sugar_demo|multiline_sugar_demo|json_viewer_demo|json_viewer_demo_v2|highlight_editor_demo|highlight_sugar_demo|text_editor_demo|button_v2_demo|minimal_editor_demo|text_editor_demo_v2|text_editor_demo_v3|code_browser_demo)
     ;;
   *)
     echo "[nebula] Error: unknown demo target '$DEMO_TARGET'"
@@ -76,6 +76,10 @@ if [ "$NEBULA_TARGET" == "linux" ]; then
   fi
   if [ "$DEMO_TARGET" == "json_viewer_demo" ] || [ "$DEMO_TARGET" == "json_viewer_demo_v2" ]; then
     NELUA_FLAGS="$NELUA_FLAGS -L $SCRIPT_DIR/examples/json_viewer"
+  fi
+  if [ "$DEMO_TARGET" == "code_browser_demo" ]; then
+    NELUA_FLAGS="$NELUA_FLAGS -L $SCRIPT_DIR/examples/code_browser"
+    CFLAGS="$CFLAGS -I$SCRIPT_DIR/examples/code_browser"
   fi
   
 elif [ "$NEBULA_TARGET" == "windows" ]; then

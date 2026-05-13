@@ -1,0 +1,431 @@
+-- =============================================================================
+-- code_browser_demo.nelua
+-- Nebula Code Browser — Phase 1: File Tree + Editor
+--
+-- A code browser for browsing Nebula's own source code.
+-- Layout:
+--   ┌──────────────┬────────────────────────────────────┐
+--   │  File Tree   │  search_bar                        │
+--   │  (DenseText) │  line_nums │ edit_area             │
+--   │              │            │                       │
+--   │  src/        │  1 │ require "nebula"              │
+--   │   ▶ derive/  │  2 │ ...                           │
+--   │   nebula_..  │                                    │
+--   │  examples/   │  status_bar                        │
+--   └──────────────┴────────────────────────────────────┘
+--
+-- Architecture:
+--   · examples/code_browser/fs_bindings.nelua — POSIX C FFI
+--   · examples/code_browser/fs_tree.nelua     — file tree data structure
+--   · examples/code_browser_demo.nelua        — this demo (app layer)
+--   · src/ is untouched — no framework changes needed
+--
+-- Uses:
+--   · nebula_visual()  for editor (multiline_editable)
+--   · nebula_app()     for layout orchestration
+--   · builtin Producers (line_nums, edit_area, status_bar, search_bar)
+--   · Custom DenseText Producer for file tree panel
+-- =============================================================================
+require "nebula"
+## cinclude "<stdio.h>"
+## cinclude "<string.h>"
+
+-- Application-layer modules
+require "fs_tree"
+
+-- ★ Register multi-language highlight rules (compile-time)
+## nebula_highlight_builtins({"nelua", "lua", "c", "python", "json", "markdown"})
+
+-- =============================================================================
+-- Editor Visual (multiline_editable primitive)
+-- =============================================================================
+## nebula_visual("BrowserEditorVisual", {
+##   primitives   = {"multiline_editable"},
+##   max_text_len = 256,
+##   max_lines    = 512,
+##   component_id = 1,
+## })
+
+-- =============================================================================
+-- Global application state (L1 persistent)
+-- Must be declared before nebula_app() since the producer references them.
+-- =============================================================================
+global g_fs_tree: FsTree
+global g_tree_scroll: uint32 = 0
+
+-- File tree rendering constants
+local TREE_COLS <comptime> = 24    -- character columns for file tree
+local TREE_ROWS <comptime> = 40    -- visible rows
+local TREE_CELL_W <comptime> = 9.0
+local TREE_CELL_H <comptime> = 16.0
+local TREE_PAD_TOP <comptime> = 4.0  -- top padding for tree content
+local TREE_PANEL_WIDTH <comptime> = 220  -- must match flex_basis below
+
+-- Window dimensions
+local WIN_W <comptime> = 1280
+local WIN_H <comptime> = 720
+
+-- NOTE: Code browser depends on POSIX filesystem APIs (opendir/readdir/stat)
+-- and is not supported under WASM/Emscripten. Build with build.sh only.
+
+-- =============================================================================
+-- File tree DenseText Producer
+-- Must be declared before nebula_app() so the generated draw code can call it.
+-- =============================================================================
+global function fill_file_tree(
+  app: auto,
+  instances: *[0]DenseCharInstance,
+  count: *uint32,
+  max: uint32
+): void
+  local origin_x: float32 = app.dense_layout_file_tree_x
+  local origin_y: float32 = app.dense_layout_file_tree_y + TREE_PAD_TOP
+  local idx: uint32 = 0
+  local visible_rows: uint32 = TREE_ROWS
+  local formatted: FsFormattedLine
+
+  local row: uint32 = 0
+  while row < visible_rows and idx < max do
+    local line_idx = row + g_tree_scroll
+
+    if line_idx < g_fs_tree.line_count then
+      local is_selected = ((@int32)(line_idx) == g_fs_tree.selected_line)
+      local bg = is_selected and fs_color_selected() or fs_color_bg()
+
+      fs_tree_format_line(&g_fs_tree, line_idx, is_selected, &formatted)
+
+      local col: uint32 = 0
+      while col < formatted.len and col < TREE_COLS and idx < max do
+        -- For non-ASCII fold indicators, render as simple ASCII
+        local ch = formatted.chars[col].ch
+        if ch == 0x25B6 then ch = 62 end   -- ▶ → '>'
+        if ch == 0x25BC then ch = 118 end   -- ▼ → 'v'
+        nebula_dense_grid_fill_instance(
+          &instances[idx], row, col,
+          ch, origin_x, origin_y,
+          TREE_CELL_W, TREE_CELL_H,
+          formatted.chars[col].fg, bg
+        )
+        idx = idx + 1
+        col = col + 1
+      end
+      -- Fill remaining columns with background
+      while col < TREE_COLS and idx < max do
+        nebula_dense_grid_fill_instance(
+          &instances[idx], row, col,
+          32, origin_x, origin_y,
+          TREE_CELL_W, TREE_CELL_H,
+          fs_color_file(), bg
+        )
+        idx = idx + 1
+        col = col + 1
+      end
+    else
+      -- Empty row
+      local col: uint32 = 0
+      while col < TREE_COLS and idx < max do
+        nebula_dense_grid_fill_instance(
+          &instances[idx], row, col,
+          32, origin_x, origin_y,
+          TREE_CELL_W, TREE_CELL_H,
+          fs_color_file(), fs_color_bg()
+        )
+        idx = idx + 1
+        col = col + 1
+      end
+    end
+    row = row + 1
+  end
+  $count = idx
+end
+
+-- =============================================================================
+-- App orchestration: file_tree | (search_bar / editor_body / status_bar)
+-- =============================================================================
+## nebula_app("CodeBrowserApp", {
+##   layout = { direction = "row", width = 1280, height = 720 },
+##   components = {
+##     { name = "editor",      type = "BrowserEditorVisual" },
+##     { name = "file_tree",   dense = 8000, flex_basis = 220,  -- sync with TREE_PANEL_WIDTH
+##       producer = "fill_file_tree", cell_w = 9.0, cell_h = 16.0 },
+##     { name = "editor_panel", flex_grow = 1,
+##       children = { "search_bar", "editor_body", "status_bar" } },
+##     { name = "search_bar",  builtin = "search_bar", flex_basis = 24 },
+##     { name = "editor_body", row = true, flex_grow = 1,
+##       children = { "line_nums", "edit_area" } },
+##     { name = "line_nums",   builtin = "line_nums", flex_basis = 50 },
+##     { name = "edit_area",   builtin = "edit_area", flex_grow = 1 },
+##     { name = "status_bar",  builtin = "status_bar", flex_basis = 24 },
+##   },
+## })
+
+-- =============================================================================
+-- Load a file into the editor from the file tree
+-- =============================================================================
+local function load_file_from_tree(app: *CodeBrowserApp, node_idx: int32): void
+  if node_idx < 0 then return end
+  local node = &g_fs_tree.nodes[node_idx]
+  if node.kind ~= FsNodeKind.File then return end
+
+  -- Build full path
+  local path_buf: [FS_MAX_PATH_LEN]uint8
+  local path_len = fs_tree_get_path(&g_fs_tree, node_idx, &path_buf[0], FS_MAX_PATH_LEN)
+  if path_len == 0 then return end
+
+  -- Copy path to editor's file path global
+  local i: uint32 = 0
+  while i < path_len and i < 511 do
+    _editor_file_path[i] = path_buf[i]
+    i = i + 1
+  end
+  _editor_file_path[i] = 0
+  _editor_has_file = true
+
+  -- Detect highlight language from extension
+  _editor_highlight_id = nebula_highlight_detect_ext(&path_buf[0], path_len)
+
+  -- Load file into multi_buf
+  if app.editor.visual.multi_buf:load_file((@cstring)(&path_buf[0])) then
+    app.editor.line_count = app.editor.visual.multi_buf.line_count
+    app.editor.cursor_row = 0
+    app.editor.cursor_col = 0
+    app.editor.sel_anchor_row = 0
+    app.editor.sel_anchor_col = 0
+    app.editor.scroll_offset_y = 0.0
+    _editor_modified = false
+    printf("browser: loaded %s (highlight=%d, %d lines)\n",
+      (@cstring)(&path_buf[0]), (@int32)(_editor_highlight_id),
+      (@int32)(app.editor.visual.multi_buf.line_count))
+  else
+    printf("browser: failed to load %s\n", (@cstring)(&path_buf[0]))
+  end
+
+  nebula_editor_update_title(0, 0)
+end
+
+-- =============================================================================
+-- Main program
+-- =============================================================================
+local function main(): int32
+  local renderer: NebulaRenderer
+  local app: CodeBrowserApp
+
+  if not nebula_init(&renderer, &app, "Nebula Code Browser", WIN_W, WIN_H) then
+    return 1
+  end
+
+  -- Initialize editor component
+  -- init_themed sets up internal state; position/size corrected below
+  app.editor:init_themed(
+    Vec2{x = 0.0, y = 0.0},
+    Vec2{x = (@float32)(WIN_W), y = (@float32)(WIN_H)},
+    0.0)
+  -- Adjust editor background to cover only the editor panel area
+  -- (skip file_tree on left=TREE_PANEL_WIDTH, search_bar top=24, status_bar bottom=24)
+  app.editor.visual.pos  = Vec2{x = (@float32)(TREE_PANEL_WIDTH), y = 24.0}
+  app.editor.visual.size = Vec2{x = (@float32)(WIN_W) - (@float32)(TREE_PANEL_WIDTH), y = (@float32)(WIN_H) - 24.0 - 24.0}
+
+  -- Initialize file tree with the current directory (or nebula project root)
+  if not fs_tree_init(&g_fs_tree, ".") then
+    printf("browser: failed to open directory\n")
+    return 1
+  end
+  printf("browser: opened %s (%d entries)\n",
+    (@cstring)(&g_fs_tree.root_path[0]),
+    (@int32)(g_fs_tree.node_count))
+
+  -- Set the file_tree Producer
+  -- (nebula_app generated a DenseText slot for "file_tree",
+  --  but we need to manually wire the producer since it's a custom dense)
+
+  printf("=== Nebula Code Browser ===\n")
+  printf("  Click file tree to open files\n")
+  printf("  Ctrl+S save | Ctrl+Z undo | Ctrl+F find | Ctrl+H replace\n")
+
+  _editor_highlight_id = 1  -- default: nelua
+
+  local input: NebulaInputState
+  local prev_time = glfwGetTime()
+  local prev_undo_cursor: uint32 = 0
+  local title_timer: float32 = 0.0
+
+  while not nebula_should_close() do
+    nebula_poll_events()
+    local now = glfwGetTime()
+    local dt = (@float32)(now - prev_time)
+    prev_time = now
+    nebula_collect_input(_nebula_window, &input, dt)
+
+    -- =========================================
+    -- File tree interaction: click detection
+    -- =========================================
+    local tree_x: float32 = app.dense_layout_file_tree_x
+    local tree_y: float32 = app.dense_layout_file_tree_y + TREE_PAD_TOP
+    local tree_w: float32 = (@float32)(TREE_COLS) * TREE_CELL_W
+    local tree_h: float32 = (@float32)(TREE_ROWS) * TREE_CELL_H
+
+    -- Click in file tree area
+    if input.mouse_left_pressed then
+      local mx = input.mouse_x
+      local my = input.mouse_y
+      if mx >= tree_x and mx < tree_x + tree_w and my >= tree_y and my < tree_y + tree_h then
+        local clicked_row = (@uint32)((my - tree_y) / TREE_CELL_H)
+        local line_idx = clicked_row + g_tree_scroll
+
+        if line_idx < g_fs_tree.line_count then
+          g_fs_tree.selected_line = (@int32)(line_idx)
+          local node_idx = g_fs_tree.lines[line_idx].node_idx
+          local node = &g_fs_tree.nodes[node_idx]
+
+          if node.kind == FsNodeKind.Directory then
+            -- Toggle fold
+            fs_tree_toggle_fold(&g_fs_tree, node_idx)
+            printf("browser: toggle %s → %s (%d visible)\n",
+              (@cstring)(&node.name[0]),
+              node.folded and "folded" or "expanded",
+              (@int32)(g_fs_tree.line_count))
+          else
+            -- Open file in editor
+            load_file_from_tree(&app, node_idx)
+          end
+        end
+
+        -- Consume the click so editor doesn't also handle it
+        input.mouse_left_pressed = false
+      end
+    end
+
+    -- Scroll file tree with mouse wheel when hovering over it
+    if input.mouse_x >= tree_x and input.mouse_x < tree_x + tree_w then
+      if input.scroll_dy > 0.0 and g_tree_scroll > 0 then
+        g_tree_scroll = g_tree_scroll - 1
+      elseif input.scroll_dy < 0.0 and g_tree_scroll + TREE_ROWS < g_fs_tree.line_count then
+        g_tree_scroll = g_tree_scroll + 1
+      end
+    end
+
+    -- =========================================
+    -- Editor interaction (Ctrl+S, search, etc.)
+    -- =========================================
+    if input.key_pressed == NebulaKey.Save then
+      if _editor_has_file then
+        if app.editor.visual.multi_buf:save_file((@cstring)(&_editor_file_path[0])) then
+          _editor_modified = false
+          prev_undo_cursor = app.editor.undo_stack.cursor
+          printf("browser: saved\n")
+          nebula_editor_update_title(app.editor.cursor_row, app.editor.cursor_col)
+        end
+      end
+    end
+
+    -- Ctrl+F / Ctrl+H search bar
+    if input.key_pressed == NebulaKey.Find then
+      _search_active = not _search_active
+      _search_replace = false
+      if _search_active then
+        _search_len = 0; _search_cursor = 0
+        _search_match_count = 0; _search_current = 0
+      end
+    end
+    if input.key_pressed == NebulaKey.Replace then
+      _search_active = not _search_active
+      _search_replace = true
+      if _search_active then
+        _search_len = 0; _search_cursor = 0
+        _replace_len = 0; _replace_cursor = 0
+        _search_match_count = 0; _search_current = 0
+      end
+    end
+
+    -- Search bar keyboard
+    if _search_active then
+      if input.key_pressed == NebulaKey.Escape then
+        _search_active = false; _search_replace = false
+      elseif input.key_pressed == NebulaKey.FindNext or input.key_pressed == NebulaKey.Enter then
+        if _search_match_count > 0 then
+          _search_current = (_search_current + 1) % _search_match_count
+          nebula_search_goto_current(&app.editor)
+        end
+      elseif input.key_pressed == NebulaKey.Backspace then
+        if _search_cursor > 0 then
+          _search_cursor = _search_cursor - 1
+          _search_len = _search_len - 1
+          local si: uint32 = _search_cursor
+          while si < _search_len do
+            _search_buf[si] = _search_buf[si + 1]
+            si = si + 1
+          end
+          nebula_search_scan(&app.editor.visual.multi_buf)
+        end
+      else
+        local ci: uint8 = 0
+        while ci < input.char_count do
+          local ch: uint32 = input.char_input[ci]
+          if ch >= 32 and ch < 127 then
+            if _search_replace and _replace_cursor < 255 then
+              if _replace_cursor < _replace_len then
+                local ri: uint32 = _replace_len
+                while ri > _replace_cursor do
+                  _replace_buf[ri] = _replace_buf[ri - 1]
+                  ri = ri - 1
+                end
+              end
+              _replace_buf[_replace_cursor] = (@uint8)(ch)
+              _replace_cursor = _replace_cursor + 1
+              _replace_len = _replace_len + 1
+            elseif _search_cursor < 255 then
+              if _search_cursor < _search_len then
+                local si: uint32 = _search_len
+                while si > _search_cursor do
+                  _search_buf[si] = _search_buf[si - 1]
+                  si = si - 1
+                end
+              end
+              _search_buf[_search_cursor] = (@uint8)(ch)
+              _search_cursor = _search_cursor + 1
+              _search_len = _search_len + 1
+              nebula_search_scan(&app.editor.visual.multi_buf)
+              if _search_match_count > 0 then
+                _search_current = 0
+                nebula_search_goto_current(&app.editor)
+              end
+            end
+          end
+          ci = ci + 1
+        end
+      end
+      if _search_active and _search_replace then
+        if input.key_pressed == NebulaKey.Replace then
+          nebula_search_replace_current(&app.editor, &app.editor.visual.multi_buf)
+        end
+      end
+      input.key_pressed = NebulaKey.None
+      input.char_count = 0
+    end
+
+    -- Modification detection
+    if app.editor.undo_stack.cursor ~= prev_undo_cursor then
+      _editor_modified = true
+    end
+
+    -- Update content height for scroll
+    app.editor.visual.content_height = (@float32)(app.editor.line_count) * 18.0
+
+    -- Title update
+    title_timer = title_timer + dt
+    if title_timer > 0.2 then
+      title_timer = 0.0
+      nebula_editor_update_title(app.editor.cursor_row, app.editor.cursor_col)
+    end
+
+    -- Render frame
+    nebula_frame_render(&renderer, &app, &input, dt, 0.04, 0.04, 0.06)
+  end
+
+  app:deinit()
+  nebula_shutdown(&renderer)
+  printf("nebula: code browser clean exit\n")
+  return 0
+end
+
+main()
