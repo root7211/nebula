@@ -650,6 +650,9 @@ global function nebula_pipeline_base_init(
   $out_bgl = wgpuDeviceCreateBindGroupLayout(device, &bgl_desc)
   if $out_bgl == nilptr then
     printf("wgpu: failed to create bind group layout (%s)\n", label)
+    -- ★ 审计修复：释放已创建的 uniform buffer
+    wgpuBufferRelease($out_ubuf)
+    $out_ubuf = nilptr
     return false
   end
 
@@ -673,6 +676,11 @@ global function nebula_pipeline_base_init(
   $out_bind_group = wgpuDeviceCreateBindGroup(device, &bg_desc)
   if $out_bind_group == nilptr then
     printf("wgpu: failed to create bind group (%s)\n", label)
+    -- ★ 审计修复：释放已创建的资源
+    wgpuBindGroupLayoutRelease($out_bgl)
+    $out_bgl = nilptr
+    wgpuBufferRelease($out_ubuf)
+    $out_ubuf = nilptr
     return false
   end
 
@@ -974,14 +982,25 @@ global function nebula_pipeline_textured_init(
   $out_bgl = wgpuDeviceCreateBindGroupLayout(device, &bgl_desc)
   if $out_bgl == nilptr then
     printf("wgpu: failed to create textured bind group layout (%s)\n", label)
+    -- ★ 审计修复：释放已创建的 uniform buffer
+    wgpuBufferRelease($out_ubuf)
+    $out_ubuf = nilptr
     return false
   end
 
   -- 3. Shader + Pipeline（委托公共辅助函数）
-  return _nebula_build_render_pipeline(
+  if not _nebula_build_render_pipeline(
     out_pipeline, device, out_bgl, wgsl_source,
     target_format, nilptr, label
-  )
+  ) then
+    -- ★ 审计修复：释放已创建的资源
+    wgpuBindGroupLayoutRelease($out_bgl)
+    $out_bgl = nilptr
+    wgpuBufferRelease($out_ubuf)
+    $out_ubuf = nilptr
+    return false
+  end
+  return true
 end
 
 -- =============================================================================
@@ -1024,14 +1043,25 @@ global function nebula_pipeline_textured_vertex_init(
   $out_bgl = wgpuDeviceCreateBindGroupLayout(device, &bgl_desc)
   if $out_bgl == nilptr then
     printf("wgpu: failed to create textured vertex bind group layout (%s)\n", label)
+    -- ★ 审计修复：释放已创建的 uniform buffer
+    wgpuBufferRelease($out_ubuf)
+    $out_ubuf = nilptr
     return false
   end
 
   -- 3. Shader + Pipeline（委托公共辅助函数，传入 vertex_layout）
-  return _nebula_build_render_pipeline(
+  if not _nebula_build_render_pipeline(
     out_pipeline, device, out_bgl, wgsl_source,
     target_format, vertex_layout, label
-  )
+  ) then
+    -- ★ 审计修复：释放已创建的资源
+    wgpuBindGroupLayoutRelease($out_bgl)
+    $out_bgl = nilptr
+    wgpuBufferRelease($out_ubuf)
+    $out_ubuf = nilptr
+    return false
+  end
+  return true
 end
 
 -- =============================================================================

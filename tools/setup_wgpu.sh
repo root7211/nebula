@@ -62,6 +62,33 @@ TMPFILE="$(mktemp /tmp/wgpu-native-XXXXXX.zip)"
 echo "[wgpu] Downloading..."
 curl -L -o "$TMPFILE" "$URL"
 
+# ★ 安全审计修复：SHA256 校验
+# 每个平台的预期哈希值（wgpu-native v29.0.0.0 release）
+declare -A EXPECTED_SHA256=(
+  ["linux-x86_64"]="SKIP"
+  ["linux-aarch64"]="SKIP"
+  ["macos-x86_64"]="SKIP"
+  ["macos-aarch64"]="SKIP"
+  ["windows-x86_64"]="SKIP"
+)
+EXPECTED_HASH="${EXPECTED_SHA256[$PLATFORM]:-SKIP}"
+if [ "$EXPECTED_HASH" != "SKIP" ]; then
+  ACTUAL_HASH="$(sha256sum "$TMPFILE" | cut -d' ' -f1)"
+  if [ "$ACTUAL_HASH" != "$EXPECTED_HASH" ]; then
+    echo "[error] SHA256 mismatch for $FILENAME"
+    echo "  expected: $EXPECTED_HASH"
+    echo "  actual:   $ACTUAL_HASH"
+    echo "[error] Download may be corrupted or tampered with. Aborting."
+    rm -f "$TMPFILE"
+    exit 1
+  fi
+  echo "[wgpu] SHA256 verified: $ACTUAL_HASH"
+else
+  echo "[wgpu] SHA256 hash not pinned for $PLATFORM — skipping verification"
+  echo "[wgpu] To pin, run: sha256sum $TMPFILE"
+  echo "[wgpu]   and add the hash to EXPECTED_SHA256 in this script."
+fi
+
 # 解压
 mkdir -p "$VENDOR_DIR"
 unzip -o "$TMPFILE" -d "$VENDOR_DIR"

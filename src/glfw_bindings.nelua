@@ -133,6 +133,18 @@ global GLFW_KEY_RIGHT_CONTROL <comptime> = 345
 global GLFW_KEY_LEFT_ALT    <comptime> = 342
 global GLFW_KEY_RIGHT_ALT   <comptime> = 346
 
+-- ★ 审计修复：字母键 + 功能键常量，消除 app.nelua 中的魔法数字
+global GLFW_KEY_A           <comptime> = 65
+global GLFW_KEY_C           <comptime> = 67
+global GLFW_KEY_F           <comptime> = 70
+global GLFW_KEY_H           <comptime> = 72
+global GLFW_KEY_S           <comptime> = 83
+global GLFW_KEY_V           <comptime> = 86
+global GLFW_KEY_X           <comptime> = 88
+global GLFW_KEY_Y           <comptime> = 89
+global GLFW_KEY_Z           <comptime> = 90
+global GLFW_KEY_F3          <comptime> = 292
+
 -- 修饰键 mods 位掩码
 global GLFW_MOD_SHIFT   <comptime> = 0x0001
 global GLFW_MOD_CONTROL <comptime> = 0x0002
