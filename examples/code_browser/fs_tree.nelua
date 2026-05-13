@@ -109,17 +109,22 @@ global FsTree = @record{
 
 -- =============================================================================
 -- Internal: store a path in the shared buffer
+-- Returns start offset on success, or -1 on overflow (caller must not cache).
 -- =============================================================================
-local function _store_path(tree: *FsTree, path: *[0]uint8, len: uint16): uint32
+local function _store_path(tree: *FsTree, path: *[0]uint8, len: uint16): int32
   local start = tree.path_used
-  if start + len >= 65536 then return start end
+  if start + (@uint32)(len) >= 65536 then
+    printf("[nebula] warning: path buffer full (%d/%d), cannot cache path\n",
+      (@int32)(start), 65536)
+    return -1
+  end
   local i: uint16 = 0
   while i < len do
     tree.path_buf[start + i] = path[i]
     i = i + 1
   end
   tree.path_used = start + (@uint32)(len)
-  return start
+  return (@int32)(start)
 end
 
 -- =============================================================================
@@ -180,10 +185,14 @@ global function fs_tree_get_path(tree: *FsTree, node_idx: int32, buf: *[0]uint8,
   end
   buf[pos] = 0
 
-  -- Cache the path
+  -- Cache the path (only if _store_path succeeded)
   if pos > 0 then
-    node.path_start = _store_path(tree, buf, (@uint16)(pos))
-    node.path_len = (@uint16)(pos)
+    local stored = _store_path(tree, buf, (@uint16)(pos))
+    if stored >= 0 then
+      node.path_start = (@uint32)(stored)
+      node.path_len = (@uint16)(pos)
+    end
+    -- On overflow, path_len stays 0 → next call rebuilds (no corruption)
   end
 
   return pos
@@ -197,6 +206,9 @@ end
 -- =============================================================================
 
 -- Comparison: directories before files, then alphabetical
+-- NOTE: case-insensitive only for ASCII A-Z; non-ASCII (CJK etc.) sorts by
+-- raw UTF-8 byte order, which is functionally correct but may differ from
+-- locale-aware ordering.
 local function _name_cmp(a: *FsNode, b: *FsNode): boolean
   -- Directories first
   if a.kind ~= b.kind then
@@ -230,22 +242,23 @@ global function fs_tree_scan_dir(tree: *FsTree, parent_idx: int32): boolean
   local path_len = fs_tree_get_path(tree, parent_idx, &path_buf[0], FS_MAX_PATH_LEN)
   if path_len == 0 then return false end
 
-  local dir = opendir((@cstring)(&path_buf[0]))
-  if dir == nilptr then return false end
+  local iter: NebulaDirIter
+  if not nebula_dir_open(&iter, (@cstring)(&path_buf[0])) then return false end
 
   -- Collect child indices so we can sort them
   local child_indices: [512]int32
   local child_count: uint32 = 0
 
-  while true do
-    local entry = readdir(dir)
-    if entry == nilptr then break end
+  while nebula_dir_next(&iter) do
     if tree.node_count >= FS_MAX_NODES then break end
-    if child_count >= 512 then break end
+    if child_count >= 512 then
+      printf("[nebula] warning: directory has >512 entries, truncating\n")
+      break
+    end
 
-    local name = (@cstring)(&entry.d_name[0])
-    -- Skip . and ..
+    local name = nebula_dir_name(&iter)
     local np = (@*[0]uint8)(name)
+    -- Skip . and ..
     if np[0] == 46 then  -- '.'
       if np[1] == 0 then continue end
       if np[1] == 46 and np[2] == 0 then continue end
@@ -253,14 +266,15 @@ global function fs_tree_scan_dir(tree: *FsTree, parent_idx: int32): boolean
       continue
     end
 
-    -- Determine kind
+    -- Determine kind via d_type from C helper
+    local d_type = nebula_dir_type(&iter)
     local is_dir = false
-    if entry.d_type == DT_DIR then
+    if d_type == DT_DIR then
       is_dir = true
-    elseif entry.d_type == DT_REG then
+    elseif d_type == DT_REG then
       is_dir = false
-    elseif entry.d_type == DT_UNKNOWN then
-      -- Build full child path for stat fallback
+    elseif d_type == DT_UNKNOWN or d_type == DT_LNK then
+      -- stat() fallback: resolves symlinks and unknown FS types
       local child_path: [FS_MAX_PATH_LEN]uint8
       local cp: uint32 = 0
       local pi: uint32 = 0
@@ -279,7 +293,7 @@ global function fs_tree_scan_dir(tree: *FsTree, parent_idx: int32): boolean
       child_path[cp] = 0
       is_dir = nebula_fs_is_dir((@cstring)(&child_path[0]))
     else
-      -- Symlink or other — skip for now
+      -- Other special file types — skip
       continue
     end
 
@@ -312,7 +326,7 @@ global function fs_tree_scan_dir(tree: *FsTree, parent_idx: int32): boolean
     child_count = child_count + 1
   end
 
-  closedir(dir)
+  nebula_dir_close(&iter)
 
   -- Insertion sort children (directories first, then alphabetical)
   local ci: uint32 = 1

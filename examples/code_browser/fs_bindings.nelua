@@ -10,38 +10,98 @@
 --   B: L0 resources (DIR*) managed explicitly by caller
 -- =============================================================================
 
-## cinclude "<dirent.h>"
-## cinclude "<sys/stat.h>"
 ## cinclude "<string.h>"
 ## cinclude "<stdlib.h>"
 
--- Inline C helper: stat-based directory check (avoids binding struct stat)
--- Use cdefine to emit at file scope
-## cdefine "NEBULA_FS_IS_DIR_DEFINED"
-## cemitdecl "static int _nebula_c_is_dir(const char* path) { struct stat sb; if (lstat(path, &sb) != 0) return 0; return S_ISDIR(sb.st_mode); }"
+-- =============================================================================
+-- C helpers: avoid binding struct dirent / struct stat directly.
+-- struct dirent layout varies across libc implementations (glibc vs musl)
+-- and architectures (x86_64 vs aarch64), so we use C helper functions
+-- to extract d_name / d_type, following the cemitdecl pattern.
+-- =============================================================================
+## cdefine "NEBULA_FS_HELPERS_DEFINED"
+## cemitdecl [[
+#include <dirent.h>
+#include <sys/stat.h>
 
--- Opaque DIR handle
-global DIR <cimport, nodecl, forwarddecl> = @record{}
-
--- dirent structure (simplified — we only need d_name and d_type)
-global dirent <cimport, nodecl, ctypedef> = @record{
-  d_ino:    culong,
-  d_off:    clong,
-  d_reclen: uint16,
-  d_type:   uint8,
-  d_name:   [256]cchar,
+/* Directory check — uses stat() so symlinks to dirs are followed */
+static int _nebula_c_is_dir(const char* path) {
+  struct stat sb;
+  if (stat(path, &sb) != 0) return 0;
+  return S_ISDIR(sb.st_mode);
 }
 
--- d_type constants
+/* Opaque iterator for readdir results */
+typedef struct { DIR* dp; struct dirent* entry; } NebulaDirIter;
+
+static int _nebula_c_dir_open(NebulaDirIter* it, const char* path) {
+  it->dp = opendir(path);
+  it->entry = NULL;
+  return it->dp != NULL;
+}
+
+static int _nebula_c_dir_next(NebulaDirIter* it) {
+  if (!it->dp) return 0;
+  it->entry = readdir(it->dp);
+  return it->entry != NULL;
+}
+
+static const char* _nebula_c_dir_name(NebulaDirIter* it) {
+  if (!it->entry) return "";
+  return it->entry->d_name;
+}
+
+/* Returns: 0=unknown, 4=DT_DIR, 8=DT_REG, 10=DT_LNK, 255=other */
+static unsigned char _nebula_c_dir_type(NebulaDirIter* it) {
+  if (!it->entry) return 0;
+  return it->entry->d_type;
+}
+
+static void _nebula_c_dir_close(NebulaDirIter* it) {
+  if (it->dp) { closedir(it->dp); it->dp = NULL; }
+  it->entry = NULL;
+}
+]]
+
+-- Opaque directory iterator (mirrors C struct, 2 pointers)
+global NebulaDirIter = @record{ dp: pointer, entry: pointer }
+
+-- d_type constants (match POSIX DT_* values)
 global DT_UNKNOWN: uint8 = 0
 global DT_DIR:     uint8 = 4
 global DT_REG:     uint8 = 8
 global DT_LNK:     uint8 = 10
 
--- POSIX directory API
-global function opendir(name: cstring): *DIR <cimport, nodecl> end
-global function readdir(dirp: *DIR): *dirent <cimport, nodecl> end
-global function closedir(dirp: *DIR): cint <cimport, nodecl> end
+-- C helper wrappers
+local function _nebula_c_is_dir(path: cstring): cint <cimport, nodecl> end
+local function _nebula_c_dir_open(it: *NebulaDirIter, path: cstring): cint <cimport, nodecl> end
+local function _nebula_c_dir_next(it: *NebulaDirIter): cint <cimport, nodecl> end
+local function _nebula_c_dir_name(it: *NebulaDirIter): cstring <cimport, nodecl> end
+local function _nebula_c_dir_type(it: *NebulaDirIter): uint8 <cimport, nodecl> end
+local function _nebula_c_dir_close(it: *NebulaDirIter): void <cimport, nodecl> end
+
+-- =============================================================================
+-- High-level Nelua API for directory iteration
+-- =============================================================================
+global function nebula_dir_open(it: *NebulaDirIter, path: cstring): boolean
+  return _nebula_c_dir_open(it, path) ~= 0
+end
+
+global function nebula_dir_next(it: *NebulaDirIter): boolean
+  return _nebula_c_dir_next(it) ~= 0
+end
+
+global function nebula_dir_name(it: *NebulaDirIter): cstring
+  return _nebula_c_dir_name(it)
+end
+
+global function nebula_dir_type(it: *NebulaDirIter): uint8
+  return _nebula_c_dir_type(it)
+end
+
+global function nebula_dir_close(it: *NebulaDirIter): void
+  _nebula_c_dir_close(it)
+end
 
 -- String helpers
 global function strlen(s: cstring): csize <cimport, nodecl> end
@@ -50,11 +110,8 @@ global function strcpy(dest: cstring, src: cstring): cstring <cimport, nodecl> e
 global function strncpy(dest: cstring, src: cstring, n: csize): cstring <cimport, nodecl> end
 global function realpath(path: cstring, resolved: cstring): cstring <cimport, nodecl> end
 
--- C helper wrapper
-local function _nebula_c_is_dir(path: cstring): cint <cimport, nodecl> end
-
 -- =============================================================================
--- Helper: check if a path is a directory (fallback for d_type == DT_UNKNOWN)
+-- Helper: check if a path is a directory (follows symlinks via stat())
 -- =============================================================================
 global function nebula_fs_is_dir(path: cstring): boolean
   return _nebula_c_is_dir(path) ~= 0

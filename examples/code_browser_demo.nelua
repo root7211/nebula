@@ -58,10 +58,15 @@ local TREE_COLS <comptime> = 24    -- character columns for file tree
 local TREE_ROWS <comptime> = 40    -- visible rows
 local TREE_CELL_W <comptime> = 9.0
 local TREE_CELL_H <comptime> = 16.0
+local TREE_PAD_TOP <comptime> = 4.0  -- top padding for tree content
+local TREE_PANEL_WIDTH <comptime> = 220  -- must match flex_basis below
 
 -- Window dimensions
 local WIN_W <comptime> = 1280
 local WIN_H <comptime> = 720
+
+-- NOTE: Code browser depends on POSIX filesystem APIs (opendir/readdir/stat)
+-- and is not supported under WASM/Emscripten. Build with build.sh only.
 
 -- =============================================================================
 -- File tree DenseText Producer
@@ -74,7 +79,7 @@ global function fill_file_tree(
   max: uint32
 ): void
   local origin_x: float32 = app.dense_layout_file_tree_x
-  local origin_y: float32 = app.dense_layout_file_tree_y + 4.0
+  local origin_y: float32 = app.dense_layout_file_tree_y + TREE_PAD_TOP
   local idx: uint32 = 0
   local visible_rows: uint32 = TREE_ROWS
   local formatted: FsFormattedLine
@@ -141,7 +146,7 @@ end
 ##   layout = { direction = "row", width = 1280, height = 720 },
 ##   components = {
 ##     { name = "editor",      type = "BrowserEditorVisual" },
-##     { name = "file_tree",   dense = 8000, flex_basis = 220,
+##     { name = "file_tree",   dense = 8000, flex_basis = 220,  -- sync with TREE_PANEL_WIDTH
 ##       producer = "fill_file_tree", cell_w = 9.0, cell_h = 16.0 },
 ##     { name = "editor_panel", flex_grow = 1,
 ##       children = { "search_bar", "editor_body", "status_bar" } },
@@ -216,9 +221,9 @@ local function main(): int32
     Vec2{x = (@float32)(WIN_W), y = (@float32)(WIN_H)},
     0.0)
   -- Adjust editor background to cover only the editor panel area
-  -- (skip file_tree on left=220, search_bar top=24, status_bar bottom=24)
-  app.editor.visual.pos  = Vec2{x = 220.0, y = 24.0}
-  app.editor.visual.size = Vec2{x = (@float32)(WIN_W) - 220.0, y = (@float32)(WIN_H) - 24.0 - 24.0}
+  -- (skip file_tree on left=TREE_PANEL_WIDTH, search_bar top=24, status_bar bottom=24)
+  app.editor.visual.pos  = Vec2{x = (@float32)(TREE_PANEL_WIDTH), y = 24.0}
+  app.editor.visual.size = Vec2{x = (@float32)(WIN_W) - (@float32)(TREE_PANEL_WIDTH), y = (@float32)(WIN_H) - 24.0 - 24.0}
 
   -- Initialize file tree with the current directory (or nebula project root)
   if not fs_tree_init(&g_fs_tree, ".") then
@@ -255,7 +260,7 @@ local function main(): int32
     -- File tree interaction: click detection
     -- =========================================
     local tree_x: float32 = app.dense_layout_file_tree_x
-    local tree_y: float32 = app.dense_layout_file_tree_y + 4.0
+    local tree_y: float32 = app.dense_layout_file_tree_y + TREE_PAD_TOP
     local tree_w: float32 = (@float32)(TREE_COLS) * TREE_CELL_W
     local tree_h: float32 = (@float32)(TREE_ROWS) * TREE_CELL_H
 
