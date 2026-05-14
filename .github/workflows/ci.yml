@@ -17,8 +17,8 @@ jobs:
 
       - name: Install Nelua
         run: |
-          git clone --depth=1 https://github.com/edubart/nelua-lang.git /tmp/nelua-lang
-          cd /tmp/nelua-lang && sudo make install
+          git clone https://github.com/edubart/nelua-lang.git /tmp/nelua-lang
+          cd /tmp/nelua-lang && git checkout 37fb843c && sudo make install
 
       - name: Run Lua smoke tests
         run: |
@@ -56,8 +56,8 @@ jobs:
 
       - name: Install Nelua
         run: |
-          git clone --depth=1 https://github.com/edubart/nelua-lang.git /tmp/nelua-lang
-          cd /tmp/nelua-lang && sudo make install
+          git clone https://github.com/edubart/nelua-lang.git /tmp/nelua-lang
+          cd /tmp/nelua-lang && git checkout 37fb843c && sudo make install
 
       - name: Download wgpu-native
         run: bash tools/setup_wgpu.sh
@@ -132,8 +132,8 @@ jobs:
 
       - name: Install Nelua
         run: |
-          git clone --depth=1 https://github.com/edubart/nelua-lang.git /tmp/nelua-lang
-          cd /tmp/nelua-lang && sudo make install
+          git clone https://github.com/edubart/nelua-lang.git /tmp/nelua-lang
+          cd /tmp/nelua-lang && git checkout 37fb843c && sudo make install
 
       - name: Download wgpu-native (Windows GNU)
         run: |
@@ -168,8 +168,8 @@ jobs:
 
       - name: Install Nelua
         run: |
-          git clone --depth=1 https://github.com/edubart/nelua-lang.git /tmp/nelua-lang
-          cd /tmp/nelua-lang && sudo make install
+          git clone https://github.com/edubart/nelua-lang.git /tmp/nelua-lang
+          cd /tmp/nelua-lang && git checkout 37fb843c && sudo make install
 
       - name: Build button_v2_demo for WASM (full link)
         run: |
@@ -205,8 +205,8 @@ jobs:
 
       - name: Install Nelua
         run: |
-          git clone --depth=1 https://github.com/edubart/nelua-lang.git /tmp/nelua-lang
-          cd /tmp/nelua-lang && sudo make install
+          git clone https://github.com/edubart/nelua-lang.git /tmp/nelua-lang
+          cd /tmp/nelua-lang && git checkout 37fb843c && sudo make install
 
       - name: Build demos for WASM
         run: |
