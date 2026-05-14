@@ -57,12 +57,13 @@ print("--- 2. Key Mapping in app.nelua ---")
 check("Ctrl+Z mapped to Undo",
   app_src:find("NebulaKey%.Undo") ~= nil)
 check("Ctrl+Y mapped to Redo",
+  app_src:find("key == GLFW_KEY_Y then nk = NebulaKey%.Redo") ~= nil or
   app_src:find("key == 89 then nk = NebulaKey%.Redo") ~= nil)
 check("Ctrl+Shift+Z mapped to Redo",
   app_src:find("shift_down then") ~= nil and
   app_src:find("NebulaKey%.Redo") ~= nil)
 check("GLFW_KEY_Z = 90 used for Ctrl+Z",
-  app_src:find("key == 90") ~= nil)
+  app_src:find("key == 90") ~= nil or app_src:find("key == GLFW_KEY_Z") ~= nil)
 
 -- ---- 3. gap_buffer_factory 版本 + undo stack 生成 ----
 print("")
