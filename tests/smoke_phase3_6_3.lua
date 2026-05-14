@@ -74,12 +74,13 @@ assert_contains("生成代码包含拖拽逻辑注释",            ifac_src, "dr
 assert_contains("生成代码包含 Phase 3.6.3 标记",       ifac_src, "Phase 3.6.3")
 
 -- =============================================================================
--- 3. gap_buffer.nelua delete_range 方法验证
+-- 3. gap_buffer delete_range 方法验证（BUG-6 修复后实现在 gap_buffer_factory.lua 中）
 -- =============================================================================
-print("\n--- 3. gap_buffer.nelua delete_range 方法 ---")
-local gb_path = script_dir .. "/../src/gap_buffer.nelua"
-local fg = io.open(gb_path, "r")
-assert(fg, "无法读取 src/gap_buffer.nelua")
+print("\n--- 3. gap_buffer delete_range 方法 ---")
+-- BUG-6 修复：gap_buffer.nelua 委托给 factory，实际实现在 gap_buffer_factory.lua
+local gbf_path = script_dir .. "/../src/derive/gap_buffer_factory.lua"
+local fg = io.open(gbf_path, "r")
+assert(fg, "无法读取 src/derive/gap_buffer_factory.lua")
 local gb_src = fg:read("*a")
 fg:close()
 

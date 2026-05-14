@@ -85,6 +85,9 @@ assert(gb_file, "gap_buffer.nelua not found")
 local gb_content = gb_file:read("*a")
 gb_file:close()
 
+-- 确保 Lua 搜索路径包含 src/（BUG-6 修复后 gap_buffer.nelua 通过 require 加载 factory）
+package.path = "src/?.lua;src/?/init.lua;" .. package.path
+
 -- 提取并执行 ##[[ ]] 块
 for block in gb_content:gmatch("##%[%[(.-)%]%]") do
   local fn, err = load(block, "gap_buffer.nelua##")
