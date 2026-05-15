@@ -245,7 +245,7 @@ jobs:
 
       - name: Generate C code for analysis
         run: |
-          DEMOS="button_demo form_demo text_editor_demo_v3"
+          DEMOS="button_demo form_demo slider_demo dropdown_demo"
           mkdir -p /tmp/c_output
           for demo in $DEMOS; do
             EXTRA_FLAGS=""
@@ -263,8 +263,10 @@ jobs:
           done
 
       - name: Run cppcheck
+        timeout-minutes: 3
         run: |
           cppcheck --enable=warning,performance,portability \
+            --check-level=normal \
             --suppress=missingIncludeSystem \
             --suppress=unusedFunction \
             --error-exitcode=0 \
