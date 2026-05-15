@@ -1,0 +1,364 @@
+-- =============================================================================
+-- wgpu_bindings_wasm.nelua
+-- WebGPU WASM (Emscripten) 平台专属定义
+--
+-- ★ P1-3 refactor: 从 wgpu_bindings.nelua 提取。
+-- 所有 WASM 特有的枚举值、结构体布局、函数签名集中于此。
+-- =============================================================================
+
+require "wgpu_bindings_shared"
+
+-- =============================================================================
+-- WASM 特有定义
+-- =============================================================================
+-- WASM: 自定义 WGPUStringView（Emscripten 无此定义）
+global WGPUStringView = @record{
+  data:   cstring,
+  length: csize,
+}
+
+-- WASM: 返回 cstring 以匹配 WASM 结构体的 label 字段
+global function wgpu_str(s: string): cstring
+  return s.data
+end
+
+global function wgpu_str_null(): cstring
+  return nilptr
+end
+
+-- =============================================================================
+-- WASM 特有枚举值
+-- =============================================================================
+global WGPUPresentMode = @uint32
+global WGPUPresentMode_Undefined   <comptime> = (@WGPUPresentMode)(0x00000000)
+global WGPUPresentMode_Fifo        <comptime> = (@WGPUPresentMode)(0x00000001)
+global WGPUPresentMode_FifoRelaxed <comptime> = (@WGPUPresentMode)(0x00000001)
+global WGPUPresentMode_Immediate   <comptime> = (@WGPUPresentMode)(0x00000003)
+global WGPUPresentMode_Mailbox     <comptime> = (@WGPUPresentMode)(0x00000004)
+
+global WGPULoadOp = @uint32
+global WGPULoadOp_Clear <comptime> = (@WGPULoadOp)(0x00000001)
+global WGPULoadOp_Load  <comptime> = (@WGPULoadOp)(0x00000002)
+
+global WGPUStoreOp = @uint32
+global WGPUStoreOp_Store   <comptime> = (@WGPUStoreOp)(0x00000001)
+global WGPUStoreOp_Discard <comptime> = (@WGPUStoreOp)(0x00000002)
+
+global WGPUVertexFormat = @uint32
+global WGPUVertexFormat_Float32x2 <comptime> = (@WGPUVertexFormat)(0x00000014)
+global WGPUVertexFormat_Float32x4 <comptime> = (@WGPUVertexFormat)(0x00000016)
+
+global WGPUVertexStepMode = @uint32
+global WGPUVertexStepMode_Undefined <comptime> = (@WGPUVertexStepMode)(0x00000000)
+global WGPUVertexStepMode_Vertex    <comptime> = (@WGPUVertexStepMode)(0x00000002)
+global WGPUVertexStepMode_Instance  <comptime> = (@WGPUVertexStepMode)(0x00000003)
+
+global WGPUShaderStage = @uint32
+global WGPUShaderStage_Vertex   <comptime> = (@WGPUShaderStage)(0x00000001)
+global WGPUShaderStage_Fragment <comptime> = (@WGPUShaderStage)(0x00000002)
+
+global WGPUBufferBindingType = @uint32
+global WGPUBufferBindingType_Uniform <comptime> = (@WGPUBufferBindingType)(0x00000001)
+global WGPUBufferBindingType_Storage <comptime> = (@WGPUBufferBindingType)(0x00000002)
+global WGPUBufferBindingType_ReadOnlyStorage <comptime> = (@WGPUBufferBindingType)(0x00000003)
+
+global WGPUSType_ShaderSourceWGSL        <comptime> = (@WGPUSType)(0x00000006)
+global WGPUSType_SurfaceSourceCanvasHTMLSelector   <comptime> = (@WGPUSType)(0x00000004)
+
+global WGPUSamplerBindingType = @uint32
+global WGPUSamplerBindingType_Filtering <comptime> = (@WGPUSamplerBindingType)(0x00000001)
+
+global WGPUTextureSampleType = @uint32
+global WGPUTextureSampleType_Float <comptime> = (@WGPUTextureSampleType)(0x00000001)
+
+global WGPUAddressMode = @uint32
+global WGPUAddressMode_ClampToEdge <comptime> = (@WGPUAddressMode)(0x00000001)
+
+-- =============================================================================
+-- WASM 结构体（Emscripten 布局）
+-- =============================================================================
+global WGPURenderPassColorAttachment <cimport, nodecl> = @record{
+  view:          WGPUTextureView,
+  depthSlice:    uint32,
+  resolveTarget: WGPUTextureView,
+  loadOp:        WGPULoadOp,
+  storeOp:       WGPUStoreOp,
+  clearValue:    WGPUColor,
+}
+
+global WGPURenderPassDescriptor <cimport, nodecl> = @record{
+  nextInChain:          pointer,
+  label:                cstring,
+  colorAttachmentCount: csize,
+  colorAttachments:     *WGPURenderPassColorAttachment,
+  depthStencilAttachment: pointer,
+  occlusionQuerySet:    pointer,
+  timestampWrites:      pointer,
+}
+
+global WGPUSurfaceConfiguration <cimport, nodecl> = @record{
+  nextInChain:     pointer,
+  device:          WGPUDevice,
+  format:          WGPUTextureFormat,
+  usage:           uint32,
+  viewFormatCount: csize,
+  viewFormats:     pointer,
+  alphaMode:       uint32,
+  width:           uint32,
+  height:          uint32,
+  presentMode:     WGPUPresentMode,
+}
+
+global WGPUInstanceDescriptor <cimport, nodecl> = @record{
+  nextInChain: pointer,
+}
+
+global WGPURequestAdapterOptions <cimport, nodecl> = @record{
+  nextInChain:          pointer,
+  compatibleSurface:    WGPUSurface,
+  powerPreference:      uint32,
+  backendType:          uint32,
+  forceFallbackAdapter: uint32,
+}
+
+-- WASM: internal records (not cimported) for uniform Nelua code
+global WGPURequestAdapterCallbackInfo = @record{
+  nextInChain: pointer,
+  mode:        WGPUCallbackMode,
+  callback:    pointer,
+  userdata1:   pointer,
+  userdata2:   pointer,
+}
+
+global WGPURequestDeviceCallbackInfo = @record{
+  nextInChain: pointer,
+  mode:        WGPUCallbackMode,
+  callback:    pointer,
+  userdata1:   pointer,
+  userdata2:   pointer,
+}
+
+global WGPUDeviceDescriptor <cimport, nodecl> = @record{
+  nextInChain:                  pointer,
+  label:                        cstring,
+  requiredFeatureCount:         csize,
+  requiredFeatures:             pointer,
+  requiredLimits:               pointer,
+  defaultQueue:                 record{ nextInChain: pointer, label: cstring },
+  deviceLostCallback:           pointer,
+  deviceLostUserdata:           pointer,
+}
+
+global WGPUBufferDescriptor <cimport, nodecl> = @record{
+  nextInChain:      pointer,
+  label:            cstring,
+  usage:            uint32,
+  size:             uint64,
+  mappedAtCreation: uint32,
+}
+
+global WGPUBindGroupLayoutEntry <cimport, nodecl> = @record{
+  nextInChain:      pointer,
+  binding:          uint32,
+  visibility:       uint32,
+  buffer:           record{
+    nextInChain:      pointer,
+    type:             uint32,
+    hasDynamicOffset: uint32,
+    minBindingSize:   uint64,
+  },
+  sampler:          record{ nextInChain: pointer, type: uint32 },
+  texture:          record{ nextInChain: pointer, sampleType: uint32, viewDimension: uint32, multisampled: uint32 },
+  storageTexture:   record{ nextInChain: pointer, access: uint32, format: WGPUTextureFormat, viewDimension: uint32 },
+}
+
+global WGPUBindGroupLayoutDescriptor <cimport, nodecl> = @record{
+  nextInChain: pointer,
+  label:       cstring,
+  entryCount:  csize,
+  entries:     *WGPUBindGroupLayoutEntry,
+}
+
+global WGPUBindGroupDescriptor <cimport, nodecl> = @record{
+  nextInChain: pointer,
+  label:       cstring,
+  layout:      WGPUBindGroupLayout,
+  entryCount:  csize,
+  entries:     *WGPUBindGroupEntry,
+}
+
+global WGPUPipelineLayoutDescriptor <cimport, nodecl> = @record{
+  nextInChain:          pointer,
+  label:                cstring,
+  bindGroupLayoutCount: csize,
+  bindGroupLayouts:     *WGPUBindGroupLayout,
+}
+
+-- WASM: Emscripten 命名为 WGPUShaderModuleWGSLDescriptor，code 类型为 cstring
+global WGPUShaderSourceWGSL <cimport "WGPUShaderModuleWGSLDescriptor", nodecl> = @record{
+  chain: WGPUChainedStruct,
+  code:  cstring,
+}
+
+global WGPUShaderModuleDescriptor <cimport, nodecl> = @record{
+  nextInChain: *WGPUChainedStruct,
+  label:       cstring,
+}
+
+global WGPUFragmentState <cimport, nodecl> = @record{
+  nextInChain: pointer,
+  module:      WGPUShaderModule,
+  entryPoint:  cstring,
+  constantCount: csize,
+  constants:   pointer,
+  targetCount: csize,
+  targets:     *WGPUColorTargetState,
+}
+
+global WGPURenderPipelineDescriptor <cimport, nodecl> = @record{
+  nextInChain: pointer,
+  label:       cstring,
+  layout:      WGPUPipelineLayout,
+  vertex:      record{
+    nextInChain:   pointer,
+    module:        WGPUShaderModule,
+    entryPoint:    cstring,
+    constantCount: csize,
+    constants:     pointer,
+    bufferCount:   csize,
+    buffers:       pointer,
+  },
+  primitive:   record{
+    nextInChain:  pointer,
+    topology:     WGPUPrimitiveTopology,
+    stripIndexFormat: uint32,
+    frontFace:    uint32,
+    cullMode:     uint32,
+  },
+  depthStencil: pointer,
+  multisample:  record{
+    nextInChain:            pointer,
+    count:                  uint32,
+    mask:                   uint32,
+    alphaToCoverageEnabled: uint32,
+  },
+  fragment:     *WGPUFragmentState,
+}
+
+-- Web (WASM) 的 Surface 来源
+global WGPUSurfaceSourceCanvasHTMLSelector <cimport "WGPUSurfaceDescriptorFromCanvasHTMLSelector", nodecl> = @record{
+  chain:    WGPUChainedStruct,
+  selector: cstring,
+}
+
+global WGPUSurfaceDescriptor <cimport, nodecl> = @record{
+  nextInChain: *WGPUChainedStruct,
+  label:       cstring,
+}
+
+global WGPUTextureViewDescriptor <cimport, nodecl> = @record{
+  nextInChain:     pointer,
+  label:           cstring,
+  format:          WGPUTextureFormat,
+  dimension:       uint32,
+  baseMipLevel:    uint32,
+  mipLevelCount:   uint32,
+  baseArrayLayer:  uint32,
+  arrayLayerCount: uint32,
+  aspect:          uint32,
+}
+
+global WGPUCommandEncoderDescriptor <cimport, nodecl> = @record{
+  nextInChain: pointer,
+  label:       cstring,
+}
+
+global WGPUCommandBufferDescriptor <cimport, nodecl> = @record{
+  nextInChain: pointer,
+  label:       cstring,
+}
+
+-- WASM: Emscripten uses WGPUTextureDataLayout
+global WGPUTexelCopyBufferLayout <cimport "WGPUTextureDataLayout", nodecl> = @record{
+  nextInChain:  pointer,
+  offset:       uint64,
+  bytesPerRow:  uint32,
+  rowsPerImage: uint32,
+}
+
+global WGPUVertexAttribute <cimport, nodecl> = @record{
+  format:         WGPUVertexFormat,
+  offset:         uint64,
+  shaderLocation: uint32,
+}
+
+global WGPUVertexBufferLayout <cimport, nodecl> = @record{
+  arrayStride:    uint64,
+  stepMode:       WGPUVertexStepMode,
+  attributeCount: csize,
+  attributes:     *WGPUVertexAttribute,
+}
+
+global WGPUTextureDescriptor <cimport, nodecl> = @record{
+  nextInChain:     pointer,
+  label:           cstring,
+  usage:           uint32,
+  dimension:       WGPUTextureDimension,
+  size:            WGPUExtent3D,
+  format:          WGPUTextureFormat,
+  mipLevelCount:   uint32,
+  sampleCount:     uint32,
+  viewFormatCount: csize,
+  viewFormats:     pointer,
+}
+
+-- WASM: Emscripten uses WGPUImageCopyTexture
+global WGPUTexelCopyTextureInfo <cimport "WGPUImageCopyTexture", nodecl> = @record{
+  nextInChain: pointer,
+  texture:  WGPUTexture,
+  mipLevel: uint32,
+  origin:   WGPUOrigin3D,
+  aspect:   WGPUTextureAspect,
+}
+
+global WGPUSamplerDescriptor <cimport, nodecl> = @record{
+  nextInChain:   pointer,
+  label:         cstring,
+  addressModeU:  WGPUAddressMode,
+  addressModeV:  WGPUAddressMode,
+  addressModeW:  WGPUAddressMode,
+  magFilter:     WGPUFilterMode,
+  minFilter:     WGPUFilterMode,
+  mipmapFilter:  WGPUMipmapFilterMode,
+  lodMinClamp:   float32,
+  lodMaxClamp:   float32,
+  compare:       uint32,
+  maxAnisotropy: uint16,
+}
+
+-- =============================================================================
+-- WASM 函数绑定
+-- =============================================================================
+global function wgpuCreateInstance(desc: *WGPUInstanceDescriptor): WGPUInstance <cimport, nodecl> end
+global function wgpuInstanceCreateSurface(instance: WGPUInstance, desc: *WGPUSurfaceDescriptor): WGPUSurface <cimport, nodecl> end
+-- WASM: old-style callback + userdata (no CallbackInfo struct)
+global function wgpuInstanceRequestAdapter(instance: WGPUInstance, options: *WGPURequestAdapterOptions, callback: pointer, userdata: pointer): void <cimport, nodecl> end
+global function wgpuAdapterRequestDevice(adapter: WGPUAdapter, desc: *WGPUDeviceDescriptor, callback: pointer, userdata: pointer): void <cimport, nodecl> end
+global function wgpuSurfaceConfigure(surface: WGPUSurface, config: *WGPUSurfaceConfiguration): void <cimport, nodecl> end
+global function wgpuSurfaceGetPreferredFormat(surface: WGPUSurface, adapter: WGPUAdapter): WGPUTextureFormat <cimport, nodecl> end
+## cinclude "<emscripten/html5_webgpu.h>"
+global function emscripten_webgpu_get_device(): WGPUDevice <cimport, nodecl> end
+global function wgpuTextureCreateView(texture: WGPUTexture, desc: *WGPUTextureViewDescriptor): WGPUTextureView <cimport, nodecl> end
+global function wgpuDeviceCreateBuffer(device: WGPUDevice, desc: *WGPUBufferDescriptor): WGPUBuffer <cimport, nodecl> end
+global function wgpuQueueWriteBuffer(queue: WGPUQueue, buffer: WGPUBuffer, offset: uint64, data: pointer, size: csize): void <cimport, nodecl> end
+global function wgpuDeviceCreateBindGroupLayout(device: WGPUDevice, desc: *WGPUBindGroupLayoutDescriptor): WGPUBindGroupLayout <cimport, nodecl> end
+global function wgpuDeviceCreateBindGroup(device: WGPUDevice, desc: *WGPUBindGroupDescriptor): WGPUBindGroup <cimport, nodecl> end
+global function wgpuDeviceCreatePipelineLayout(device: WGPUDevice, desc: *WGPUPipelineLayoutDescriptor): WGPUPipelineLayout <cimport, nodecl> end
+global function wgpuDeviceCreateShaderModule(device: WGPUDevice, desc: *WGPUShaderModuleDescriptor): WGPUShaderModule <cimport, nodecl> end
+global function wgpuDeviceCreateRenderPipeline(device: WGPUDevice, desc: *WGPURenderPipelineDescriptor): WGPURenderPipeline <cimport, nodecl> end
+global function wgpuDeviceCreateCommandEncoder(device: WGPUDevice, desc: *WGPUCommandEncoderDescriptor): WGPUCommandEncoder <cimport, nodecl> end
+global function wgpuCommandEncoderBeginRenderPass(encoder: WGPUCommandEncoder, desc: *WGPURenderPassDescriptor): WGPURenderPassEncoder <cimport, nodecl> end
+global function wgpuCommandEncoderFinish(encoder: WGPUCommandEncoder, desc: *WGPUCommandBufferDescriptor): WGPUCommandBuffer <cimport, nodecl> end
+global function wgpuDeviceCreateTexture(device: WGPUDevice, desc: *WGPUTextureDescriptor): WGPUTexture <cimport, nodecl> end
+global function wgpuDeviceCreateSampler(device: WGPUDevice, desc: *WGPUSamplerDescriptor): WGPUSampler <cimport, nodecl> end
+global function wgpuQueueWriteTexture(queue: WGPUQueue, destination: *WGPUTexelCopyTextureInfo, data: pointer, dataSize: csize, dataLayout: *WGPUTexelCopyBufferLayout, writeSize: *WGPUExtent3D): void <cimport, nodecl> end
