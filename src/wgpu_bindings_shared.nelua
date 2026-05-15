@@ -1,0 +1,216 @@
+-- =============================================================================
+-- wgpu_bindings_shared.nelua
+-- WebGPU 平台无关定义：Opaque Handles + 共享枚举 + 共享结构体 + 共享函数
+--
+-- ★ P1-3 refactor: 从 wgpu_bindings.nelua 提取。
+-- 由 wgpu_bindings_native.nelua 和 wgpu_bindings_wasm.nelua 共同 require。
+-- =============================================================================
+
+-- 链接与头文件
+## if NEBULA_TARGET ~= 'wasm' then
+## linklib "wgpu_native"
+## cdefine "WGPU_SKIP_PROCS"
+## cinclude "<webgpu/webgpu.h>"
+## cinclude "<webgpu/wgpu.h>"
+## else
+## cinclude "<webgpu/webgpu.h>"
+## end
+
+-- =============================================================================
+-- 基础类型绑定（Opaque Handles）
+-- =============================================================================
+global WGPUInstance         <cimport, nodecl> = @pointer
+global WGPUAdapter          <cimport, nodecl> = @pointer
+global WGPUDevice           <cimport, nodecl> = @pointer
+global WGPUQueue            <cimport, nodecl> = @pointer
+global WGPUSurface          <cimport, nodecl> = @pointer
+global WGPUSwapChain        <cimport, nodecl> = @pointer
+global WGPURenderPipeline   <cimport, nodecl> = @pointer
+global WGPUBuffer           <cimport, nodecl> = @pointer
+global WGPUBindGroup        <cimport, nodecl> = @pointer
+global WGPUBindGroupLayout  <cimport, nodecl> = @pointer
+global WGPUPipelineLayout   <cimport, nodecl> = @pointer
+global WGPUShaderModule     <cimport, nodecl> = @pointer
+global WGPUCommandEncoder   <cimport, nodecl> = @pointer
+global WGPURenderPassEncoder <cimport, nodecl> = @pointer
+global WGPUCommandBuffer    <cimport, nodecl> = @pointer
+global WGPUTextureView      <cimport, nodecl> = @pointer
+global WGPUTexture          <cimport, nodecl> = @pointer
+global WGPUSampler          <cimport, nodecl> = @pointer
+
+-- =============================================================================
+-- 共享枚举类型（Native 与 WASM 值一致）
+-- =============================================================================
+global WGPUTextureFormat = @uint32
+global WGPUTextureFormat_Undefined  <comptime> = (@WGPUTextureFormat)(0x00000000)
+global WGPUTextureFormat_R8Unorm    <comptime> = (@WGPUTextureFormat)(0x00000001)
+global WGPUTextureFormat_RGBA8Unorm <comptime> = (@WGPUTextureFormat)(0x00000012)
+global WGPUTextureFormat_BGRA8Unorm <comptime> = (@WGPUTextureFormat)(0x00000017)
+
+global WGPUBufferUsage = @uint32
+global WGPUBufferUsage_None         <comptime> = (@WGPUBufferUsage)(0x00000000)
+global WGPUBufferUsage_MapRead      <comptime> = (@WGPUBufferUsage)(0x00000001)
+global WGPUBufferUsage_MapWrite     <comptime> = (@WGPUBufferUsage)(0x00000002)
+global WGPUBufferUsage_CopySrc      <comptime> = (@WGPUBufferUsage)(0x00000004)
+global WGPUBufferUsage_CopyDst      <comptime> = (@WGPUBufferUsage)(0x00000008)
+global WGPUBufferUsage_Index        <comptime> = (@WGPUBufferUsage)(0x00000010)
+global WGPUBufferUsage_Vertex       <comptime> = (@WGPUBufferUsage)(0x00000020)
+global WGPUBufferUsage_Uniform      <comptime> = (@WGPUBufferUsage)(0x00000040)
+global WGPUBufferUsage_Storage      <comptime> = (@WGPUBufferUsage)(0x00000080)
+global WGPUBufferUsage_Indirect     <comptime> = (@WGPUBufferUsage)(0x00000100)
+global WGPUBufferUsage_QueryResolve <comptime> = (@WGPUBufferUsage)(0x00000200)
+
+global WGPUColorWriteMask = @uint32
+global WGPUColorWriteMask_All <comptime> = (@WGPUColorWriteMask)(0x0000000F)
+
+global WGPUSurfaceGetCurrentTextureStatus = @uint32
+global WGPUSurfaceGetCurrentTextureStatus_Success           <comptime> = (@WGPUSurfaceGetCurrentTextureStatus)(0x00000000)
+global WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal    <comptime> = (@WGPUSurfaceGetCurrentTextureStatus)(0x00000001)
+global WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal <comptime> = (@WGPUSurfaceGetCurrentTextureStatus)(0x00000002)
+global WGPUSurfaceGetCurrentTextureStatus_Timeout           <comptime> = (@WGPUSurfaceGetCurrentTextureStatus)(0x00000003)
+global WGPUSurfaceGetCurrentTextureStatus_Outdated          <comptime> = (@WGPUSurfaceGetCurrentTextureStatus)(0x00000004)
+global WGPUSurfaceGetCurrentTextureStatus_Lost              <comptime> = (@WGPUSurfaceGetCurrentTextureStatus)(0x00000005)
+
+global WGPURequestAdapterStatus = @uint32
+global WGPURequestAdapterStatus_Success <comptime> = (@WGPURequestAdapterStatus)(0x00000001)
+
+global WGPURequestDeviceStatus = @uint32
+global WGPURequestDeviceStatus_Success <comptime> = (@WGPURequestDeviceStatus)(0x00000001)
+
+global WGPUCallbackMode = @uint32
+global WGPUCallbackMode_AllowSpontaneous <comptime> = (@WGPUCallbackMode)(0x00000003)
+
+global WGPUPrimitiveTopology = @uint32
+global WGPUPrimitiveTopology_TriangleList  <comptime> = (@WGPUPrimitiveTopology)(0x00000004)
+global WGPUPrimitiveTopology_TriangleStrip <comptime> = (@WGPUPrimitiveTopology)(0x00000005)
+
+global WGPUBlendOperation = @uint32
+global WGPUBlendOperation_Add <comptime> = (@WGPUBlendOperation)(0x00000001)
+
+global WGPUBlendFactor = @uint32
+global WGPUBlendFactor_Zero             <comptime> = (@WGPUBlendFactor)(0x00000001)
+global WGPUBlendFactor_One              <comptime> = (@WGPUBlendFactor)(0x00000002)
+global WGPUBlendFactor_SrcAlpha         <comptime> = (@WGPUBlendFactor)(0x00000005)
+global WGPUBlendFactor_OneMinusSrcAlpha <comptime> = (@WGPUBlendFactor)(0x00000006)
+
+-- ===== 纹理相关共享枚举 =====
+global WGPUTextureUsage = @uint32
+global WGPUTextureUsage_CopySrc          <comptime> = (@WGPUTextureUsage)(0x00000001)
+global WGPUTextureUsage_CopyDst          <comptime> = (@WGPUTextureUsage)(0x00000002)
+global WGPUTextureUsage_TextureBinding   <comptime> = (@WGPUTextureUsage)(0x00000004)
+global WGPUTextureUsage_RenderAttachment <comptime> = (@WGPUTextureUsage)(0x00000010)
+
+global WGPUTextureDimension = @uint32
+global WGPUTextureDimension_2D <comptime> = (@WGPUTextureDimension)(0x00000002)
+
+global WGPUTextureViewDimension = @uint32
+global WGPUTextureViewDimension_2D <comptime> = (@WGPUTextureViewDimension)(0x00000002)
+
+global WGPUTextureAspect = @uint32
+global WGPUTextureAspect_Undefined <comptime> = (@WGPUTextureAspect)(0x00000000)
+global WGPUTextureAspect_All       <comptime> = (@WGPUTextureAspect)(0x00000001)
+
+global WGPUFilterMode = @uint32
+global WGPUFilterMode_Nearest <comptime> = (@WGPUFilterMode)(0x00000001)
+global WGPUFilterMode_Linear  <comptime> = (@WGPUFilterMode)(0x00000002)
+
+global WGPUMipmapFilterMode = @uint32
+global WGPUMipmapFilterMode_Nearest <comptime> = (@WGPUMipmapFilterMode)(0x00000001)
+
+-- =============================================================================
+-- 共享结构体（Native 与 WASM 布局一致）
+-- =============================================================================
+global WGPUSType = @uint32
+
+global WGPUChainedStruct <cimport, nodecl> = @record{
+  next:  pointer,
+  sType: WGPUSType,
+}
+
+global WGPUColor <cimport, nodecl> = @record{
+  r: float64,
+  g: float64,
+  b: float64,
+  a: float64,
+}
+
+global WGPUSurfaceTexture <cimport, nodecl> = @record{
+  texture:    WGPUTexture,
+  suboptimal: boolean,
+  status:     WGPUSurfaceGetCurrentTextureStatus,
+}
+
+global WGPUBindGroupEntry <cimport, nodecl> = @record{
+  nextInChain: pointer,
+  binding:     uint32,
+  buffer:      WGPUBuffer,
+  offset:      uint64,
+  size:        uint64,
+  sampler:     pointer,
+  textureView: pointer,
+}
+
+global WGPUBlendComponent <cimport, nodecl> = @record{
+  operation: WGPUBlendOperation,
+  srcFactor: WGPUBlendFactor,
+  dstFactor: WGPUBlendFactor,
+}
+
+global WGPUBlendState <cimport, nodecl> = @record{
+  color: WGPUBlendComponent,
+  alpha: WGPUBlendComponent,
+}
+
+global WGPUColorTargetState <cimport, nodecl> = @record{
+  nextInChain: pointer,
+  format:      WGPUTextureFormat,
+  blend:       *WGPUBlendState,
+  writeMask:   uint32,
+}
+
+global WGPUExtent3D <cimport, nodecl> = @record{
+  width:              uint32,
+  height:             uint32,
+  depthOrArrayLayers: uint32,
+}
+
+global WGPUOrigin3D <cimport, nodecl> = @record{
+  x: uint32,
+  y: uint32,
+  z: uint32,
+}
+
+-- =============================================================================
+-- 共享函数绑定（签名在 Native 与 WASM 上一致）
+-- =============================================================================
+-- 注：依赖平台特定描述符类型的函数在 native/wasm 文件中声明。
+-- 这里只包含签名完全一致的函数。
+
+global function wgpuDeviceGetQueue(device: WGPUDevice): WGPUQueue <cimport, nodecl> end
+global function wgpuSurfaceGetCurrentTexture(surface: WGPUSurface, surfaceTexture: *WGPUSurfaceTexture): void <cimport, nodecl> end
+global function wgpuSurfacePresent(surface: WGPUSurface): void <cimport, nodecl> end
+global function wgpuTextureViewRelease(view: WGPUTextureView): void <cimport, nodecl> end
+global function wgpuTextureRelease(texture: WGPUTexture): void <cimport, nodecl> end
+global function wgpuRenderPassEncoderSetPipeline(pass: WGPURenderPassEncoder, pipeline: WGPURenderPipeline): void <cimport, nodecl> end
+global function wgpuRenderPassEncoderSetBindGroup(pass: WGPURenderPassEncoder, groupIndex: uint32, group: WGPUBindGroup, dynamicOffsetCount: csize, dynamicOffsets: pointer): void <cimport, nodecl> end
+global function wgpuRenderPassEncoderSetVertexBuffer(pass: WGPURenderPassEncoder, slot: uint32, buffer: WGPUBuffer, offset: uint64, size: uint64): void <cimport, nodecl> end
+global function wgpuRenderPassEncoderDraw(pass: WGPURenderPassEncoder, vertexCount: uint32, instanceCount: uint32, firstVertex: uint32, firstInstance: uint32): void <cimport, nodecl> end
+global function wgpuRenderPassEncoderSetScissorRect(pass: WGPURenderPassEncoder, x: uint32, y: uint32, width: uint32, height: uint32): void <cimport, nodecl> end
+global function wgpuRenderPassEncoderEnd(pass: WGPURenderPassEncoder): void <cimport, nodecl> end
+global function wgpuRenderPassEncoderRelease(pass: WGPURenderPassEncoder): void <cimport, nodecl> end
+global function wgpuCommandEncoderRelease(encoder: WGPUCommandEncoder): void <cimport, nodecl> end
+global function wgpuQueueSubmit(queue: WGPUQueue, commandCount: csize, commands: *WGPUCommandBuffer): void <cimport, nodecl> end
+global function wgpuCommandBufferRelease(buf: WGPUCommandBuffer): void <cimport, nodecl> end
+global function wgpuBindGroupRelease(bg: WGPUBindGroup): void <cimport, nodecl> end
+global function wgpuBufferRelease(buffer: WGPUBuffer): void <cimport, nodecl> end
+global function wgpuBufferGetSize(buffer: WGPUBuffer): uint64 <cimport, nodecl> end
+global function wgpuInstanceRelease(instance: WGPUInstance): void <cimport, nodecl> end
+global function wgpuAdapterRelease(adapter: WGPUAdapter): void <cimport, nodecl> end
+global function wgpuDeviceRelease(device: WGPUDevice): void <cimport, nodecl> end
+global function wgpuSurfaceRelease(surface: WGPUSurface): void <cimport, nodecl> end
+global function wgpuSamplerRelease(sampler: WGPUSampler): void <cimport, nodecl> end
+global function wgpuShaderModuleRelease(shaderModule: WGPUShaderModule): void <cimport, nodecl> end
+global function wgpuBindGroupLayoutRelease(bindGroupLayout: WGPUBindGroupLayout): void <cimport, nodecl> end
+global function wgpuPipelineLayoutRelease(pipelineLayout: WGPUPipelineLayout): void <cimport, nodecl> end
+global function wgpuRenderPipelineRelease(renderPipeline: WGPURenderPipeline): void <cimport, nodecl> end
+global function wgpuQueueRelease(queue: WGPUQueue): void <cimport, nodecl> end
