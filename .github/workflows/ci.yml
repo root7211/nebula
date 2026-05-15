@@ -41,6 +41,12 @@ jobs:
           echo "Results: $PASS/$TOTAL passed, $FAIL failed"
           if [ "$FAIL" -gt 0 ]; then exit 1; fi
 
+      - name: Verify golden files
+        run: |
+          nelua-lua tests/golden_gen.lua
+          nelua-lua tests/golden_gen_extended.lua
+          echo "Golden file verification passed"
+
   # ============================================================
   # Job 2: Linux 编译回归（nelua -c 生成 C 代码，验证代码生成正确性）
   # ============================================================

@@ -1,0 +1,50 @@
+struct DenseTextUniforms {
+  viewport: vec2<f32>,
+  cell_w:   f32,
+  cell_h:   f32,
+}
+
+struct DenseCharInstance {
+  pos_x:    f32,
+  pos_y:    f32,
+  uv_x:     f32,
+  uv_y:     f32,
+  uv_w:     f32,
+  uv_h:     f32,
+  fg_color: u32,
+  bg_color: u32,
+}
+
+@group(0) @binding(0) var<uniform>       u:     DenseTextUniforms;
+@group(0) @binding(1) var<storage, read> chars: array<DenseCharInstance>;
+@group(0) @binding(2) var glyph_atlas:   texture_2d<f32>;
+@group(0) @binding(3) var glyph_sampler: sampler;
+
+struct VertexOutput {
+  @builtin(position)              clip_pos: vec4<f32>,
+  @location(0)                    uv:       vec2<f32>,
+  @location(1)                    fg_color: vec4<f32>,
+  @location(2)                    bg_color: vec4<f32>,
+}
+
+@vertex
+fn vs_main(
+  @builtin(vertex_index)   vi:   u32,
+  @builtin(instance_index) inst: u32,
+) -> VertexOutput {
+  let ch = chars[inst];
+
+  // 6 顶点 → unit quad（与 standard_instanced 一致的三角形模式）
+  var corners = array<vec2<f32>, 6>(
+    vec2<f32>(0.0, 0.0),
+    vec2<f32>(1.0, 0.0),
+    vec2<f32>(0.0, 1.0),
+    vec2<f32>(0.0, 1.0),
+    vec2<f32>(1.0, 0.0),
+    vec2<f32>(1.0, 1.0)
+  );
+  let c = corners[vi];
+
+  // 像素坐标
+  let pixel_x = ch.pos_x + c.x * u.cell_w;
+  let pixel_y = ch.pos_y + c.y * u.cell_h;

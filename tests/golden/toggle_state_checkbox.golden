@@ -1,0 +1,14 @@
+-- [toggleable] ToggleState: 正交开关状态
+global NebulaToggleState = @record{
+  is_on:        boolean,
+  just_toggled: boolean,
+}
+-- [toggleable] CheckboxContext: process_toggle
+function CheckboxContext:process_toggle(input: *NebulaInputState): void
+  local prev_on = self.toggle.is_on
+  -- 当 just_clicked 时翻转开关状态
+  if self.click.just_clicked then
+    self.toggle.is_on = not self.toggle.is_on
+  end
+  self.toggle.just_toggled = (self.toggle.is_on ~= prev_on)
+end

@@ -1,0 +1,4 @@
+[root] dir=column pos=(0.0, 0.0) size=(400.0 x 300.0)
+  [header] dir=column pos=(16.0, 16.0) size=(368.0 x 40.0)
+  [body] dir=column pos=(16.0, 64.0) size=(368.0 x 200.0)
+  [footer] dir=column pos=(16.0, 272.0) size=(368.0 x 20.0)

@@ -1,0 +1,4 @@
+[row_root] dir=row pos=(0.0, 0.0) size=(500.0 x 100.0)
+  [sidebar] dir=column pos=(10.0, 10.0) size=(80.0 x 80.0)
+  [content] dir=column pos=(95.0, 10.0) size=(330.0 x 80.0)
+  [aside] dir=column pos=(430.0, 10.0) size=(60.0 x 80.0)

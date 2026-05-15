@@ -1,5 +1,6 @@
 -- tests/golden_gen.lua
 -- 生成 golden files 用于重构回归对比
+-- 注意：golden_gen_extended.lua 提供额外覆盖（shader_compose, layout_engine, hit_test, toggle_state）
 
 package.path = "./src/?.lua;" .. "./src/derive/?.lua;" .. package.path
 require "derive.interaction_factory"

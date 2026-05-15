@@ -1,0 +1,6 @@
+-- [interaction] SliderContext: hit_test (AABB inline)
+function SliderContext:hit_test(x: float32, y: float32): boolean
+  local v = &self.visual
+  return x >= v.pos.x and x < v.pos.x + v.size.x and
+         y >= v.pos.y and y < v.pos.y + v.size.y
+end

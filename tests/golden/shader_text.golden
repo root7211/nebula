@@ -1,0 +1,44 @@
+struct TextUniforms {
+  viewport: vec2<f32>,
+  text_color: vec4<f32>,
+}
+@group(0) @binding(0) var<uniform> u: TextUniforms;
+@group(0) @binding(1) var glyph_atlas:   texture_2d<f32>;
+@group(0) @binding(2) var glyph_sampler: sampler;
+
+struct TextVertexInput {
+  @location(0) position: vec2<f32>,
+  @location(1) uv:       vec2<f32>,
+}
+struct VertexOutput {
+  @builtin(position) clip_pos: vec4<f32>,
+  @location(0)       uv:       vec2<f32>,
+}
+
+@vertex
+fn vs_main(in: TextVertexInput) -> VertexOutput {
+  var out: VertexOutput;
+  // Use u.viewport from the provided struct
+  let ndc = vec2<f32>(
+    (in.position.x / u.viewport.x) * 2.0 - 1.0,
+    (in.position.y / u.viewport.y) * 2.0 - 1.0
+  );
+  out.clip_pos = vec4<f32>(ndc.x, -ndc.y, 0.0, 1.0);
+  out.uv = in.uv;
+  return out;
+}
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+  let sdf_sample = textureSample(glyph_atlas, glyph_sampler, in.uv).r;
+  
+  // Basic SDF anti-aliasing with fwidth
+  let width = fwidth(sdf_sample);
+  let alpha = smoothstep(0.5 - width, 0.5 + width, sdf_sample);
+  
+  if (alpha < 0.001) {
+    discard;
+  }
+  
+  return vec4<f32>(u.text_color.rgb, u.text_color.a * alpha);
+}
