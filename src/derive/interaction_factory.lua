@@ -293,8 +293,8 @@ NEBULA_PRIMITIVES["editable"] = {
   },
   -- ★ Phase 4.7-S5: dynamic context fields (undo_stack type depends on compile-time params)
   dynamic_context_fields = function(reg)
-    local undo_entries = reg.undo_max_entries or 128
-    local undo_data    = reg.undo_max_data    or 4096
+    local undo_entries = reg.undo_max_entries or 512
+    local undo_data    = reg.undo_max_data    or 16384
     local undo_type = ("NebulaUndoStack%d_%d"):format(undo_entries, undo_data)
     return {
       { name = "undo_stack", type = undo_type },
