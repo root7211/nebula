@@ -272,8 +272,8 @@ NEBULA_PRIMITIVES["editable"] = {
       end
       print(("[derive] %s: injected %s (capacity=%d) for editable primitive"):format(type_name, buf_type_name, max_len))
       -- ★ Phase 4.7-S5: 注入 undo stack 类型
-      local undo_entries = reg.undo_max_entries or 128
-      local undo_data    = reg.undo_max_data    or 4096
+      local undo_entries = reg.undo_max_entries or 512
+      local undo_data    = reg.undo_max_data    or 16384
       local undo_type, undo_src = nebula_gen_undo_stack_type(undo_entries, undo_data)
       if undo_src and #undo_src > 0 then
         local undo_ast = aster.parse(undo_src, "<nebula_derive:undo_stack:" .. type_name .. ">")
@@ -293,8 +293,8 @@ NEBULA_PRIMITIVES["editable"] = {
   },
   -- ★ Phase 4.7-S5: dynamic context fields (undo_stack type depends on compile-time params)
   dynamic_context_fields = function(reg)
-    local undo_entries = reg.undo_max_entries or 128
-    local undo_data    = reg.undo_max_data    or 4096
+    local undo_entries = reg.undo_max_entries or 512
+    local undo_data    = reg.undo_max_data    or 16384
     local undo_type = ("NebulaUndoStack%d_%d"):format(undo_entries, undo_data)
     return {
       { name = "undo_stack", type = undo_type },

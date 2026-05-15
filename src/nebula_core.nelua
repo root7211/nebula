@@ -163,7 +163,7 @@ global NebulaInputState = @record{
   mouse_left_released:boolean,   -- 左键本帧是否刚刚释放（下降沿）
   focused_id:         uint32,    -- 当前获得焦点的组件 ID；0 表示无焦点
   -- 键盘事件（Phase 3.4.1 新增）
-  char_input:         [16]uint32, -- 本帧输入的 Unicode 码位数组（最多 16 个字符）
+  char_input:         [64]uint32, -- 本帧输入的 Unicode 码位数组（最多 64 个字符，支持 CJK IME 批量提交）
   char_count:         uint8,     -- char_input 中有效字符数量
   key_pressed:        NebulaKey, -- 本帧按下的控制键；不存在控制键时为 None
   scroll_dy:          float32,   -- 本帧鼠标滚轮 Y 轴偏移量（Phase 3.3.5 新增）

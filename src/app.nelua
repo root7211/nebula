@@ -22,7 +22,7 @@ global _nebula_char_queue:  [64]uint32   -- Unicode 码位队列
 global _nebula_char_head:   uint8 = 0
 global _nebula_char_tail:   uint8 = 0
 
-global _nebula_key_queue:   [16]NebulaKey  -- 控制键队列
+global _nebula_key_queue:   [64]NebulaKey  -- 控制键队列（扩展至 64，支持快速按键重复）
 global _nebula_key_head:    uint8 = 0
 global _nebula_key_tail:    uint8 = 0
 
@@ -128,7 +128,7 @@ global function _nebula_key_callback(
   end -- close: if nk == NebulaKey.None
 
   if nk ~= NebulaKey.None then
-    local next = (_nebula_key_tail + 1) % 16
+    local next = (_nebula_key_tail + 1) % 64
     if next ~= _nebula_key_head then
       _nebula_key_queue[_nebula_key_tail] = nk
       _nebula_key_tail = next
@@ -171,7 +171,7 @@ global function nebula_collect_input(
 
   -- ---- 字符输入：从队列提取到 input.char_input ----
   input.char_count = 0
-  while _nebula_char_head ~= _nebula_char_tail and input.char_count < 16 do
+  while _nebula_char_head ~= _nebula_char_tail and input.char_count < 64 do
     input.char_input[input.char_count] = _nebula_char_queue[_nebula_char_head]
     input.char_count = input.char_count + 1
     _nebula_char_head = (_nebula_char_head + 1) % 64
@@ -180,7 +180,7 @@ global function nebula_collect_input(
   -- ---- 控制键：每帧取一个（FIFO，支持按键重复） ----
   if _nebula_key_head ~= _nebula_key_tail then
     input.key_pressed = _nebula_key_queue[_nebula_key_head]
-    _nebula_key_head = (_nebula_key_head + 1) % 16
+    _nebula_key_head = (_nebula_key_head + 1) % 64
   else
     input.key_pressed = NebulaKey.None
   end
@@ -554,18 +554,19 @@ global function snprintf(buf: cstring, size: csize, fmt: cstring, ...: cvarargs)
 global MatchPos = @record{ row: uint32, col: uint32 }
 global _search_active: boolean = false
 global _search_replace: boolean = false
-global _search_buf: [256]uint8
+global _search_buf: [1024]uint8
 global _search_len: uint32 = 0
 global _search_cursor: uint32 = 0
-global _replace_buf: [256]uint8
+global _replace_buf: [1024]uint8
 global _replace_len: uint32 = 0
 global _replace_cursor: uint32 = 0
-global _search_matches: [512]MatchPos
+global _search_matches: [4096]MatchPos
 global _search_match_count: uint32 = 0
 global _search_current: uint32 = 0
+global _search_overflow: boolean = false  -- 匹配数超过上限时置 true，供 UI 层提示用户
 
 -- 编辑器文件状态（框架级声明）
-global _editor_file_path: [512]uint8
+global _editor_file_path: [4096]uint8
 global _editor_has_file: boolean = false
 global _editor_modified: boolean = false
 global _editor_highlight_id: uint32 = 0
@@ -577,7 +578,7 @@ global function nebula_editor_update_title(cursor_row: uint32, cursor_col: uint3
   if _editor_has_file then
     local last_slash: int32 = -1
     local fi: uint32 = 0
-    while _editor_file_path[fi] ~= 0 and fi < 511 do
+    while _editor_file_path[fi] ~= 0 and fi < 4095 do
       if _editor_file_path[fi] == 47 then last_slash = (@int32)(fi) end
       fi = fi + 1
     end
@@ -598,16 +599,17 @@ end
 global function nebula_search_scan(mb: auto): void
   _search_match_count = 0
   _search_current = 0
+  _search_overflow = false
   if _search_len == 0 then return end
   local total_lines: uint32 = mb.line_count
   local row: uint32 = 0
-  while row < total_lines and _search_match_count < 512 do
+  while row < total_lines and _search_match_count < 4096 do
     local ln = mb:get_line(row)
-    local flat: [256]uint8
-    local line_len = ln:flatten(&flat[0], 255)
+    local flat: [1024]uint8
+    local line_len = ln:flatten(&flat[0], 1023)
     local end_pos: uint32 = line_len > _search_len and (line_len - _search_len + 1) or 0
     local ci: uint32 = 0
-    while ci < end_pos and _search_match_count < 512 do
+    while ci < end_pos and _search_match_count < 4096 do
       local match: boolean = true
       local k: uint32 = 0
       while k < _search_len do
@@ -624,6 +626,10 @@ global function nebula_search_scan(mb: auto): void
       end
     end
     row = row + 1
+  end
+  -- 检测是否还有未扫描的行（溢出）
+  if row < total_lines and _search_match_count >= 4096 then
+    _search_overflow = true
   end
 end
 

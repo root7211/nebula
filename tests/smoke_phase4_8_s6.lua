@@ -91,9 +91,9 @@ check("Ctrl+H mapped in app.nelua", app_src:find("72.*NebulaKey%.Replace") ~= ni
 check("F3 mapped in app.nelua", app_src:find("NebulaKey%.FindNext") ~= nil)
 
 check("demo: _search_active state", demo_src:find("global _search_active") ~= nil)
-check("demo: _search_buf[256] buffer", demo_src:find("global _search_buf: %[256%]uint8") ~= nil)
+check("demo: _search_buf[1024] buffer", demo_src:find("global _search_buf: %[1024%]uint8") ~= nil)
 check("demo: MatchPos record", demo_src:find("MatchPos = @record") ~= nil)
-check("demo: _search_matches[512] fixed array", demo_src:find("global _search_matches: %[512%]MatchPos") ~= nil)
+check("demo: _search_matches[4096] fixed array", demo_src:find("global _search_matches: %[4096%]MatchPos") ~= nil)
 check("demo: scan_matches function", demo_src:find("global function scan_matches") ~= nil)
 check("demo: SearchBarDenseVisual declared", demo_src:find("SearchBarDenseVisual") ~= nil)
 check("demo: fill_search_bar Producer", demo_src:find("global function fill_search_bar") ~= nil)

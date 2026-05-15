@@ -59,7 +59,7 @@ local CELL_H <comptime> = 16.0
 -- =============================================================================
 -- 全局状态
 -- =============================================================================
-global _editor_file_path: [512]uint8
+global _editor_file_path: [4096]uint8
 global _editor_has_file: boolean = false
 global _editor_modified: boolean = false
 global _editor_highlight_id: uint32 = 0  -- 0=none, 1=nelua, 2=lua, 3=c, 4=python, 5=json, 6=markdown
@@ -67,18 +67,19 @@ global _editor_highlight_id: uint32 = 0  -- 0=none, 1=nelua, 2=lua, 3=c, 4=pytho
 -- ★ Phase 4.8-S2: 搜索状态（固定布局，零堆分配）
 global _search_active: boolean = false   -- 搜索栏是否激活
 global _search_replace: boolean = false  -- 是否为替换模式（Ctrl+H）
-global _search_buf: [256]uint8           -- 搜索关键字 buffer
+global _search_buf: [1024]uint8           -- 搜索关键字 buffer
 global _search_len: uint32 = 0           -- 当前关键字长度
 global _search_cursor: uint32 = 0        -- 搜索框光标位置
-global _replace_buf: [256]uint8          -- 替换文本 buffer
+global _replace_buf: [1024]uint8          -- 替换文本 buffer
 global _replace_len: uint32 = 0          -- 替换文本长度
 global _replace_cursor: uint32 = 0       -- 替换框光标位置
 
 -- 匹配结果（固定数组，零堆分配——公理 B）
 global MatchPos = @record{ row: uint32, col: uint32 }
-global _search_matches: [512]MatchPos
+global _search_matches: [4096]MatchPos
 global _search_match_count: uint32 = 0
 global _search_current: uint32 = 0       -- 当前高亮的匹配索引
+global _search_overflow: boolean = false  -- 匹配数超过上限时置 true
 
 -- =============================================================================
 -- 语法高亮规则（多语言 — Phase 4.8-S4）
@@ -257,7 +258,7 @@ global function fill_edit_area(
   local idx: uint32 = 0
   local scroll_row: uint32 = (@uint32)(editor.scroll_offset_y / (CELL_H + 2.0))
   local visible_rows: uint32 = EDIT_ROWS
-  local hl_colors: [512]uint32
+  local hl_colors: [1024]uint32
 
   -- ★ Phase 4.8 S1: compute ordered selection bounds
   local sel_active: boolean = (editor.sel_anchor_row ~= editor.cursor_row) or (editor.sel_anchor_col ~= editor.cursor_col)
@@ -283,8 +284,8 @@ global function fill_edit_area(
 
     if buf_row < mb.line_count then
       local line = mb:get_line(buf_row)
-      local flat: [512]uint8
-      local line_len = line:flatten(&flat[0], 511)
+      local flat: [1024]uint8
+      local line_len = line:flatten(&flat[0], 1023)
       nebula_highlight_dispatch(_editor_highlight_id, &flat[0], (@uint32)(line_len), nebula_theme_fg_normal(), &hl_colors[0])
 
       local cursor_byte: int32 = -1
@@ -397,7 +398,7 @@ global function fill_status_bar(
     -- Extract filename from path
     local last_slash: int32 = -1
     local fi: uint32 = 0
-    while _editor_file_path[fi] ~= 0 and fi < 511 do
+    while _editor_file_path[fi] ~= 0 and fi < 4095 do
       if _editor_file_path[fi] == 47 then last_slash = (@int32)(fi) end
       fi = fi + 1
     end
@@ -439,14 +440,14 @@ global function scan_matches(mb: auto): void
 
   local total_lines: uint32 = mb.line_count
   local row: uint32 = 0
-  while row < total_lines and _search_match_count < 512 do
+  while row < total_lines and _search_match_count < 4096 do
     local ln = mb:get_line(row)
-    local flat: [256]uint8
-    local line_len = ln:flatten(&flat[0], 255)
+    local flat: [1024]uint8
+    local line_len = ln:flatten(&flat[0], 1023)
     -- 朴素滑窗匹配
     local end_pos: uint32 = line_len > _search_len and (line_len - _search_len + 1) or 0
     local ci: uint32 = 0
-    while ci < end_pos and _search_match_count < 512 do
+    while ci < end_pos and _search_match_count < 4096 do
       local match: boolean = true
       local k: uint32 = 0
       while k < _search_len do
@@ -648,7 +649,7 @@ local function update_window_title(cursor_row: uint32, cursor_col: uint32): void
   if _editor_has_file then
     local last_slash: int32 = -1
     local fi: uint32 = 0
-    while _editor_file_path[fi] ~= 0 and fi < 511 do
+    while _editor_file_path[fi] ~= 0 and fi < 4095 do
       if _editor_file_path[fi] == 47 then last_slash = (@int32)(fi) end
       fi = fi + 1
     end

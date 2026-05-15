@@ -37,6 +37,7 @@ require "nebula_core"
 ##   local idx: uint32 = 0
 ##   local scroll_row: uint32 = (@uint32)(editor.scroll_offset_y / (%s + 2.0))
 ##   local visible_rows: uint32 = %d
+##   local LINE_NUM_DIGITS: uint32 = 7
 ##   local row: uint32 = 0
 ##   while row < visible_rows and idx < max do
 ##     local buf_row = row + scroll_row
@@ -44,33 +45,35 @@ require "nebula_core"
 ##     local bg = is_cursor_line and nebula_theme_bg_cursor_line() or nebula_theme_bg_linenum()
 ##     if buf_row < mb.line_count then
 ##       local num = buf_row + 1
-##       local d3 = num / 1000
-##       local d2 = (num %% 1000) / 100
-##       local d1 = (num %% 100) / 10
-##       local d0 = num %% 10
-##       local num_chars: [4]uint32 = {
-##         d3 > 0 and (48 + d3) or 32,
-##         (d3 > 0 or d2 > 0) and (48 + d2) or 32,
-##         (d3 > 0 or d2 > 0 or d1 > 0) and (48 + d1) or 32,
-##         48 + d0
-##       }
+##       -- 动态计算行号位数（支持最多 9999999 行）
+##       local digits: [7]uint32
+##       local divisor: uint32 = 1000000
+##       local leading_zero: boolean = true
+##       local di: uint32 = 0
+##       while di < LINE_NUM_DIGITS do
+##         local d: uint32 = (num / divisor) %% 10
+##         if d > 0 then leading_zero = false end
+##         digits[di] = leading_zero and d == 0 and di < (LINE_NUM_DIGITS - 1) and 32 or (48 + d)
+##         divisor = divisor / 10
+##         di = di + 1
+##       end
 ##       local nc: uint32 = 0
-##       while nc < 4 and idx < max do
-##         nebula_dense_grid_fill_instance(&instances[idx], row, nc, num_chars[nc], origin_x, origin_y, %s, %s, nebula_theme_fg_linenum(), bg)
+##       while nc < LINE_NUM_DIGITS and idx < max do
+##         nebula_dense_grid_fill_instance(&instances[idx], row, nc, digits[nc], origin_x, origin_y, %s, %s, nebula_theme_fg_linenum(), bg)
 ##         idx = idx + 1; nc = nc + 1
 ##       end
 ##       if idx < max then
-##         nebula_dense_grid_fill_instance(&instances[idx], row, 4, 124, origin_x, origin_y, %s, %s, nebula_theme_fg_separator(), bg)
+##         nebula_dense_grid_fill_instance(&instances[idx], row, LINE_NUM_DIGITS, 124, origin_x, origin_y, %s, %s, nebula_theme_fg_separator(), bg)
 ##         idx = idx + 1
 ##       end
 ##     else
 ##       local nc: uint32 = 0
-##       while nc < 4 and idx < max do
+##       while nc < LINE_NUM_DIGITS and idx < max do
 ##         nebula_dense_grid_fill_instance(&instances[idx], row, nc, nc == 0 and 126 or 32, origin_x, origin_y, %s, %s, nebula_theme_fg_linenum(), nebula_theme_bg_linenum())
 ##         idx = idx + 1; nc = nc + 1
 ##       end
 ##       if idx < max then
-##         nebula_dense_grid_fill_instance(&instances[idx], row, 4, 124, origin_x, origin_y, %s, %s, nebula_theme_fg_separator(), nebula_theme_bg_linenum())
+##         nebula_dense_grid_fill_instance(&instances[idx], row, LINE_NUM_DIGITS, 124, origin_x, origin_y, %s, %s, nebula_theme_fg_separator(), nebula_theme_bg_linenum())
 ##         idx = idx + 1
 ##       end
 ##     end
@@ -131,7 +134,7 @@ require "nebula_core"
 ##   if _editor_has_file then
 ##     local last_slash: int32 = -1
 ##     local fi: uint32 = 0
-##     while _editor_file_path[fi] ~= 0 and fi < 511 do
+##     while _editor_file_path[fi] ~= 0 and fi < 4095 do
 ##       if _editor_file_path[fi] == 47 then last_slash = (@int32)(fi) end
 ##       fi = fi + 1
 ##     end
@@ -287,7 +290,7 @@ require "nebula_core"
 ##   local idx: uint32 = 0
 ##   local scroll_row: uint32 = (@uint32)(editor.scroll_offset_y / (%s + 2.0))
 ##   local visible_rows: uint32 = %d
-##   local hl_colors: [512]uint32
+##   local hl_colors: [1024]uint32
 ##   local EDIT_COLS: uint32 = %d
 ##   -- selection bounds
 ##   local sel_active: boolean = (editor.sel_anchor_row ~= editor.cursor_row) or (editor.sel_anchor_col ~= editor.cursor_col)
@@ -311,8 +314,8 @@ require "nebula_core"
 ##     local bg = is_cursor_line and nebula_theme_bg_cursor_line() or nebula_theme_bg_normal()
 ##     if buf_row < mb.line_count then
 ##       local line = mb:get_line(buf_row)
-##       local flat: [512]uint8
-##       local line_len = line:flatten(&flat[0], 511)
+##       local flat: [1024]uint8
+##       local line_len = line:flatten(&flat[0], 1023)
 ##       nebula_highlight_dispatch(_editor_highlight_id, &flat[0], (@uint32)(line_len), nebula_theme_fg_normal(), &hl_colors[0])
 ##       local cursor_byte: int32 = -1
 ##       if is_cursor_line then cursor_byte = (@int32)(editor.cursor_col) end
