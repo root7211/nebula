@@ -1151,8 +1151,12 @@ global ClickableState = @record{
 ##     end
 ##   end
 ##   assert(color_field, "text derive requires <state>_text_color field")
-## 
+##
 ##   local max_chars = reg.max_chars or 256
+##   -- ★ P0-6 fix: 限制 max_chars 上限，防止栈分配超出 WASM 默认栈大小（64KB）
+##   -- NebulaPosUvVertex = 16B, 每字符 6 顶点 → max_chars * 96B 栈占用
+##   -- 上限 512 → 512 * 96 = 48KB，安全区间
+##   assert(max_chars <= 512, "text derive: max_chars exceeds 512 (stack overflow risk on WASM). Use DenseText for large text.")
 ##   local max_vertices = max_chars * 6
 ##   local lines = {}
 ##   table.insert(lines, ("global %s = @record{"):format(ctx))
@@ -1290,8 +1294,12 @@ global ClickableState = @record{
 ##     if info then color_field = info.name break end
 ##   end
 ##   assert(color_field, "slug text derive requires <state>_text_color field")
-## 
+##
 ##   local max_chars   = reg.max_chars or 256
+##   -- ★ P0-6 fix: 限制 max_chars 上限，防止栈分配超出 WASM 默认栈大小（64KB）
+##   -- NebulaSlugVertex = 80B, 每字符 6 顶点 → max_chars * 480B 栈占用
+##   -- 上限 128 → 128 * 480 = 60KB，安全区间
+##   assert(max_chars <= 128, "slug text derive: max_chars exceeds 128 (stack overflow risk on WASM). Use DenseText for large text.")
 ##   local max_vertices = max_chars * 6
 ##   local ctx  = base .. "Context"
 ##   local lines = {}

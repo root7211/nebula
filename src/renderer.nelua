@@ -169,6 +169,9 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   self.surface = wgpuInstanceCreateSurface(self.instance, &surf_desc)
   if self.surface == nilptr then
     printf("wgpu: failed to create surface\n")
+    -- ★ P0-1 fix: 释放已获取的 instance
+    wgpuInstanceRelease(self.instance)
+    self.instance = nilptr
     return false
   end
 
@@ -193,6 +196,11 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   self.adapter = adapter_result
   if self.adapter == nilptr then
     printf("wgpu: no adapter\n")
+    -- ★ P0-1 fix: 释放已获取的 surface + instance
+    wgpuSurfaceRelease(self.surface)
+    self.surface = nilptr
+    wgpuInstanceRelease(self.instance)
+    self.instance = nilptr
     return false
   end
 
@@ -230,6 +238,13 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   self.device = device_result
   if self.device == nilptr then
     printf("wgpu: no device\n")
+    -- ★ P0-1 fix: 释放已获取的 adapter + surface + instance
+    wgpuAdapterRelease(self.adapter)
+    self.adapter = nilptr
+    wgpuSurfaceRelease(self.surface)
+    self.surface = nilptr
+    wgpuInstanceRelease(self.instance)
+    self.instance = nilptr
     return false
   end
 
@@ -241,6 +256,17 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   local caps_status = wgpuSurfaceGetCapabilities(self.surface, self.adapter, &caps)
   if caps_status ~= 1 or caps.formatCount == 0 then
     printf("wgpu: failed to get surface capabilities\n")
+    -- ★ P0-1 fix: 释放已获取的全部资源
+    wgpuQueueRelease(self.queue)
+    self.queue = nilptr
+    wgpuDeviceRelease(self.device)
+    self.device = nilptr
+    wgpuAdapterRelease(self.adapter)
+    self.adapter = nilptr
+    wgpuSurfaceRelease(self.surface)
+    self.surface = nilptr
+    wgpuInstanceRelease(self.instance)
+    self.instance = nilptr
     return false
   end
 
@@ -891,6 +917,9 @@ global function nebula_create_render_target(
   $out_view = wgpuTextureCreateView($out_texture, &view_desc)
   if $out_view == nilptr then
     printf("wgpu: failed to create render target view (%s)\n", label)
+    -- ★ P0-2 fix: 释放已创建的 texture，防止泄漏
+    wgpuTextureRelease($out_texture)
+    $out_texture = nilptr
     return false
   end
 

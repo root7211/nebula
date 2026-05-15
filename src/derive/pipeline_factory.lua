@@ -139,11 +139,12 @@ local function gen_pipeline_textured_vertex(base, uniforms_record, wgsl_source)
   table.insert(lines,  "end")
 
   -- deinit（释放所有 GPU 资源，公理 B：L0 资源在 deinit 时销毁）
+  -- ★ P0-3 fix: 统一 nilptr 守卫
   table.insert(lines, ("function %s:deinit(): void"):format(pipe))
-  table.insert(lines,  "  wgpuRenderPipelineRelease(self.pipeline)")
+  table.insert(lines,  "  if self.pipeline ~= nilptr then wgpuRenderPipelineRelease(self.pipeline) end")
   table.insert(lines,  "  if self.bind_group ~= nilptr then wgpuBindGroupRelease(self.bind_group) end")
-  table.insert(lines,  "  wgpuBindGroupLayoutRelease(self.bind_layout)")
-  table.insert(lines,  "  wgpuBufferRelease(self.uniform_buf)")
+  table.insert(lines,  "  if self.bind_layout ~= nilptr then wgpuBindGroupLayoutRelease(self.bind_layout) end")
+  table.insert(lines,  "  if self.uniform_buf ~= nilptr then wgpuBufferRelease(self.uniform_buf) end")
   table.insert(lines,  "  if self.vertex_buf ~= nilptr then wgpuBufferRelease(self.vertex_buf) end")
   table.insert(lines,  "end")
 
@@ -723,12 +724,13 @@ local function gen_pipeline_standard_instanced(base, uniforms_record, wgsl_sourc
   emit("end")
 
   -- ===== deinit（释放所有 GPU 资源，公理 B：L0 资源在 deinit 时销毁） =====
+  -- ★ P0-3 fix: 所有 release 调用前加 nilptr 守卫，防止 partial init 后 crash
   emit(("function %s:deinit(): void"):format(pipe))
-  emit("  wgpuRenderPipelineRelease(self.pipeline)")
-  emit("  wgpuBindGroupRelease(self.bind_group)")
-  emit("  wgpuBindGroupLayoutRelease(self.bind_layout)")
-  emit("  wgpuBufferRelease(self.storage_buf)")
-  emit("  wgpuBufferRelease(self.uniform_buf)")
+  emit("  if self.pipeline ~= nilptr then wgpuRenderPipelineRelease(self.pipeline) end")
+  emit("  if self.bind_group ~= nilptr then wgpuBindGroupRelease(self.bind_group) end")
+  emit("  if self.bind_layout ~= nilptr then wgpuBindGroupLayoutRelease(self.bind_layout) end")
+  emit("  if self.storage_buf ~= nilptr then wgpuBufferRelease(self.storage_buf) end")
+  emit("  if self.uniform_buf ~= nilptr then wgpuBufferRelease(self.uniform_buf) end")
   emit("end")
 
   return table.concat(L, "\n")
@@ -853,11 +855,12 @@ local function gen_pipeline_slug_text(base, uniforms_record, wgsl_source)
   emit("end")
 
   -- deinit（释放所有 GPU 资源，公理 B：L0 资源在 deinit 时销毁）
+  -- ★ P0-3 fix: 统一 nilptr 守卫
   emit(("function %s:deinit(): void"):format(pipe))
-  emit("  wgpuRenderPipelineRelease(self.pipeline)")
+  emit("  if self.pipeline ~= nilptr then wgpuRenderPipelineRelease(self.pipeline) end")
   emit("  if self.bind_group ~= nilptr then wgpuBindGroupRelease(self.bind_group) end")
-  emit("  wgpuBindGroupLayoutRelease(self.bind_layout)")
-  emit("  wgpuBufferRelease(self.uniform_buf)")
+  emit("  if self.bind_layout ~= nilptr then wgpuBindGroupLayoutRelease(self.bind_layout) end")
+  emit("  if self.uniform_buf ~= nilptr then wgpuBufferRelease(self.uniform_buf) end")
   emit("  if self.curve_buf ~= nilptr then wgpuBufferRelease(self.curve_buf) end")
   emit("  if self.band_meta_buf ~= nilptr then wgpuBufferRelease(self.band_meta_buf) end")
   emit("  if self.band_ref_buf ~= nilptr then wgpuBufferRelease(self.band_ref_buf) end")
