@@ -304,16 +304,9 @@ end
 require "wgpu_bindings"
 require "renderer"
 
-global function nebula_frame_render(
-  renderer:  *NebulaRenderer,
-  app:       auto,
-  input:     *NebulaInputState,
-  dt:        float32,
-  clear_r:   float64,
-  clear_g:   float64,
-  clear_b:   float64
-): void
-  -- 0. Surface 重配置：当窗口尺寸变化时，需重新配置 Surface 以匹配新尺寸
+-- ★ P1-8 refactor: Surface 重配置共享函数
+-- 从 nebula_frame_render 和 nebula_frame_render_multipass 提取。
+global function _nebula_reconfigure_surface(renderer: *NebulaRenderer, input: *NebulaInputState): void
   if input.viewport_resized then
     local new_w = (@uint32)(input.viewport_w)
     local new_h = (@uint32)(input.viewport_h)
@@ -335,6 +328,19 @@ global function nebula_frame_render(
       wgpuSurfaceConfigure(renderer.surface, &surf_cfg)
     end
   end
+end
+
+global function nebula_frame_render(
+  renderer:  *NebulaRenderer,
+  app:       auto,
+  input:     *NebulaInputState,
+  dt:        float32,
+  clear_r:   float64,
+  clear_g:   float64,
+  clear_b:   float64
+): void
+  -- 0. Surface 重配置
+  _nebula_reconfigure_surface(renderer, input)
 
   -- 1. 获取 Surface 当前纹理
   local surface_tex: WGPUSurfaceTexture
@@ -430,28 +436,8 @@ global function nebula_frame_render_multipass(
   clear_g:   float64,
   clear_b:   float64
 ): void
-  -- 0. Surface 重配置：当窗口尺寸变化时，需重新配置 Surface 以匹配新尺寸
-  if input.viewport_resized then
-    local new_w = (@uint32)(input.viewport_w)
-    local new_h = (@uint32)(input.viewport_h)
-    if new_w > 0 and new_h > 0 then
-      renderer.width  = new_w
-      renderer.height = new_h
-      local surf_cfg = WGPUSurfaceConfiguration{
-        nextInChain     = nilptr,
-        device          = renderer.device,
-        format          = renderer.format,
-        usage           = 0x00000010, -- WGPUTextureUsage_RenderAttachment
-        width           = new_w,
-        height          = new_h,
-        viewFormatCount = 0,
-        viewFormats     = nilptr,
-        alphaMode       = #[NEBULA_TARGET ~= 'wasm' and 1 or 0]#, -- Auto: 1=native, 0=WASM/Emscripten
-        presentMode     = WGPUPresentMode_Fifo,
-      }
-      wgpuSurfaceConfigure(renderer.surface, &surf_cfg)
-    end
-  end
+  -- 0. Surface 重配置
+  _nebula_reconfigure_surface(renderer, input)
 
   -- 1. 获取 Surface 当前纹理
   local surface_tex: WGPUSurfaceTexture
