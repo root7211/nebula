@@ -122,7 +122,9 @@ require "nebula_builtins"
 ##   local win_w_const = app_type .. "_WIN_WIDTH"
 ##   local win_h_const = app_type .. "_WIN_HEIGHT"
 ##
-##   local src = ([[local function main(): int32
+##   -- ★ P1-2: 按需加载编辑器模块（require 是幂等的）
+##   local src = ([[require "nebula_editor"
+## local function main(): int32
 ##   local renderer: NebulaRenderer
 ##   local app: %s
 ##   if not nebula_init(&renderer, &app, "%s", %s, %s) then

@@ -36,9 +36,9 @@ check("glfwSetCharCallback declared", glfw_src:find("glfwSetCharCallback") ~= ni
 check("GLFWkeyfun type declared",     glfw_src:find("GLFWkeyfun") ~= nil)
 check("GLFWcharfun type declared",    glfw_src:find("GLFWcharfun") ~= nil)
 
--- ---- 2. nebula_core.nelua NebulaKey 枚举 ----
-local core = io.open("src/nebula_core.nelua", "r")
-assert(core, "nebula_core.nelua not found")
+-- ---- 2. nebula_types.nelua NebulaKey 枚举 ----
+local core = io.open("src/nebula_types.nelua", "r")
+assert(core, "nebula_types.nelua not found")
 local core_src = core:read("*a")
 core:close()
 
