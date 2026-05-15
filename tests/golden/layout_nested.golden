@@ -1,0 +1,5 @@
+[app] dir=column pos=(0.0, 0.0) size=(320.0 x 240.0)
+  [toolbar] dir=column pos=(8.0, 8.0) size=(304.0 x 32.0)
+  [main] dir=row pos=(8.0, 44.0) size=(304.0 x 188.0)
+    [nav] dir=column pos=(8.0, 44.0) size=(60.0 x 188.0)
+    [editor] dir=column pos=(72.0, 44.0) size=(240.0 x 188.0)

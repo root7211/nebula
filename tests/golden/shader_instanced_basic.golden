@@ -1,0 +1,50 @@
+struct ButtonUniforms {
+  pos: vec2<f32>,
+  size: vec2<f32>,
+  bg_color: vec4<f32>,
+}
+
+
+struct NebulaViewport {
+  size: vec2<f32>,
+  _pad0: f32,
+  _pad1: f32,
+}
+
+@group(0) @binding(0) var<uniform>       vp:        NebulaViewport;
+@group(0) @binding(1) var<storage, read>  instances: array<ButtonUniforms>;
+
+struct VertexOutput {
+  @builtin(position) clip_position: vec4<f32>,
+  @location(0) @interpolate(flat) inst_idx: u32,
+}
+
+@vertex
+fn vs_main(
+  @builtin(vertex_index)   vi:   u32,
+  @builtin(instance_index) inst: u32,
+) -> VertexOutput {
+  let d = instances[inst];
+  var pos = array<vec2<f32>, 6>(
+    vec2<f32>(0.0, 0.0),
+    vec2<f32>(1.0, 0.0),
+    vec2<f32>(0.0, 1.0),
+    vec2<f32>(0.0, 1.0),
+    vec2<f32>(1.0, 0.0),
+    vec2<f32>(1.0, 1.0)
+  );
+  let p = d.pos + pos[vi] * d.size;
+  let ndc = (p / vp.size) * 2.0 - 1.0;
+  var out: VertexOutput;
+  out.clip_position = vec4<f32>(ndc.x, -ndc.y, 0.0, 1.0);
+  out.inst_idx      = inst;
+  return out;
+}
+fn sdf_rect(p: vec2<f32>, b: vec2<f32>) -> f32 {
+  let d = abs(p) - b;
+  return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0);
+}
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+  let d = instances[in.inst_idx];
