@@ -183,11 +183,105 @@ jobs:
           ls -lh build/wasm/button_v2_demo.*
 
   # ============================================================
+  # Job: Headless GPU 渲染测试（lavapipe 软件渲染器）
+  # ============================================================
+  headless-render:
+    runs-on: ubuntu-latest
+    needs: [compile-linux]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libglfw3-dev mesa-vulkan-drivers
+
+      - name: Install Nelua
+        run: |
+          git clone https://github.com/edubart/nelua-lang.git /tmp/nelua-lang
+          cd /tmp/nelua-lang && git checkout a58450563e2d && sudo make install
+
+      - name: Download wgpu-native
+        run: bash tools/setup_wgpu.sh
+
+      - name: Compile headless test
+        run: |
+          gcc -o /tmp/headless_test tools/headless_test.c \
+            -I vendor/wgpu-native/include -I tools \
+            -L vendor/wgpu-native/lib -lwgpu_native \
+            -lm -ldl -Wl,-rpath,vendor/wgpu-native/lib \
+            -Wall -Wextra
+
+      - name: Run headless render test (lavapipe)
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          WGPU_BACKEND: vulkan
+        run: |
+          /tmp/headless_test
+          echo "[PASS] Headless render test completed"
+          test -f /tmp/nebula_render_2_3_4.ppm && echo "[PASS] PPM output generated" || echo "::warning::No PPM output"
+
+  # ============================================================
+  # Job: 静态分析（cppcheck 扫描生成的 C 代码）
+  # ============================================================
+  static-analysis:
+    runs-on: ubuntu-latest
+    needs: [compile-linux]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libglfw3-dev cppcheck
+
+      - name: Install Nelua
+        run: |
+          git clone https://github.com/edubart/nelua-lang.git /tmp/nelua-lang
+          cd /tmp/nelua-lang && git checkout a58450563e2d && sudo make install
+
+      - name: Download wgpu-native
+        run: bash tools/setup_wgpu.sh
+
+      - name: Generate C code for analysis
+        run: |
+          DEMOS="button_demo form_demo slider_demo dropdown_demo"
+          mkdir -p /tmp/c_output
+          for demo in $DEMOS; do
+            EXTRA_FLAGS=""
+            case "$demo" in
+              json_viewer_demo|json_viewer_demo_v2)
+                EXTRA_FLAGS="-L examples/json_viewer" ;;
+              code_browser_demo)
+                EXTRA_FLAGS="-L examples/code_browser" ;;
+            esac
+            nelua -c -L src -L assets/generated --add-path . --add-path examples --add-path assets/generated \
+              $EXTRA_FLAGS \
+              --cflags="-I./vendor/wgpu-native/include" \
+              --ldflags="-L./vendor/wgpu-native/lib -lwgpu_native -lglfw -lm -ldl" \
+              "examples/${demo}.nelua" -o "/tmp/c_output/${demo}" 2>&1 || true
+          done
+
+      - name: Run cppcheck
+        timeout-minutes: 3
+        run: |
+          cppcheck --enable=warning,performance,portability \
+            --check-level=normal \
+            --suppress=missingIncludeSystem \
+            --suppress=unusedFunction \
+            --error-exitcode=0 \
+            --inline-suppr \
+            /tmp/c_output/*.c 2>&1 | tee /tmp/cppcheck_report.txt
+          ERRORS=$(grep -c "error:" /tmp/cppcheck_report.txt || true)
+          WARNINGS=$(grep -c "warning:" /tmp/cppcheck_report.txt || true)
+          echo "cppcheck: $ERRORS errors, $WARNINGS warnings"
+
+  # ============================================================
   # Job 5: Deploy WASM demos to GitHub Pages (main branch only)
   # ============================================================
   deploy-pages:
     runs-on: ubuntu-latest
-    needs: [smoke-tests, compile-linux, compile-wasm]
+    needs: [smoke-tests, compile-linux, compile-wasm, headless-render, static-analysis]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       pages: write
