@@ -83,10 +83,11 @@ local function _emit_ml_delete_selection(lines, indent)
 end
 
 -- ===== multiline_editable: 方向键辅助函数 =====
--- emit_cursor_move: 生成方向键光标移动代码
--- emit_sel_anchor_reset: 生成光标移动后重置 anchor 的代码（普通方向键需要，Shift 不需要）
-local function _emit_ml_cursor_move(lines, key, direction, indent)
-  local I = indent
+-- ★ P1-9 refactor: 统一生成方向键光标移动代码。
+-- update_anchor=true 时在移动后重置选区锚点（普通方向键），
+-- update_anchor=false 时保留锚点（Shift+方向键，用于扩展选区）。
+local function _emit_ml_cursor_move(lines, key, direction, indent, update_anchor)
+  local I = indent or "  "
   local function L(s) table.insert(lines, I .. s) end
   L("if input.key_pressed == NebulaKey." .. key .. " then")
   if direction == "left" then
@@ -120,6 +121,9 @@ local function _emit_ml_cursor_move(lines, key, direction, indent)
     L("  self.cursor_col = 0")
   elseif direction == "end" then
     L("  self.cursor_col = (@uint32)(self.visual.multi_buf:get_line(self.cursor_row):len())")
+  end
+  if update_anchor then
+    L("  self.sel_anchor_row = self.cursor_row; self.sel_anchor_col = self.cursor_col")
   end
   L("end")
 end
@@ -602,102 +606,26 @@ NEBULA_PRIMITIVES["multiline_editable"] = {
     table.insert(lines, "    _ml_i = _ml_i + 1")
     table.insert(lines, "  end")
 
-    -- ---- Left arrow: move cursor left ----
-    table.insert(lines, "  if input.key_pressed == NebulaKey.Left then")
-    table.insert(lines, "    if self.cursor_col > 0 then")
-    table.insert(lines, "      self.cursor_col = self.cursor_col - 1")
-    table.insert(lines, "    elseif self.cursor_row > 0 then")
-    table.insert(lines, "      self.cursor_row = self.cursor_row - 1")
-    table.insert(lines, "      self.cursor_col = (@uint32)(self.visual.multi_buf:get_line(self.cursor_row):len())")
-    table.insert(lines, "    end")
-    table.insert(lines, "    self.sel_anchor_row = self.cursor_row; self.sel_anchor_col = self.cursor_col")
-    table.insert(lines, "  end")
-
-    -- ---- Right arrow: move cursor right ----
-    table.insert(lines, "  if input.key_pressed == NebulaKey.Right then")
-    table.insert(lines, "    local _ml_llen = (@uint32)(self.visual.multi_buf:get_line(self.cursor_row):len())")
-    table.insert(lines, "    if self.cursor_col < _ml_llen then")
-    table.insert(lines, "      self.cursor_col = self.cursor_col + 1")
-    table.insert(lines, "    elseif self.cursor_row + 1 < self.line_count then")
-    table.insert(lines, "      self.cursor_row = self.cursor_row + 1")
-    table.insert(lines, "      self.cursor_col = 0")
-    table.insert(lines, "    end")
-    table.insert(lines, "    self.sel_anchor_row = self.cursor_row; self.sel_anchor_col = self.cursor_col")
-    table.insert(lines, "  end")
-
-    -- ---- Up arrow: move cursor to previous line ----
-    table.insert(lines, "  if input.key_pressed == NebulaKey.Up then")
-    table.insert(lines, "    if self.cursor_row > 0 then")
-    table.insert(lines, "      self.cursor_row = self.cursor_row - 1")
-    table.insert(lines, "      local _ml_llen = (@uint32)(self.visual.multi_buf:get_line(self.cursor_row):len())")
-    table.insert(lines, "      if self.cursor_col > _ml_llen then self.cursor_col = _ml_llen end")
-    table.insert(lines, "    end")
-    table.insert(lines, "    self.sel_anchor_row = self.cursor_row; self.sel_anchor_col = self.cursor_col")
-    table.insert(lines, "  end")
-
-    -- ---- Down arrow: move cursor to next line ----
-    table.insert(lines, "  if input.key_pressed == NebulaKey.Down then")
-    table.insert(lines, "    if self.cursor_row + 1 < self.line_count then")
-    table.insert(lines, "      self.cursor_row = self.cursor_row + 1")
-    table.insert(lines, "      local _ml_llen = (@uint32)(self.visual.multi_buf:get_line(self.cursor_row):len())")
-    table.insert(lines, "      if self.cursor_col > _ml_llen then self.cursor_col = _ml_llen end")
-    table.insert(lines, "    end")
-    table.insert(lines, "    self.sel_anchor_row = self.cursor_row; self.sel_anchor_col = self.cursor_col")
-    table.insert(lines, "  end")
-
-    -- ---- Home: move to beginning of line ----
-    table.insert(lines, "  if input.key_pressed == NebulaKey.Home then")
-    table.insert(lines, "    self.cursor_col = 0")
-    table.insert(lines, "    self.sel_anchor_row = self.cursor_row; self.sel_anchor_col = self.cursor_col")
-    table.insert(lines, "  end")
-
-    -- ---- End: move to end of line ----
-    table.insert(lines, "  if input.key_pressed == NebulaKey.End then")
-    table.insert(lines, "    self.cursor_col = (@uint32)(self.visual.multi_buf:get_line(self.cursor_row):len())")
-    table.insert(lines, "    self.sel_anchor_row = self.cursor_row; self.sel_anchor_col = self.cursor_col")
-    table.insert(lines, "  end")
+    -- ---- Direction keys: plain (reset selection anchor) ----
+    -- ★ P1-9 refactor: 使用 _emit_ml_cursor_move 消除重复
+    _emit_ml_cursor_move(lines, "Left",  "left",  "  ", true)
+    _emit_ml_cursor_move(lines, "Right", "right", "  ", true)
+    _emit_ml_cursor_move(lines, "Up",    "up",    "  ", true)
+    _emit_ml_cursor_move(lines, "Down",  "down",  "  ", true)
+    _emit_ml_cursor_move(lines, "Home",  "home",  "  ", true)
+    _emit_ml_cursor_move(lines, "End",   "end",   "  ", true)
 
     -- ================================================================
     -- ★ Phase 4.8 S1: Shift+Arrow — extend selection (move cursor, keep anchor)
+    -- ★ P1-9 refactor: 使用 _emit_ml_cursor_move 消除重复
     -- ================================================================
     table.insert(lines, "  -- ★ Phase 4.8 S1: Shift+Arrow selection extension")
-    table.insert(lines, "  if input.key_pressed == NebulaKey.ShiftLeft then")
-    table.insert(lines, "    if self.cursor_col > 0 then")
-    table.insert(lines, "      self.cursor_col = self.cursor_col - 1")
-    table.insert(lines, "    elseif self.cursor_row > 0 then")
-    table.insert(lines, "      self.cursor_row = self.cursor_row - 1")
-    table.insert(lines, "      self.cursor_col = (@uint32)(self.visual.multi_buf:get_line(self.cursor_row):len())")
-    table.insert(lines, "    end")
-    table.insert(lines, "  end")
-    table.insert(lines, "  if input.key_pressed == NebulaKey.ShiftRight then")
-    table.insert(lines, "    local _ml_llen = (@uint32)(self.visual.multi_buf:get_line(self.cursor_row):len())")
-    table.insert(lines, "    if self.cursor_col < _ml_llen then")
-    table.insert(lines, "      self.cursor_col = self.cursor_col + 1")
-    table.insert(lines, "    elseif self.cursor_row + 1 < self.line_count then")
-    table.insert(lines, "      self.cursor_row = self.cursor_row + 1")
-    table.insert(lines, "      self.cursor_col = 0")
-    table.insert(lines, "    end")
-    table.insert(lines, "  end")
-    table.insert(lines, "  if input.key_pressed == NebulaKey.ShiftUp then")
-    table.insert(lines, "    if self.cursor_row > 0 then")
-    table.insert(lines, "      self.cursor_row = self.cursor_row - 1")
-    table.insert(lines, "      local _ml_llen = (@uint32)(self.visual.multi_buf:get_line(self.cursor_row):len())")
-    table.insert(lines, "      if self.cursor_col > _ml_llen then self.cursor_col = _ml_llen end")
-    table.insert(lines, "    end")
-    table.insert(lines, "  end")
-    table.insert(lines, "  if input.key_pressed == NebulaKey.ShiftDown then")
-    table.insert(lines, "    if self.cursor_row + 1 < self.line_count then")
-    table.insert(lines, "      self.cursor_row = self.cursor_row + 1")
-    table.insert(lines, "      local _ml_llen = (@uint32)(self.visual.multi_buf:get_line(self.cursor_row):len())")
-    table.insert(lines, "      if self.cursor_col > _ml_llen then self.cursor_col = _ml_llen end")
-    table.insert(lines, "    end")
-    table.insert(lines, "  end")
-    table.insert(lines, "  if input.key_pressed == NebulaKey.ShiftHome then")
-    table.insert(lines, "    self.cursor_col = 0")
-    table.insert(lines, "  end")
-    table.insert(lines, "  if input.key_pressed == NebulaKey.ShiftEnd then")
-    table.insert(lines, "    self.cursor_col = (@uint32)(self.visual.multi_buf:get_line(self.cursor_row):len())")
-    table.insert(lines, "  end")
+    _emit_ml_cursor_move(lines, "ShiftLeft",  "left",  "  ", false)
+    _emit_ml_cursor_move(lines, "ShiftRight", "right", "  ", false)
+    _emit_ml_cursor_move(lines, "ShiftUp",    "up",    "  ", false)
+    _emit_ml_cursor_move(lines, "ShiftDown",  "down",  "  ", false)
+    _emit_ml_cursor_move(lines, "ShiftHome",  "home",  "  ", false)
+    _emit_ml_cursor_move(lines, "ShiftEnd",   "end",   "  ", false)
 
     -- ---- Enter: delete selection first if active, then delegate to MultiBuf.insert_newline ----
     -- ★ Phase 4.8-S5: auto-indent (preserve leading spaces + extra indent after { or :)
