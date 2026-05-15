@@ -40,6 +40,7 @@
 | `TEXT_EDITOR_ROADMAP.md` | 文本编辑器长期愿景 — 历史参考 + 未来方向 |
 | `ROADMAP_INDUSTRY_RESEARCH.md` | 行业对标研究 — 持续相关 |
 | `WASM_TARGET_ANALYSIS.md` | WebAssembly 可行性分析 — WASM 渲染问题修复前持续相关 |
+| `PLAN_ARCHITECTURE_AUDIT.md` | 架构审计与整改方案 — 全代码库审计发现的 P0-P3 问题清单与五梯队实施计划 |
 
 ## 历史资产
 
