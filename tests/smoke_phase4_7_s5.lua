@@ -36,6 +36,7 @@ local function read_file(path)
   return s
 end
 
+local types_src     = read_file("src/nebula_types.nelua")
 local core_src      = read_file("src/nebula_core.nelua")
 local app_src       = read_file("src/app.nelua")
 local interact_src  = read_file("src/derive/interaction_factory.lua")
@@ -47,9 +48,9 @@ print("")
 -- ---- 1. NebulaKey 枚举扩展 ----
 print("--- 1. NebulaKey Enum ---")
 check("NebulaKey.Undo defined (= 22)",
-  core_src:find("Undo%s*=%s*22") ~= nil)
+  types_src:find("Undo%s*=%s*22") ~= nil)
 check("NebulaKey.Redo defined (= 23)",
-  core_src:find("Redo%s*=%s*23") ~= nil)
+  types_src:find("Redo%s*=%s*23") ~= nil)
 
 -- ---- 2. app.nelua 键映射 ----
 print("")

@@ -45,13 +45,13 @@ end
 
 local glfw_src    = read_file("src/glfw_bindings.nelua")
 local app_src     = read_file("src/app.nelua")
-local core_src    = read_file("src/nebula_core.nelua")
+local core_src    = read_file("src/nebula_types.nelua")
 local interact_src = read_file("src/derive/interaction_factory.lua")
 local gapbuf_src  = read_file("src/derive/gap_buffer_factory.lua")
 
 assert(glfw_src,     "glfw_bindings.nelua not found")
 assert(app_src,      "app.nelua not found")
-assert(core_src,     "nebula_core.nelua not found")
+assert(core_src,     "nebula_types.nelua not found")
 assert(interact_src, "interaction_factory.lua not found")
 assert(gapbuf_src,   "gap_buffer_factory.lua not found")
 

@@ -42,10 +42,10 @@ package.path = script_dir .. "/../src/?.lua;" ..
 -- =============================================================================
 -- 1. nebula_core.nelua 修饰键扩展验证
 -- =============================================================================
-print("\n--- 1. nebula_core.nelua 修饰键扩展 ---")
-local core_path = script_dir .. "/../src/nebula_core.nelua"
+print("\n--- 1. nebula_types.nelua 修饰键扩展 ---")
+local core_path = script_dir .. "/../src/nebula_types.nelua"
 local f = io.open(core_path, "r")
-assert(f, "无法读取 src/nebula_core.nelua")
+assert(f, "无法读取 src/nebula_types.nelua")
 local core_src = f:read("*a")
 f:close()
 
@@ -102,9 +102,9 @@ assert_not_contains("get_text 生成代码不写入 visual.flat_buf", ifac_src, 
 -- =============================================================================
 print("\n--- 5. nebula_core.nelua 包含内聚的交互原语结构体 ---")
 
-assert_contains("HoverableState 已内聚到 nebula_core.nelua", core_src, "global HoverableState")
-assert_contains("ClickableState 已内聚到 nebula_core.nelua", core_src, "global ClickableState")
-assert_contains("内聚注释包含 Phase 3.9 标记", core_src, "Phase 3.9 内聚至此")
+assert_contains("HoverableState 已内聚到 nebula_types.nelua", core_src, "global HoverableState")
+assert_contains("ClickableState 已内聚到 nebula_types.nelua", core_src, "global ClickableState")
+-- ★ P1-1: Phase 3.9 注释不再需要，类型已提取到独立模块 nebula_types.nelua
 
 -- =============================================================================
 -- 汇总

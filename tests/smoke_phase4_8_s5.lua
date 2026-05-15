@@ -27,7 +27,7 @@ end
 -- =============================================================================
 print("\n=== Part 1: NebulaKey Enum ===")
 
-local core_src = io.open("src/nebula_core.nelua"):read("*a")
+local core_src = io.open("src/nebula_types.nelua"):read("*a")
 
 check("NebulaKey.ShiftTab exists",
   core_src:find("ShiftTab") ~= nil)
