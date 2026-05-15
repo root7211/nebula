@@ -14,15 +14,15 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ## 当前状态
 
-**Era III | Code Browser Demo + CI 全量覆盖 32 demo | 编辑器 19 行极限形态 | wgpu-native v29（2026-05-13）**
+**Era III | Code Browser Demo + CI 全量覆盖 32 demo | 编辑器 19 行极限形态 | wgpu-native v29 + 77/77 回归全绿（2026-05-15）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
 | **Code Browser Demo** | Monaco 风格代码浏览器——文件树面板（DenseText + POSIX C FFI + 懒加载扫描）+ 语法高亮编辑器（6 语言）+ 搜索/替换；可移植 `NebulaDirIter` C helper API（绕过 `struct dirent` 布局差异）；路径缓存溢出安全修复；CI 全量覆盖 32 demo + C 单元测试 | `df52377` |
-| **Phase 5.0 Slot Layout** | `nebula_app_register_slot` 新增 `layout` 声明（direction/gap/padding/item_size/scroll_var）；`app_factory.lua` 编译期生成单态化定位循环（常量内联，零运行时分支）；Producer 不再手算坐标——框架自动覆写 pos/size；`dynamic_list_v2_demo.nelua` 验证通过；19/19 冒烟测试全绿 | — |
-| **wgpu-native v29 绑定修正** | 恢复 `WGPUBindGroupLayoutEntry.bindingArraySize` + `WGPUVertexAttribute/WGPUVertexBufferLayout.nextInChain`；`WGPUShaderStage` uint32→uint64；所有 demo 编译通过 | — |
+| **Phase 5.0 Slot Layout** | `nebula_app_register_slot` 新增 `layout` 声明（direction/gap/padding/item_size/scroll_var）；`app_factory.lua` 编译期生成单态化定位循环（常量内联，零运行时分支）；Producer 不再手算坐标——框架自动覆写 pos/size；`dynamic_list_v2_demo.nelua` 验证通过；19/19 冒烟测试全绿 | `6fdf02f` |
+| **wgpu-native v29 绑定修正** | 恢复 `WGPUBindGroupLayoutEntry.bindingArraySize` + `WGPUVertexAttribute/WGPUVertexBufferLayout.nextInChain`；`WGPUShaderStage` uint32→uint64；所有 demo 编译通过 | `6fdf02f` |
 | **Era III 模块化拆分** | 5 个 builtin Producer 工厂 (`nebula_builtin_*`) 从 `nebula_core` 提取到 `nebula_builtins.nelua`；`nebula_editor_main` / `nebula_terminal_main` 提取到 `nebula_apps.nelua`；内置 `_nebula_builtins` 编译期注册表替代 if-else 分发链；`nebula_core` 净减少 930 行 → 497 行；24/24 demo 编译通过 | `634a362` |
 | **Phase 4.9.1 终态收尾** | 7 项 sugar 改进全落地——`dense=N` 自动生成 DenseText + `builtin` 自动绑定 Producer + layout 字段提升 + children/row 简写 + cell 默认值 + `auto_editor_name` 推断 + editor_main 默认参数 + `text_editor_demo_v3.nelua`（19 行，原 886 行压缩 46.6x）+ 77/77 回归全绿 | `77973d0` |
 | **Phase 4.6 语法统一化** | `nebula_main()` 泛用生成器（S1）+ builtin 隐含默认 dense（S2）+ nebula_app spec 缓存消除参数重复（S3）+ term_demo_v2: 489→16 行 (30.6x) + button_v2_demo: 147→18 行 (8.2x) + 77/77 回归全绿 | `849cec7` |
@@ -30,27 +30,27 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 | **Phase 4.9 50 行终态收敛** | 5 层 Sugar 系统——L1 `nebula_highlight_pack`（多语言高亮一键注册）+ L2 `nebula_builtin_status_bar/search_bar/edit_area`（Producer 自动生成）+ L3 搜索交互内置（框架级全局变量 + `nebula_search_*` 辅助函数）+ L4 `nebula_editor_update_title` 等框架内建辅助 + L5 `nebula_editor_main`（主循环一行生成）+ `text_editor_demo_v2.nelua`（85 行，原 885 行压缩 10.4x）+ 77/77 回归全绿 | `67e16c6` |
 | **Phase 4.8-S6 集成验收** | S1-S5 + NL 全功能协同验证——110 条集成冒烟测试覆盖 9 个维度（源文件完整性/S1 选区+剪贴板/S2 搜索+替换/S3 状态栏/S4 多语言高亮/S5 自动缩进/NL 嵌套布局/架构完整性/编译产物）+ text_editor_demo 871 行完整编辑器 + 76/76 回归全绿 | `c512367` |
 | **Phase 4.8-S2 搜索与替换** | 固定布局方案（`flex_basis=24` 搜索栏始终占位，Producer 切换渲染内容）+ `Ctrl+F` 搜索 / `Ctrl+H` 替换 / `F3` 下一匹配 / `Escape` 关闭 + 朴素 O(n*m) 字符串匹配 + `MatchPos[512]` 固定数组（公理 B: 零堆分配）+ 匹配高亮（当前匹配亮黄 / 其他暗黄）+ `search_replace_current` / `search_replace_all` + 搜索栏激活时键盘事件拦截 + 53 条冒烟测试 + 75/75 回归全绿 | `c512367` |
-| **Phase 4.8-S5 自动缩进 + Tab 处理** | `NebulaKey.ShiftTab` 枚举 + Tab 插入 4 空格 + Shift+Tab 移除至多 4 前导空格（`delete_range`）+ Enter 自动保持缩进（计算前导空格）+ `{`/`:` 结尾额外增加 4 空格缩进 + 30 条冒烟测试 + 74/74 回归全绿 | — |
-| **Phase 4.8-S4 多语言语法高亮** | 6 种语言高亮规则（nelua/lua/c/python/json/markdown）+ `nebula_highlight_select` 编译期多语言注册 + `nebula_highlight_dispatch` 运行时分发 + `nebula_highlight_detect_ext` 文件扩展名自动检测（15 种扩展名映射）+ `_editor_highlight_id` 状态管理 + 47 条冒烟测试 + 73/73 回归全绿 | — |
-| **Phase 4.8-S3 状态栏 + 光标行高亮** | 底部状态栏（`flex_basis=24` 固定高度 DenseText 组件）——显示文件名 + 修改标记 + 行列号 + 总行数 + 编码(UTF-8) + 行尾符(LF) + `fill_status_bar` Producer + `StatusBarDenseVisual` 声明 + `nebula_theme_bg_status/fg_status/fg_status_accent` 主题色 + 光标行高亮（`fill_edit_area` 中 `is_cursor_line` → `nebula_theme_bg_cursor_line`）+ 31 条冒烟测试 + 72/72 回归全绿 | — |
+| **Phase 4.8-S5 自动缩进 + Tab 处理** | `NebulaKey.ShiftTab` 枚举 + Tab 插入 4 空格 + Shift+Tab 移除至多 4 前导空格（`delete_range`）+ Enter 自动保持缩进（计算前导空格）+ `{`/`:` 结尾额外增加 4 空格缩进 + 30 条冒烟测试 + 74/74 回归全绿 | `2aab7c7` |
+| **Phase 4.8-S4 多语言语法高亮** | 6 种语言高亮规则（nelua/lua/c/python/json/markdown）+ `nebula_highlight_select` 编译期多语言注册 + `nebula_highlight_dispatch` 运行时分发 + `nebula_highlight_detect_ext` 文件扩展名自动检测（15 种扩展名映射）+ `_editor_highlight_id` 状态管理 + 47 条冒烟测试 + 73/73 回归全绿 | `74aa78f` |
+| **Phase 4.8-S3 状态栏 + 光标行高亮** | 底部状态栏（`flex_basis=24` 固定高度 DenseText 组件）——显示文件名 + 修改标记 + 行列号 + 总行数 + 编码(UTF-8) + 行尾符(LF) + `fill_status_bar` Producer + `StatusBarDenseVisual` 声明 + `nebula_theme_bg_status/fg_status/fg_status_accent` 主题色 + 光标行高亮（`fill_edit_area` 中 `is_cursor_line` → `nebula_theme_bg_cursor_line`）+ 31 条冒烟测试 + 72/72 回归全绿 | `3d8f1b3` |
 | **Phase 4.8-NL 嵌套布局支持** | `layout.container` 声明式嵌套容器实现——`nebula_app_register_layout_node` 纯布局容器注册（无 GPU 管线）+ `_build_container_node` 递归构建 + `_solve_layout` 拓扑感知挂载（`_layout_seq` 维持注册顺序）+ layout_engine 交叉轴自动拉伸修复（对齐 CSS Flexbox `align-items:stretch` 默认行为）+ `nebula_app()` sugar 识别无 type 组件为容器 + 51 条冒烟测试 + 71/71 回归全绿 | `b32547b` |
 | **Phase 4.8-S1 选区 + 剪贴板** | 选区可视化（Shift+Arrow/Home/End 扩展选区）+ 系统剪贴板（Ctrl+C/V/X/A）+ 选区覆盖删除 + 正常移动重置锚点 + Producer 选区背景渲染 + `nebula_theme_bg_selected()` + 32 条冒烟测试 + 70/70 回归全绿 | `a09ecdf` |
 | **Phase 4.5-S3 语法糖深化** | L2 层 API：`require "nebula"`（统一入口）+ `nebula_visual()`（从 primitives 自动推导 record 字段）+ `init_themed()`（NEBULA_THEME_DEFAULTS 编译期主题表驱动默认颜色）+ `nebula_frame_begin()`（帧循环整合）+ `button_v2_demo.nelua`（30 行极限形态，原 147 行压缩 ~5x）+ 52 条冒烟测试 + 70/70 回归全绿 | `d615c5d` |
 | **Phase 4.7-S7-fix multiline_editable 修复** | multiline_editable 原语完整重写——字符输入直接操作 multi_buf（绕过 editable 的 gap_buf）、Enter 调用 `insert_newline()`、Backspace 调用 `merge_line_up()`、新增 Left/Right/Home/End/Delete 完整键盘支持 + `wgpu_bindings.nelua` TextureFormat 枚举值和 BindGroupLayoutEntry 布局修正（v29） | `856f326` |
-| **Phase 4.7-S7 文本编辑器原型** | `text_editor_demo.nelua` — S1-S6 全集成验收（CJK 编辑 + DenseText 渲染 + 行号 + 语法高亮 + Undo/Redo + File I/O + Ctrl+S 保存 + 窗口标题状态显示）+ `NebulaKey.Save` + `glfwSetWindowTitle` 绑定 + `nebula_annotate` 存储 `max_lines` 修复 + **语法糖优化**：`nebula_theme`（内置暗色主题）+ `nebula_editor_visual`（自动生成 Visual record）+ `nebula_builtin_line_nums`（内置行号 Producer）+ 68/68 回归测试全绿 | — |
+| **Phase 4.7-S7 文本编辑器原型** | `text_editor_demo.nelua` — S1-S6 全集成验收（CJK 编辑 + DenseText 渲染 + 行号 + 语法高亮 + Undo/Redo + File I/O + Ctrl+S 保存 + 窗口标题状态显示）+ `NebulaKey.Save` + `glfwSetWindowTitle` 绑定 + `nebula_annotate` 存储 `max_lines` 修复 + **语法糖优化**：`nebula_theme`（内置暗色主题）+ `nebula_editor_visual`（自动生成 Visual record）+ `nebula_builtin_line_nums`（内置行号 Producer）+ 68/68 回归测试全绿 | `d47c2d7` |
 | **Phase 4.7-S6 File I/O** | `load_file(path)` / `save_file(path)` 方法生成（C stdio FFI 绑定）+ CRLF 处理 + 空文件 + POSIX 换行末尾 + roundtrip 验证 + 66/66 回归测试全绿 | `91560be` |
 | **Phase 4.7-S5 Undo/Redo** | 编译期 `NebulaUndoStack` 类型生成 + `NebulaKey.Undo`/`Redo` 枚举 + Ctrl+Z/Y/Shift+Z 键映射 + `process_text_input` 全操作记录 + `nebula_inject_buffers` 自动注入 undo stack | `457fd62` |
-| **Phase 4.5-S2 混合管线自动编排** | `nebula_app()` 的 `components` 数组自动检测 Visual 的 `text_mode`，dense 管线自动路由到 `nebula_app_register_dense_text`（消除 `dense_texts` 分离声明）+ highlight_sugar_demo（全糖化语法高亮编辑器，编排样板从 ~80 行→~15 行）+ 33 条冒烟测试 | — |
-| **Phase 4.7-S4 语法高亮架构** | `highlight_factory.lua` 编译期模块（`nebula_highlight_rules` 规则注册 + `nebula_derive_highlighter` 扫描函数生成）+ 4 种 token 着色（关键字分组 + 行注释 + 字符串字面量 + 数字字面量）+ highlight_editor_demo（Nelua 语法高亮编辑器）+ 30 条冒烟测试 + 62/62 回归测试全绿 | — |
-| **Phase 4.5 S1 语法糖 API** | `nebula_component`（合并 annotate+derive，自动推导 states/transitions）+ `nebula_inject_buffers`（自动注入 buffer 类型）+ `nebula_app`（一站式 App 编排）+ `nebula_auto_states`（从 primitives 推导状态枚举）+ button_sugar_demo + multiline_sugar_demo + 45 条冒烟测试 | — |
+| **Phase 4.5-S2 混合管线自动编排** | `nebula_app()` 的 `components` 数组自动检测 Visual 的 `text_mode`，dense 管线自动路由到 `nebula_app_register_dense_text`（消除 `dense_texts` 分离声明）+ highlight_sugar_demo（全糖化语法高亮编辑器，编排样板从 ~80 行→~15 行）+ 33 条冒烟测试 | `09edf05` |
+| **Phase 4.7-S4 语法高亮架构** | `highlight_factory.lua` 编译期模块（`nebula_highlight_rules` 规则注册 + `nebula_derive_highlighter` 扫描函数生成）+ 4 种 token 着色（关键字分组 + 行注释 + 字符串字面量 + 数字字面量）+ highlight_editor_demo（Nelua 语法高亮编辑器）+ 30 条冒烟测试 + 62/62 回归测试全绿 | `d4fc286` |
+| **Phase 4.5 S1 语法糖 API** | `nebula_component`（合并 annotate+derive，自动推导 states/transitions）+ `nebula_inject_buffers`（自动注入 buffer 类型）+ `nebula_app`（一站式 App 编排）+ `nebula_auto_states`（从 primitives 推导状态枚举）+ button_sugar_demo + multiline_sugar_demo + 45 条冒烟测试 | `68fa3fb` |
 | **Phase 4.7-S3 行号显示** | flex_grow/flex_basis 布局支持 + 多列 DenseText 布局（行号栏固定宽度 + 编辑区弹性宽度）+ editor_with_lines_demo（双 DenseText 管线并排）+ 55/55 回归测试全绿 | `c4a7743` |
-| **Phase 4.7-S2 DenseText 接入 App 编排** | `nebula_app_register_dense_text` API + Producer 模式 + App 自动管理 DenseText 管线生命周期（init/draw/deinit）+ dense_editor_demo（DenseText + multiline_editable + App 编排三者整合）+ 28 条冒烟测试 | — |
-| **Phase 4.7-S1 CJK multiline 升级** | UTF-8 aware gap buffer（move_cursor_left_char 等 5 个新方法）+ CJK 显示宽度函数 + cjk_editor_demo + 43 条冒烟测试，editable 原语全面升级为 char-aware | — |
+| **Phase 4.7-S2 DenseText 接入 App 编排** | `nebula_app_register_dense_text` API + Producer 模式 + App 自动管理 DenseText 管线生命周期（init/draw/deinit）+ dense_editor_demo（DenseText + multiline_editable + App 编排三者整合）+ 28 条冒烟测试 | `538d699` |
+| **Phase 4.7-S1 CJK multiline 升级** | UTF-8 aware gap buffer（move_cursor_left_char 等 5 个新方法）+ CJK 显示宽度函数 + cjk_editor_demo + 43 条冒烟测试，editable 原语全面升级为 char-aware | `c360c86` |
 | **wgpu-native v29.0.0.0 绑定对齐** | 12 个结构体布局修复（新增字段、类型宽度、字段顺序），14/14 demo 编译通过，42/42 结构体尺寸验证 OK | `f051974` |
 | **Phase 4.X-J JSON Viewer** | 只读 JSON 树形浏览器——递归下降解析器（4096 节点/64KB）+ One Dark 语法着色（key/string/number/bool/null）+ 折叠/展开 + 垂直滚动 + 行号（双 DenseText 管线）+ json_viewer_demo + 28 条冒烟测试 + 60/60 回归测试全绿 | `f9d4c10` |
 | **Phase 4.7→4.5 调序方案** | 先做 4.7-S1~S4（编辑器前置）积累 4 个新 demo 样本，再设计 4.5 语法糖，避免过早固化 API | — |
 | **Phase 4.X Terminal Emulator** | 终端模拟器原型——PTY + ANSI 解析器 + Dense Text 渲染，term_demo 编译运行通过 | `21ee560` |
-| **Phase 4.X Step 1-5** | 高密度文本渲染通道——着色器组合 + 管线生成 + Record 定义 + 派生入口 + 辅助函数 + dense_text_demo（120×50 = 6000 字符网格）+ 65 条冒烟测试 | — |
+| **Phase 4.X Step 1-5** | 高密度文本渲染通道——着色器组合 + 管线生成 + Record 定义 + 派生入口 + 辅助函数 + dense_text_demo（120×50 = 6000 字符网格）+ 65 条冒烟测试 | `d6b2e25` |
 | **Phase 4.2.3-S2** | CJK 运行时排版——零 HarfBuzz 依赖，O(log N) 表查找，CJK+ASCII 混排 Slug 渲染，cjk_text_demo | `a6336e5` |
 | **Phase 4.2.3-S1** | GB2312 一级 3755 字 shaping 表生成（v3 直接 API，102.7 KB，3755/3755 映射成功，0 .notdef） | `c1cd8ee` |
 | **交互原语行为验证** | 40 条运行时行为断言 + BUG-4/5/6 回归守护（Direction A） | `c424005` |
@@ -153,21 +153,21 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 | 4.7-S1 | CJK multiline editable | **已完成**（UTF-8 gap buffer + CJK 显示宽度 + cjk_editor_demo） | 85 |
 | 4.7-S2 | DenseText 接入 App 编排 | **已完成**（`nebula_app_register_dense_text` + Producer 模式 + dense_editor_demo） | 86 |
 | 4.7-S3 | 行号显示（独立 DenseText 列） | **已完成**（flex_grow/flex_basis + 多列 DenseText + editor_with_lines_demo） | 84 |
-| 4.5 | 注册原语语法糖 | **S1+S2+S3 已完成**（S1: `nebula_component` + `nebula_inject_buffers` + `nebula_app` + `nebula_auto_states`；S2: 混合管线自动编排 + highlight_sugar_demo；S3: `nebula_visual` + `init_themed` + `nebula_frame_begin` + `require "nebula"` + button_v2_demo 30 行极限形态） | — |
-|| 4.7-S4 | 语法高亮架构 | **已完成**（`highlight_factory.lua` + 编译期规则注入 + 运行时 per-char 着色 + highlight_editor_demo） | 85 |
-|| 4.8-S1 | 选区可视化 + 系统剪贴板 | **已完成**（Shift+Arrow/Home/End + Ctrl+C/V/X/A + 选区覆盖删除 + Producer 选区渲染） | 86 |
-|| 4.8-NL | 嵌套布局支持 | **已完成**（`layout.container` 声明式嵌套容器 + ref 拓扑 + 交叉轴自动拉伸 + 51 条冒烟测试） | 88 |
-|| 4.8-S3 | 状态栏 + 光标行高亮 | **已完成**（底部固定高度状态栏 + 文件名/行列号/行数/编码/行尾符 + `fill_status_bar` Producer + 光标行高亮 + 31 条冒烟测试） | 80 |
-|| 4.8-S4 | 多语言语法高亮 | **已完成**（6 语言规则 + `nebula_highlight_select` + `nebula_highlight_dispatch` + 扩展名自动检测 + 47 条冒烟测试） | 82 |
-|| 4.8-S5 | 自动缩进 + Tab 处理 | **已完成**（Tab 4 空格 + Shift+Tab 反缩进 + Enter 自动保持/增加缩进 + 30 条冒烟测试） | 79 |
+| 4.5 | 注册原语语法糖 | **S1+S2+S3 已完成**（S1: `nebula_component` + `nebula_inject_buffers` + `nebula_app` + `nebula_auto_states`；S2: 混合管线自动编排 + highlight_sugar_demo；S3: `nebula_visual` + `init_themed` + `nebula_frame_begin` + `require "nebula"` + button_v2_demo 30 行极限形态） | 85 |
+| 4.7-S4 | 语法高亮架构 | **已完成**（`highlight_factory.lua` + 编译期规则注入 + 运行时 per-char 着色 + highlight_editor_demo） | 85 |
+| 4.8-S1 | 选区可视化 + 系统剪贴板 | **已完成**（Shift+Arrow/Home/End + Ctrl+C/V/X/A + 选区覆盖删除 + Producer 选区渲染） | 86 |
+| 4.8-NL | 嵌套布局支持 | **已完成**（`layout.container` 声明式嵌套容器 + ref 拓扑 + 交叉轴自动拉伸 + 51 条冒烟测试） | 88 |
+| 4.8-S3 | 状态栏 + 光标行高亮 | **已完成**（底部固定高度状态栏 + 文件名/行列号/行数/编码/行尾符 + `fill_status_bar` Producer + 光标行高亮 + 31 条冒烟测试） | 80 |
+| 4.8-S4 | 多语言语法高亮 | **已完成**（6 语言规则 + `nebula_highlight_select` + `nebula_highlight_dispatch` + 扩展名自动检测 + 47 条冒烟测试） | 82 |
+| 4.8-S5 | 自动缩进 + Tab 处理 | **已完成**（Tab 4 空格 + Shift+Tab 反缩进 + Enter 自动保持/增加缩进 + 30 条冒烟测试） | 79 |
 | **4.9** | **50 行终态收敛** | **已完成**（5 层 Sugar：L1 highlight pack + L2 Producer 自动生成 + L3 搜索交互内置 + L4 框架辅助 + L5 主循环生成，885→85 行，10.4x 压缩） | **88** |
 | **4.9.1** | **语法打磨终态** | **已完成**（7 项改进：dense=N + builtin 绑定 + layout 提升 + children/row + cell 默认值 + auto_editor_name + editor_main 默认，886→19 行，46.6x 压缩） | **90** |
 | **4.X-T2** | Terminal Emulator v2 | **已完成**（`nebula_terminal_main` + builtin="term_grid" + spec 缓存，489→16 行，30.6x 压缩） | 80 |
 | **4.6** | **语法统一化** | **已完成**（S1: `nebula_main()` + S2: builtin 隐含 dense + S3: spec 缓存，button 18 行，term 16 行，editor 19 行） | **85** |
 | 4.6-I | Indirect Drawing | 规划中（文档预研，等待组件数>100 触发） | 78 |
-| 4.7 | 文本编辑器原型 | **S1-S7 已完成**（S7: text_editor_demo 全集成验收） | — |
+| 4.7 | 文本编辑器原型 | **S1-S7 已完成**（S7: text_editor_demo 全集成验收） | 85 |
 | **4.X-CB** | **Code Browser** | **已完成**（文件树 + 语法高亮编辑器 + POSIX FFI + 懒加载目录扫描 + `code_browser_demo`） | 83 |
-| 5.0 | 生态与 CI/CD | **进行中**（CI 全量覆盖 32 demo + C 单元测试 + GitHub Pages 部署） | — |
+| 5.0 | 生态与 CI/CD | **进行中**（CI 全量覆盖 32 demo + C 单元测试 + GitHub Pages 部署；WASM editor 渲染修复待完成） | 80 |
 
 > 重要度评分基于五个维度加权综合评分（满分 100），详见 [`docs/PHASE_IMPORTANCE_SCORECARD.md`](docs/PHASE_IMPORTANCE_SCORECARD.md)。
 
@@ -409,11 +409,11 @@ nebula/
 | [`PLAN_PHASE4_X_DENSE_TEXT.md`](docs/PLAN_PHASE4_X_DENSE_TEXT.md) | 高密度文本 + 输入系统规划（待实施） |
 | [`PLAN_PHASE4_X_JSON_VIEWER.md`](docs/PLAN_PHASE4_X_JSON_VIEWER.md) | JSON Viewer 实施方案（DenseText + 折叠 + 着色） |
 | [`PLAN_PHASE4_7_BEFORE_4_5.md`](docs/PLAN_PHASE4_7_BEFORE_4_5.md) | Phase 4.7→4.5 调序方案（先积累样本再提炼语法糖） |
-|| [`PLAN_PHASE4_5_S3_SUGAR.md`](docs/PLAN_PHASE4_5_S3_SUGAR.md) | Phase 4.5-S3 语法糖深化实施方案（nebula_visual + init_themed + frame_begin） |
+| [`PLAN_PHASE4_5_S3_SUGAR.md`](docs/PLAN_PHASE4_5_S3_SUGAR.md) | Phase 4.5-S3 语法糖深化实施方案（nebula_visual + init_themed + frame_begin） |
 | [`PLAN_PHASE4_8_EDITOR.md`](docs/PLAN_PHASE4_8_EDITOR.md) | Phase 4.8 编辑器功能规划 |
 | [`PLAN_PHASE4_9_FIFTY_LINES.md`](docs/PLAN_PHASE4_9_FIFTY_LINES.md) | ★ Phase 4.9 — 50 行终态收敛方案（5 层 Sugar 架构 + 公理合规性分析） |
-|| [`PLAN_NESTED_LAYOUT.md`](docs/PLAN_NESTED_LAYOUT.md) | ★ 嵌套布局实施方案（layout.container 声明式嵌套容器，公理合规性分析） |
-|| [`PLAN_ERA2_MASTER.md`](docs/PLAN_ERA2_MASTER.md) | Era II 总体实施规划 |
+| [`PLAN_NESTED_LAYOUT.md`](docs/PLAN_NESTED_LAYOUT.md) | ★ 嵌套布局实施方案（layout.container 声明式嵌套容器，公理合规性分析） |
+| [`PLAN_ERA2_MASTER.md`](docs/PLAN_ERA2_MASTER.md) | Era II 总体实施规划 |
 | [`REPORT_PHASE4_2_2_BENCH.md`](docs/REPORT_PHASE4_2_2_BENCH.md) | Phase 4.2.2 Storage Buffer 基准测试报告 |
 | [`TEXT_EDITOR_ROADMAP.md`](docs/TEXT_EDITOR_ROADMAP.md) | 文本编辑器长期愿景 |
 | [`ROADMAP_INDUSTRY_RESEARCH.md`](docs/ROADMAP_INDUSTRY_RESEARCH.md) | 行业对标研究 (Zed/GPUI, Vello/Piet) |
