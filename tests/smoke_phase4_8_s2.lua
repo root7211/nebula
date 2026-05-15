@@ -136,8 +136,8 @@ check("_search_active boolean declared",
 check("_search_replace boolean declared",
   demo_src:find("global _search_replace: boolean") ~= nil)
 
-check("_search_buf [256]uint8 declared",
-  demo_src:find("global _search_buf: %[256%]uint8") ~= nil)
+check("_search_buf [1024]uint8 declared",
+  demo_src:find("global _search_buf: %[1024%]uint8") ~= nil)
 
 check("_search_len uint32 declared",
   demo_src:find("global _search_len: uint32") ~= nil)
@@ -145,8 +145,8 @@ check("_search_len uint32 declared",
 check("_search_cursor uint32 declared",
   demo_src:find("global _search_cursor: uint32") ~= nil)
 
-check("_replace_buf [256]uint8 declared",
-  demo_src:find("global _replace_buf: %[256%]uint8") ~= nil)
+check("_replace_buf [1024]uint8 declared",
+  demo_src:find("global _replace_buf: %[1024%]uint8") ~= nil)
 
 check("_replace_len uint32 declared",
   demo_src:find("global _replace_len: uint32") ~= nil)
@@ -154,8 +154,8 @@ check("_replace_len uint32 declared",
 check("MatchPos record declared",
   demo_src:find("MatchPos = @record") ~= nil)
 
-check("_search_matches [512]MatchPos declared",
-  demo_src:find("global _search_matches: %[512%]MatchPos") ~= nil)
+check("_search_matches [4096]MatchPos declared",
+  demo_src:find("global _search_matches: %[4096%]MatchPos") ~= nil)
 
 check("_search_match_count uint32 declared",
   demo_src:find("global _search_match_count: uint32") ~= nil)
@@ -175,8 +175,8 @@ check("scan_matches uses naive string matching (O(n*m))",
   demo_src:find("朴素滑窗匹配") ~= nil or
   demo_src:find("flat%[ci %+ k%] ~= _search_buf%[k%]") ~= nil)
 
-check("scan_matches limits to 512 matches (fixed array)",
-  demo_src:find("512") ~= nil)
+check("scan_matches limits to 4096 matches (fixed array)",
+  demo_src:find("4096") ~= nil)
 
 check("scan_matches uses flatten to get line bytes",
   demo_src:find("flatten") ~= nil)
@@ -256,11 +256,11 @@ print("\n=== Part 11: Axiom Compliance ===")
 check("公理 A: search_bar uses fixed layout (flex_basis=24, always present)",
   demo_src:find('"search_bar".*flex_basis = 24') ~= nil)
 
-check("公理 B: zero heap — search_buf is stack array [256]uint8",
-  demo_src:find("_search_buf: %[256%]uint8") ~= nil)
+check("公理 B: zero heap — search_buf is stack array [1024]uint8",
+  demo_src:find("_search_buf: %[1024%]uint8") ~= nil)
 
-check("公理 B: zero heap — matches is fixed array [512]MatchPos",
-  demo_src:find("_search_matches: %[512%]MatchPos") ~= nil)
+check("公理 B: zero heap — matches is fixed array [4096]MatchPos",
+  demo_src:find("_search_matches: %[4096%]MatchPos") ~= nil)
 
 check("公理 C: match highlight uses direct GPU color (DenseCharInstance bg)",
   demo_src:find("search_match.*bg") ~= nil or

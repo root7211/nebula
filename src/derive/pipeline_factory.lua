@@ -522,7 +522,7 @@ local function gen_pipeline_standard_instanced(base, uniforms_record, wgsl_sourc
   local L = {}
   local function emit(s) table.insert(L, s) end
 
-  max_instances = max_instances or 128
+  max_instances = max_instances or 1024
 
   emit(("-- === Derived standard-instanced pipeline: %s (uniforms=%s, max=%d) ==="):format(
     pipe, uniforms_record, max_instances))
@@ -1175,7 +1175,7 @@ function nebula_gen_pipeline_source(spec)
   elseif spec.standard_instanced then
     -- ★ Phase 3.5.1 / Phase 3.7: 标准 Visual 的默认路径
     assert(spec.wgsl_source, "nebula_gen_pipeline_source: wgsl_source required for standard_instanced path")
-    local max_inst = spec.max_instances or 128
+    local max_inst = spec.max_instances or 1024
     return gen_pipeline_standard_instanced(spec.base, spec.uniforms_record, spec.wgsl_source, max_inst)
   elseif spec.textured then
     -- 文本 SDF 路径

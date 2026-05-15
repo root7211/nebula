@@ -649,8 +649,8 @@ end
 _nebula_undo_stack_types = _nebula_undo_stack_types or {}
 
 function nebula_gen_undo_stack_type(max_entries, max_data_bytes)
-  max_entries    = max_entries    or 128
-  max_data_bytes = max_data_bytes or 4096
+  max_entries    = max_entries    or 512
+  max_data_bytes = max_data_bytes or 16384
   assert(type(max_entries) == "number" and max_entries > 0 and max_entries <= 65535,
     ("nebula_gen_undo_stack_type: max_entries must be 1..65535, got %s"):format(tostring(max_entries)))
   assert(type(max_data_bytes) == "number" and max_data_bytes > 0 and max_data_bytes <= 65535,

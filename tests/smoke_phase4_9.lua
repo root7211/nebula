@@ -236,8 +236,8 @@ check("L2 edit_area: compile-time function", builtins_src:find("function nebula_
 check("L5 editor_main: compile-time function", apps_src:find("function nebula_editor_main") ~= nil)
 
 -- 公理 B: 零堆分配
-check("search state uses fixed arrays [256]", app_src:find("%[256%]uint8") ~= nil)
-check("match result uses fixed array [512]", app_src:find("%[512%]MatchPos") ~= nil)
+check("search state uses fixed arrays [1024]", app_src:find("%[1024%]uint8") ~= nil)
+check("match result uses fixed array [4096]", app_src:find("%[4096%]MatchPos") ~= nil)
 
 -- 公理 C: GPU 直映
 check("edit_area uses nebula_dense_grid_fill_instance", builtins_src:find("nebula_dense_grid_fill_instance") ~= nil)
