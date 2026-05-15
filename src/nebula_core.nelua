@@ -1151,8 +1151,14 @@ global ClickableState = @record{
 ##     end
 ##   end
 ##   assert(color_field, "text derive requires <state>_text_color field")
-## 
+##
 ##   local max_chars = reg.max_chars or 256
+##   -- ★ P0-6 fix: 限制 max_chars 上限，防止栈分配过大
+##   -- NebulaPosUvVertex = 16B, 每字符 6 顶点 → max_chars * 96B 栈占用
+##   -- WASM 上限 512 → 48KB（WASM 默认栈 64KB）; Native 上限 2048 → 192KB（Native 栈通常 8MB）
+##   local text_max = NEBULA_TARGET == 'wasm' and 512 or 2048
+##   assert(max_chars <= text_max,
+##     ("text derive: max_chars=%d exceeds %d (stack overflow risk). Use DenseText for large text."):format(max_chars, text_max))
 ##   local max_vertices = max_chars * 6
 ##   local lines = {}
 ##   table.insert(lines, ("global %s = @record{"):format(ctx))
@@ -1290,8 +1296,14 @@ global ClickableState = @record{
 ##     if info then color_field = info.name break end
 ##   end
 ##   assert(color_field, "slug text derive requires <state>_text_color field")
-## 
+##
 ##   local max_chars   = reg.max_chars or 256
+##   -- ★ P0-6 fix: 限制 max_chars 上限，防止栈分配过大
+##   -- NebulaSlugVertex = 80B, 每字符 6 顶点 → max_chars * 480B 栈占用
+##   -- WASM 上限 128 → 60KB（WASM 默认栈 64KB）; Native 上限 1024 → 480KB（Native 栈通常 8MB）
+##   local slug_max = NEBULA_TARGET == 'wasm' and 128 or 1024
+##   assert(max_chars <= slug_max,
+##     ("slug text derive: max_chars=%d exceeds %d (stack overflow risk). Use DenseText for large text."):format(max_chars, slug_max))
 ##   local max_vertices = max_chars * 6
 ##   local ctx  = base .. "Context"
 ##   local lines = {}

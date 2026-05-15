@@ -316,6 +316,8 @@ require "nebula_core"
 ##       local line = mb:get_line(buf_row)
 ##       local flat: [1024]uint8
 ##       local line_len = line:flatten(&flat[0], 1023)
+##       -- ★ P0-5 fix: 限制 line_len 上限为 1023，防止 hl_colors 越界
+##       if line_len > 1023 then line_len = 1023 end
 ##       nebula_highlight_dispatch(_editor_highlight_id, &flat[0], (@uint32)(line_len), nebula_theme_fg_normal(), &hl_colors[0])
 ##       local cursor_byte: int32 = -1
 ##       if is_cursor_line then cursor_byte = (@int32)(editor.cursor_col) end

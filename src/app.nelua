@@ -654,6 +654,18 @@ global function nebula_search_replace_current(editor: auto, mb: auto): void
   if _search_current >= _search_match_count then return end
   local m = _search_matches[_search_current]
   local ln = mb:get_line(m.row)
+  -- ★ P0-4 fix: 替换前检查 gap buffer 容量
+  -- 替换串比搜索串长时，需要额外的 gap 空间
+  if _replace_len > _search_len then
+    local extra_needed = (@uint16)(_replace_len - _search_len)
+    local gap_avail = ln.gap_end - ln.gap_start
+    if gap_avail < extra_needed then
+      printf("wgpu: search_replace_current: gap buffer overflow prevented (need %u, have %u)\n",
+        (@uint32)(extra_needed), (@uint32)(gap_avail))
+      _search_overflow = true
+      return
+    end
+  end
   ln:delete_range(m.col, m.col + _search_len)
   local ins_i: uint32 = 0
   while ins_i < _replace_len do
@@ -675,6 +687,18 @@ global function nebula_search_replace_all(editor: auto, mb: auto): void
   while i >= 0 do
     local m = _search_matches[(@uint32)(i)]
     local ln = mb:get_line(m.row)
+    -- ★ P0-4 fix: 替换前检查 gap buffer 容量
+    if _replace_len > _search_len then
+      local extra_needed = (@uint16)(_replace_len - _search_len)
+      local gap_avail = ln.gap_end - ln.gap_start
+      if gap_avail < extra_needed then
+        printf("wgpu: search_replace_all: gap buffer overflow prevented at row %u (need %u, have %u)\n",
+          m.row, (@uint32)(extra_needed), (@uint32)(gap_avail))
+        _search_overflow = true
+        i = i - 1
+        continue
+      end
+    end
     ln:delete_range(m.col, m.col + _search_len)
     local ins_j: uint32 = 0
     while ins_j < _replace_len do
