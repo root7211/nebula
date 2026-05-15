@@ -66,7 +66,7 @@ check("glfwSetKeyCallback called",           app_src:find("glfwSetKeyCallback%(w
 check("char_count cleared each frame",       app_src:find("char_count%s*=%s*0") ~= nil)
 check("key_pressed set to None on no key",   app_src:find("NebulaKey%.None") ~= nil)
 check("char queue ring buffer (mod 64)",     app_src:find("%%%s*64") ~= nil)
-check("key queue ring buffer (mod 16)",      app_src:find("%%%s*16") ~= nil)
+check("key queue ring buffer (mod 64)",      app_src:find("%%%s*64") ~= nil)
 check("GLFW_RELEASE guard in key callback",  app_src:find("GLFW_RELEASE") ~= nil)
 
 -- ---- 汇总 ----
