@@ -115,7 +115,9 @@ require "nebula_core"
 ##   local layout_x = "app.dense_layout_status_bar_x"
 ##   local layout_y = "app.dense_layout_status_bar_y"
 ##
-##   local src = ([[global function %s(
+##   -- ★ P1-2: 按需加载编辑器模块（require 是幂等的）
+##   local src = ([[require "nebula_editor"
+## global function %s(
 ##   app: auto, instances: *[0]DenseCharInstance, count: *uint32, max: uint32
 ## ): void
 ##   local editor = &app.%s
@@ -185,7 +187,9 @@ require "nebula_core"
 ##   local layout_x = "app.dense_layout_search_bar_x"
 ##   local layout_y = "app.dense_layout_search_bar_y"
 ##
-##   local src = ([[global function %s(
+##   -- ★ P1-2: 按需加载编辑器模块（require 是幂等的）
+##   local src = ([[require "nebula_editor"
+## global function %s(
 ##   app: auto, instances: *[0]DenseCharInstance, count: *uint32, max: uint32
 ## ): void
 ##   local origin_x: float32 = %s
@@ -280,7 +284,9 @@ require "nebula_core"
 ##   local layout_x = "app.dense_layout_edit_area_x"
 ##   local layout_y = "app.dense_layout_edit_area_y"
 ##
-##   local src = ([[global function %s(
+##   -- ★ P1-2: 按需加载编辑器模块（require 是幂等的）
+##   local src = ([[require "nebula_editor"
+## global function %s(
 ##   app: auto, instances: *[0]DenseCharInstance, count: *uint32, max: uint32
 ## ): void
 ##   local editor = &app.%s

@@ -5,8 +5,14 @@
 -- 包含搜索/替换状态、文件状态、窗口标题更新等编辑器功能。
 -- 非编辑器应用无需 require 此模块。
 --
+-- 前置依赖：
+--   · require "glfw_bindings"  — glfwSetWindowTitle
+--   · _nebula_window           — 由 app.nelua 声明的全局窗口句柄
+--   因此本模块应在 app.nelua 之后加载（编辑器 builtin 和 nebula_editor_main
+--   会在编译期自动 require 本模块，无需手动处理加载顺序）。
+--
 -- 使用方式：
---   require "nebula_editor"  -- 在编辑器 demo 中 require
+--   require "nebula_editor"  -- 编辑器 builtin 自动 require，一般无需手动添加
 -- =============================================================================
 
 require "glfw_bindings"

@@ -544,8 +544,8 @@ end
 -- =============================================================================
 
 -- ★ P1-2 refactor: 编辑器功能已提取到 nebula_editor.nelua
--- 非编辑器应用不会加载编辑器代码（按需 require）
-require "nebula_editor"
+-- 编辑器 builtin（status_bar / search_bar / edit_area）和 nebula_editor_main()
+-- 在编译期被调用时会自动 require "nebula_editor"，非编辑器应用不会加载。
 
 -- =============================================================================
 -- ★ Phase 4.2.1: nebula_main_loop — 跨平台主循环宏
