@@ -1,6 +1,6 @@
 # 文档状态索引
 
-**更新日期**：2026-05-15
+**更新日期**：2026-05-16
 
 本文档集中标注 `docs/` 下所有规划文档的当前状态。
 
@@ -41,6 +41,7 @@
 | `ROADMAP_INDUSTRY_RESEARCH.md` | 行业对标研究 — 持续相关 |
 | `WASM_TARGET_ANALYSIS.md` | WebAssembly 可行性分析 — WASM 渲染问题修复前持续相关 |
 | `PLAN_ARCHITECTURE_AUDIT.md` | 架构审计与整改方案 — 全代码库审计发现的 P0-P3 问题清单与五梯队实施计划 |
+| `PLAN_PHASE5_OMNISCIENT_GRAPH.md` | Phase 5.0 全知图与端到端特化路径 — 编译期消解状态管理、事件路由、依赖传播 |
 
 ## 历史资产
 
