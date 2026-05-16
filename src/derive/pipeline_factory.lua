@@ -17,21 +17,13 @@
 --   · gen_pipeline_simple              — Phase 2.3 占位符路径
 --   · gen_pipeline_instanced           — Phase 3.3 遗留路径
 --
+-- ★ P1-4 refactor: 管线类型注册表 (NEBULA_PIPELINES)
+--   新增管线类型仅需调用 nebula_register_pipeline()，无需修改分发逻辑。
+--
 -- 公开 API：
+--   nebula_register_pipeline(pspec)        -> void    (注册新管线类型)
 --   nebula_gen_pipeline_source(spec)       -> string  (Nelua 源码)
 --   nebula_gen_to_uniforms_typed(spec)     -> string  (仅 to_uniforms 方法)
---
--- spec 字段：
---   has_shadow           : boolean  — 选择 shadow_multipass 路径
---   standard_instanced   : boolean  — 选择 standard_instanced 路径（默认）
---   textured             : boolean  — 选择 textured_vertex 路径
---   slug_text            : boolean  — 选择 slug_text 路径
---   atlas_dense          : boolean  — 选择 dense_text 路径 (Phase 4.X)
---   max_chars            : number   — dense_text 最大字符数（默认 4096）
---   shadow_mask_source   : string   — 阴影遮罩 WGSL
---   blur_h_source        : string   — 水平模糊 WGSL
---   blur_v_source        : string   — 垂直模糊 WGSL
---   composite_source     : string   — 最终阴影合成 WGSL
 -- =============================================================================
 
 -- ===== 小工具：转义 WGSL 源码到 Nelua 字符串字面量 =====
@@ -1144,19 +1136,95 @@ local function gen_pipeline_dense_text(base, wgsl_source, max_chars)
 end
 
 -- =============================================================================
+-- ★ P1-4 refactor: NEBULA_PIPELINES 数据驱动注册表
+--
+-- 每种管线类型注册自己的 flag 名称、必需字段、生成器函数。
+-- nebula_gen_pipeline_source 通过遍历注册表分发，新增管线类型仅需
+-- 在此处添加一行 nebula_register_pipeline() 调用。
+--
+-- 对标已有的 NEBULA_PRIMITIVES 注册表设计模式。
+-- =============================================================================
+local NEBULA_PIPELINES = {}
+
+-- nebula_register_pipeline(spec)
+-- 注册一种管线类型到全局注册表。
+--   spec.flag           : string  — spec 中的布尔标志名（如 "has_shadow"）
+--   spec.required_fields: table   — 该路径需要的额外 spec 字段名列表
+--   spec.generator      : function(spec) -> string — 代码生成器
+--   spec.description    : string  — 可读描述（调试用）
+function nebula_register_pipeline(pspec)
+  assert(pspec.flag,      "nebula_register_pipeline: flag required")
+  assert(pspec.generator, "nebula_register_pipeline: generator required")
+  pspec.required_fields = pspec.required_fields or {}
+  pspec.description     = pspec.description or pspec.flag
+  table.insert(NEBULA_PIPELINES, pspec)
+end
+
+-- ===== 注册内置管线类型 =====
+
+nebula_register_pipeline({
+  flag = "has_shadow",
+  description = "Shadow multi-pass pipeline (Phase 2.5)",
+  required_fields = { "shadow_mask_source", "blur_h_source", "blur_v_source", "composite_source" },
+  generator = function(spec)
+    return gen_pipeline_shadow(
+      spec.base, spec.uniforms_record, spec.shadow_mask_source,
+      spec.shadow_mask_source, spec.blur_h_source, spec.blur_v_source, spec.composite_source)
+  end,
+})
+
+nebula_register_pipeline({
+  flag = "standard_instanced",
+  description = "Standard instanced pipeline (Phase 3.5.1)",
+  required_fields = { "wgsl_source" },
+  generator = function(spec)
+    local max_inst = spec.max_instances or 1024
+    return gen_pipeline_standard_instanced(spec.base, spec.uniforms_record, spec.wgsl_source, max_inst)
+  end,
+})
+
+nebula_register_pipeline({
+  flag = "textured",
+  description = "Textured vertex pipeline — SDF text (Phase 3.2.2)",
+  required_fields = { "wgsl_source" },
+  generator = function(spec)
+    return gen_pipeline_textured_vertex(spec.base, spec.uniforms_record, spec.wgsl_source)
+  end,
+})
+
+nebula_register_pipeline({
+  flag = "slug_text",
+  description = "Slug vector text pipeline (Phase 4.1)",
+  required_fields = { "wgsl_source" },
+  generator = function(spec)
+    return gen_pipeline_slug_text(spec.base, spec.uniforms_record, spec.wgsl_source)
+  end,
+})
+
+nebula_register_pipeline({
+  flag = "atlas_dense",
+  description = "Dense text instanced pipeline — SDF atlas (Phase 4.X)",
+  required_fields = { "wgsl_source" },
+  generator = function(spec)
+    local max_ch = spec.max_chars or 4096
+    return gen_pipeline_dense_text(spec.base, spec.wgsl_source, max_ch)
+  end,
+})
+
+-- =============================================================================
 -- 主入口：生成完整的 <T>Pipeline 源码
 --
--- Phase 3.7: 三条显式路径，无 else 兑底。任何未识别的 spec 触发 error()。
+-- ★ P1-4 refactor: 数据驱动分发，替代原来的 5 路 if/elseif 硬编码链。
+-- 新增管线类型仅需调用 nebula_register_pipeline()，无需修改此函数。
 -- =============================================================================
 function nebula_gen_pipeline_source(spec)
   assert(spec.base,            "nebula_gen_pipeline_source: spec.base required")
   assert(spec.uniforms_record, "nebula_gen_pipeline_source: spec.uniforms_record required")
 
-  -- Phase 3.7+: 互斥标志校验——五条路径最多只能激活一条
-  local _path_flags = { "has_shadow", "standard_instanced", "textured", "slug_text", "atlas_dense" }
+  -- 互斥标志校验——注册表中的路径最多只能激活一条
   local _active = {}
-  for _, flag in ipairs(_path_flags) do
-    if spec[flag] then _active[#_active + 1] = flag end
+  for _, pspec in ipairs(NEBULA_PIPELINES) do
+    if spec[pspec.flag] then _active[#_active + 1] = pspec.flag end
   end
   if #_active > 1 then
     error("nebula_gen_pipeline_source: conflicting pipeline paths for '" ..
@@ -1164,40 +1232,27 @@ function nebula_gen_pipeline_source(spec)
           " are mutually exclusive — set exactly one.")
   end
 
-  if spec.has_shadow then
-    -- 阴影多 Pass 路径：需要四个子着色器源码
-    assert(spec.shadow_mask_source, "nebula_gen_pipeline_source: shadow_mask_source required when has_shadow")
-    assert(spec.blur_h_source,      "nebula_gen_pipeline_source: blur_h_source required when has_shadow")
-    assert(spec.blur_v_source,      "nebula_gen_pipeline_source: blur_v_source required when has_shadow")
-    assert(spec.composite_source,   "nebula_gen_pipeline_source: composite_source required when has_shadow")
-    -- Phase 3.7: 阴影路径的主着色器使用 nebula_compose_shadow_shaders 的 shadow_mask_source
-    -- 主管线的 WGSL 由 gen_pipeline_shadow 内部使用 shadow_mask_source 作为主着色器
-    return gen_pipeline_shadow(
-      spec.base, spec.uniforms_record, spec.shadow_mask_source,
-      spec.shadow_mask_source, spec.blur_h_source, spec.blur_v_source, spec.composite_source)
-  elseif spec.standard_instanced then
-    -- ★ Phase 3.5.1 / Phase 3.7: 标准 Visual 的默认路径
-    assert(spec.wgsl_source, "nebula_gen_pipeline_source: wgsl_source required for standard_instanced path")
-    local max_inst = spec.max_instances or 1024
-    return gen_pipeline_standard_instanced(spec.base, spec.uniforms_record, spec.wgsl_source, max_inst)
-  elseif spec.textured then
-    -- 文本 SDF 路径
-    assert(spec.wgsl_source, "nebula_gen_pipeline_source: wgsl_source required for textured path")
-    return gen_pipeline_textured_vertex(spec.base, spec.uniforms_record, spec.wgsl_source)
-  elseif spec.slug_text then
-    -- ★ Phase 4.1: Slug 文本管线路径
-    assert(spec.wgsl_source, "nebula_gen_pipeline_source: wgsl_source required for slug_text path")
-    return gen_pipeline_slug_text(spec.base, spec.uniforms_record, spec.wgsl_source)
-  elseif spec.atlas_dense then
-    -- ★ Phase 4.X: 高密度文本管线路径
-    assert(spec.wgsl_source, "nebula_gen_pipeline_source: wgsl_source required for atlas_dense path")
-    local max_ch = spec.max_chars or 4096
-    return gen_pipeline_dense_text(spec.base, spec.wgsl_source, max_ch)
-  else
-    error("nebula_gen_pipeline_source: unrecognized spec for '" .. tostring(spec.base) .. "'. " ..
-          "All standard Visuals must use standard_instanced path (set via nebula_derive). " ..
-          "Phase 3.7: gen_pipeline_simple and gen_pipeline_instanced have been removed.")
+  -- 数据驱动分发：遍历注册表，匹配激活的 flag
+  for _, pspec in ipairs(NEBULA_PIPELINES) do
+    if spec[pspec.flag] then
+      -- 校验必需字段
+      for _, field in ipairs(pspec.required_fields) do
+        assert(spec[field],
+          ("nebula_gen_pipeline_source: %s required when %s is set (pipeline: %s)"):format(
+            field, pspec.flag, spec.base))
+      end
+      return pspec.generator(spec)
+    end
   end
+
+  -- 无匹配路径
+  local known_flags = {}
+  for _, pspec in ipairs(NEBULA_PIPELINES) do
+    table.insert(known_flags, pspec.flag)
+  end
+  error("nebula_gen_pipeline_source: unrecognized spec for '" .. tostring(spec.base) .. "'. " ..
+        "Set one of: " .. table.concat(known_flags, ", ") .. ". " ..
+        "Or register a custom pipeline type via nebula_register_pipeline().")
 end
 
 
