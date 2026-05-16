@@ -63,17 +63,17 @@ require "nebula_core"
 ##         idx = idx + 1; nc = nc + 1
 ##       end
 ##       if idx < max then
-##         nebula_dense_grid_fill_instance(&instances[idx], row, LINE_NUM_DIGITS, 124, origin_x, origin_y, %s, %s, nebula_theme_fg_separator(), bg)
+##         nebula_dense_grid_fill_instance(&instances[idx], row, LINE_NUM_DIGITS, NEBULA_CHAR_PIPE, origin_x, origin_y, %s, %s, nebula_theme_fg_separator(), bg)
 ##         idx = idx + 1
 ##       end
 ##     else
 ##       local nc: uint32 = 0
 ##       while nc < LINE_NUM_DIGITS and idx < max do
-##         nebula_dense_grid_fill_instance(&instances[idx], row, nc, nc == 0 and 126 or 32, origin_x, origin_y, %s, %s, nebula_theme_fg_linenum(), nebula_theme_bg_linenum())
+##         nebula_dense_grid_fill_instance(&instances[idx], row, nc, nc == 0 and NEBULA_CHAR_TILDE or NEBULA_CHAR_SPACE, origin_x, origin_y, %s, %s, nebula_theme_fg_linenum(), nebula_theme_bg_linenum())
 ##         idx = idx + 1; nc = nc + 1
 ##       end
 ##       if idx < max then
-##         nebula_dense_grid_fill_instance(&instances[idx], row, LINE_NUM_DIGITS, 124, origin_x, origin_y, %s, %s, nebula_theme_fg_separator(), nebula_theme_bg_linenum())
+##         nebula_dense_grid_fill_instance(&instances[idx], row, LINE_NUM_DIGITS, NEBULA_CHAR_PIPE, origin_x, origin_y, %s, %s, nebula_theme_fg_separator(), nebula_theme_bg_linenum())
 ##         idx = idx + 1
 ##       end
 ##     end
@@ -137,7 +137,7 @@ require "nebula_core"
 ##     local last_slash: int32 = -1
 ##     local fi: uint32 = 0
 ##     while _editor_file_path[fi] ~= 0 and fi < 4095 do
-##       if _editor_file_path[fi] == 47 then last_slash = (@int32)(fi) end
+##       if _editor_file_path[fi] == NEBULA_CHAR_SLASH then last_slash = (@int32)(fi) end
 ##       fi = fi + 1
 ##     end
 ##     local start: uint32 = last_slash >= 0 and (@uint32)(last_slash + 1) or 0
@@ -296,7 +296,7 @@ require "nebula_core"
 ##   local idx: uint32 = 0
 ##   local scroll_row: uint32 = (@uint32)(editor.scroll_offset_y / (%s + 2.0))
 ##   local visible_rows: uint32 = %d
-##   local hl_colors: [1024]uint32
+##   local hl_colors: [NEBULA_LINE_BUF_SIZE]uint32
 ##   local EDIT_COLS: uint32 = %d
 ##   -- selection bounds
 ##   local sel_active: boolean = (editor.sel_anchor_row ~= editor.cursor_row) or (editor.sel_anchor_col ~= editor.cursor_col)

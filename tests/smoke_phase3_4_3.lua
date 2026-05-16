@@ -35,10 +35,10 @@ check("returns float32 offset",
   src:find("return offset") ~= nil)
 check("time parameter in cursor_visible",
   src:find("time%s*:%s*float64") ~= nil)
-check("0.5s blink logic present",
-  src:find("0%.5") ~= nil)
+check("blink period constant present",
+  src:find("NEBULA_CURSOR_BLINK_PERIOD") ~= nil)
 check("returns boolean",
-  src:find("return t < 0%.5") ~= nil)
+  src:find("return t < NEBULA_CURSOR_BLINK_PERIOD") ~= nil)
 
 -- ---- 2. 逻辑正确性：用纯 Lua 模拟 nebula_cursor_x_offset ----
 local function cursor_x_offset(advances, cursor_pos, count)

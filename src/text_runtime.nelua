@@ -35,7 +35,7 @@ function NebulaTextMesh:init(): void
 end
 
 local function nebula_ascii_glyph_for_codepoint(cp: cint, out_glyph: *NebulaGeneratedAsciiGlyph): boolean
-  local fallback = 63 -- '?'
+  local fallback = NEBULA_CHAR_FALLBACK
   if cp < NEBULA_ASCII_FIRST_CODEPOINT or cp > NEBULA_ASCII_LAST_CODEPOINT then
     cp = fallback
   end

@@ -21,6 +21,7 @@
 ## cinclude "<math.h>"
 
 require "glfw_bindings"
+require "nebula_constants"
 
 -- =============================================================================
 -- nebula_cursor_x_offset
@@ -57,5 +58,5 @@ end
 global function nebula_cursor_visible(time: float64): boolean
   -- fmod(time, 1.0) < 0.5 => 前半秒可见，后半秒不可见
   local t = time - (@float64)((@int64)(time))  -- 等价于 fmod(time, 1.0)
-  return t < 0.5
+  return t < NEBULA_CURSOR_BLINK_PERIOD
 end

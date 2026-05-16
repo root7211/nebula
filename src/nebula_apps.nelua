@@ -31,10 +31,11 @@ require "nebula_builtins"
 --
 -- =============================================================================
 ## function nebula_main(app_type, opts)
+##   local _cfg = require("derive.nebula_config")
 ##   opts = opts or {}
 ##   local title  = opts.title  or "Nebula App"
-##   local width  = opts.width  or 800
-##   local height = opts.height or 600
+##   local width  = opts.width  or _cfg.DEFAULT_VIEWPORT_WIDTH
+##   local height = opts.height or _cfg.DEFAULT_VIEWPORT_HEIGHT
 ##   local bg_r   = opts.bg_r   or 0.04
 ##   local bg_g   = opts.bg_g   or 0.04
 ##   local bg_b   = opts.bg_b   or 0.06
@@ -498,8 +499,8 @@ require "nebula_builtins"
 ##     local dt = now - prev_time
 ##     prev_time = now
 ##     cursor_blink_time = cursor_blink_time + dt
-##     if cursor_blink_time >= 0.5 then
-##       cursor_blink_time = cursor_blink_time - 0.5
+##     if cursor_blink_time >= NEBULA_CURSOR_BLINK_PERIOD then
+##       cursor_blink_time = cursor_blink_time - NEBULA_CURSOR_BLINK_PERIOD
 ##       cursor_visible = not cursor_visible
 ##     end
 ##     local total_read: csize = 0

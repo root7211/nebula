@@ -18,11 +18,11 @@ require "glfw_bindings"
 -- 内部全局事件队列（环形缓冲区，仅在 app.nelua 内部可见）
 -- 回调函数写入，nebula_collect_input 读取并清空。
 -- =============================================================================
-global _nebula_char_queue:  [64]uint32   -- Unicode 码位队列
+global _nebula_char_queue:  [NEBULA_INPUT_QUEUE_SIZE]uint32   -- Unicode 码位队列
 global _nebula_char_head:   uint8 = 0
 global _nebula_char_tail:   uint8 = 0
 
-global _nebula_key_queue:   [64]NebulaKey  -- 控制键队列（扩展至 64，支持快速按键重复）
+global _nebula_key_queue:   [NEBULA_INPUT_QUEUE_SIZE]NebulaKey  -- 控制键队列
 global _nebula_key_head:    uint8 = 0
 global _nebula_key_tail:    uint8 = 0
 
@@ -57,7 +57,7 @@ end
 -- GLFW 回调：字符输入（Unicode 可打印字符）
 -- =============================================================================
 global function _nebula_char_callback(window: GLFWwindow, codepoint: uint32): void
-  local next = (_nebula_char_tail + 1) % 64
+  local next = (_nebula_char_tail + 1) % NEBULA_INPUT_QUEUE_SIZE
   if next ~= _nebula_char_head then  -- 队列未满
     _nebula_char_queue[_nebula_char_tail] = codepoint
     _nebula_char_tail = next
@@ -128,7 +128,7 @@ global function _nebula_key_callback(
   end -- close: if nk == NebulaKey.None
 
   if nk ~= NebulaKey.None then
-    local next = (_nebula_key_tail + 1) % 64
+    local next = (_nebula_key_tail + 1) % NEBULA_INPUT_QUEUE_SIZE
     if next ~= _nebula_key_head then
       _nebula_key_queue[_nebula_key_tail] = nk
       _nebula_key_tail = next
@@ -171,20 +171,20 @@ global function nebula_collect_input(
 
   -- ---- 字符输入：从队列提取到 input.char_input ----
   input.char_count = 0
-  while _nebula_char_head ~= _nebula_char_tail and input.char_count < 64 do
+  while _nebula_char_head ~= _nebula_char_tail and input.char_count < NEBULA_INPUT_QUEUE_SIZE do
     input.char_input[input.char_count] = _nebula_char_queue[_nebula_char_head]
     input.char_count = input.char_count + 1
-    _nebula_char_head = (_nebula_char_head + 1) % 64
+    _nebula_char_head = (_nebula_char_head + 1) % NEBULA_INPUT_QUEUE_SIZE
   end
 
   -- ---- 控制键：全量消费（FIFO，消除按键滞后） ----
   -- ★ P1-7: 与字符输入保持一致，每帧排空整个键队列。
   -- key_pressed 保留第一个键以保持向后兼容。
   input.key_count = 0
-  while _nebula_key_head ~= _nebula_key_tail and input.key_count < 16 do
+  while _nebula_key_head ~= _nebula_key_tail and input.key_count < NEBULA_KEY_BATCH_SIZE do
     input.key_input[input.key_count] = _nebula_key_queue[_nebula_key_head]
     input.key_count = input.key_count + 1
-    _nebula_key_head = (_nebula_key_head + 1) % 64
+    _nebula_key_head = (_nebula_key_head + 1) % NEBULA_INPUT_QUEUE_SIZE
   end
   if input.key_count > 0 then
     input.key_pressed = input.key_input[0]
@@ -324,7 +324,7 @@ global function _nebula_reconfigure_surface(renderer: *NebulaRenderer, input: *N
         nextInChain     = nilptr,
         device          = renderer.device,
         format          = renderer.format,
-        usage           = 0x00000010, -- WGPUTextureUsage_RenderAttachment
+        usage           = NEBULA_TEXTURE_USAGE_RENDER_ATTACHMENT,
         width           = new_w,
         height          = new_h,
         viewFormatCount = 0,
@@ -379,7 +379,7 @@ global function nebula_frame_render(
   local clear_color = WGPURenderPassColorAttachment{
     nextInChain   = nilptr,
     view          = view,
-    depthSlice    = 0xFFFFFFFF,
+    depthSlice    = NEBULA_DEPTH_SLICE_ALL,
     resolveTarget = nilptr,
     loadOp        = WGPULoadOp_Clear,
     storeOp       = WGPUStoreOp_Store,
@@ -388,7 +388,7 @@ global function nebula_frame_render(
 ## else
   local clear_color = WGPURenderPassColorAttachment{
     view          = view,
-    depthSlice    = 0xFFFFFFFF,
+    depthSlice    = NEBULA_DEPTH_SLICE_ALL,
     resolveTarget = nilptr,
     loadOp        = WGPULoadOp_Clear,
     storeOp       = WGPUStoreOp_Store,
@@ -485,7 +485,7 @@ global function nebula_frame_render_multipass(
   local clear_color = WGPURenderPassColorAttachment{
     nextInChain   = nilptr,
     view          = view,
-    depthSlice    = 0xFFFFFFFF,
+    depthSlice    = NEBULA_DEPTH_SLICE_ALL,
     resolveTarget = nilptr,
     loadOp        = WGPULoadOp_Clear,
     storeOp       = WGPUStoreOp_Store,
@@ -494,7 +494,7 @@ global function nebula_frame_render_multipass(
 ## else
   local clear_color = WGPURenderPassColorAttachment{
     view          = view,
-    depthSlice    = 0xFFFFFFFF,
+    depthSlice    = NEBULA_DEPTH_SLICE_ALL,
     resolveTarget = nilptr,
     loadOp        = WGPULoadOp_Clear,
     storeOp       = WGPUStoreOp_Store,
