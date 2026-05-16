@@ -40,9 +40,9 @@
 | P1-1 | God Module | `nebula_core.nelua` (2375行) | 类型系统、注解注册表、WGSL 生成、管线分发、交互分发、状态机生成、全部 sugar API 混在一个文件。 | 拆分为 `nebula_types.nelua`（类型+枚举）、`nebula_derive.nelua`（派生引擎）、`nebula_sugar.nelua`（sugar API）、`nebula_registry.nelua`（注册表）。 |
 | P1-2 | 编辑器逻辑侵入框架（违反 Axiom B） | `app.nelua` L551-689 | ~140 行编辑器专属代码（搜索/替换状态、文件路径、修改标记、`nebula_editor_update_title` 等）定义在框架层。非编辑器应用被迫携带。 | 提取为 `nebula_editor.nelua` 模块，通过 `require` 按需引入。框架层仅保留 input 收集和 frame render。 |
 | P1-3 | wgpu 绑定 48 处条件编译 | `wgpu_bindings.nelua` (1121行) | native/WASM 结构体大量重复定义。`WGPUShaderStage` 类型宽度不同（uint64 vs uint32），布局错误难以发现。 | 拆分为 `wgpu_types_shared.nelua` + `wgpu_types_native.nelua` + `wgpu_types_wasm.nelua`。共享类型定义一次，平台差异隔离到专属文件。 |
-| P1-4 | 管线类型无扩展点 | `pipeline_factory.lua` L1148-1198 | 硬编码 if/elseif/else 分发 5 种管线。新增管线需改 4 个文件（shader_compose + pipeline_factory + app_factory + axiom_validator）。 | 引入 `NEBULA_PIPELINES` 注册表（对标已有的 `NEBULA_PRIMITIVES`），数据驱动分发。每种管线注册自己的 init/draw/deinit/shader 生成器。 |
-| P1-5 | app_factory 线性膨胀 | `app_factory.lua` | 6 种组件类别 × 5 个 gen_app_* 函数。每新增一种类别需修改 5 个函数。 | 抽象 `ComponentCategory` 接口（包含 record_fields / init_code / update_code / draw_code / deinit_code 生成器），gen_app_* 遍历注册的 category 列表。 |
-| P1-6 | WGPU 句柄类型擦除 | `wgpu_bindings.nelua` L23-39 | 17 种 GPU 句柄全部 alias 到 `@pointer`，传错类型编译不报错。 | 改为 `global WGPUBuffer = @record{ _handle: pointer }` 模式，零运行时开销但获得编译期类型安全。 |
+| P1-4 | ✅ 管线类型无扩展点 | `pipeline_factory.lua` | `NEBULA_PIPELINES` 注册表 + `nebula_register_pipeline()` 公开 API，数据驱动分发。新增管线仅需 1 行注册。 | ✅ 已完成 |
+| P1-5 | ✅ app_factory 线性膨胀 | `app_factory.lua` | `NEBULA_CATEGORIES` 注册表 + `nebula_register_category()` 公开 API，gen_app_* 遍历注册 category。新增组件类别仅需注册 hooks。 | ✅ 已完成 |
+| P1-6 | Deferred: WGPU 句柄类型擦除 | `wgpu_bindings_shared.nelua` L22-39 | 18 种 GPU 句柄全部 alias 到 `@pointer`。`<cimport, nodecl>` 约束下改为 `@record{_handle: pointer}` 会破坏 C FFI ABI。 | 需本地 Nelua 编译验证可行性后再实施。 |
 | P1-7 | 每帧仅消费一个按键 | `app.nelua` L180-186 | char queue 全量消费，但 key queue 每帧只弹出一个。高重复率按键场景下输入滞后。 | 改为 key queue 也全量消费，将 `key_pressed` 改为 `key_queue_snapshot: [N]NebulaKey` + `key_count`，或循环处理直到队列空。 |
 | P1-8 | Surface 重配置代码重复 | `app.nelua` L317-337 / L433-454 | `nebula_frame_render` 与 `nebula_frame_render_multipass` 中 surface resize + config 逻辑完全相同（~20 行）。 | 提取为 `_nebula_reconfigure_surface(renderer, width, height)` 共享函数。 |
 | P1-9 | multiline_editable 420 行单体函数 | `interaction_factory.lua` L433-852 | cursor 移动逻辑 8 方向 × 2（plain + shift）= 16 段近似代码。`_emit_ml_cursor_move` helper 存在但为死代码。 | 复用 `_emit_ml_cursor_move`，通过参数控制是否更新 sel_anchor。删除死代码。 |
@@ -120,12 +120,12 @@
 
 | 任务 | 来源 | 描述 | 验收标准 |
 |:-----|:-----|:-----|:---------|
-| T3.1 管线注册表 | P1-4 | `NEBULA_PIPELINES` 数据驱动分发，对标 `NEBULA_PRIMITIVES` | 新增一种管线类型仅需 1 个文件 + 1 行注册 |
-| T3.2 ComponentCategory 抽象 | P1-5 | gen_app_* 改为遍历注册 category | 新增组件类别仅需实现接口，无需改 gen_app_* |
-| T3.3 WGPU 句柄类型安全 | P1-6 | 17 种句柄改为 distinct record | 传错类型编译报错 |
-| T3.4 Key queue 全量消费 | P1-7 | key queue 改为 per-frame batch | 高重复率按键无滞后 |
-| T3.5 Surface 重配置提取 | P1-8 | 共享 helper 函数 | 代码重复消除 |
-| T3.6 multiline cursor 重构 | P1-9 | 复用 `_emit_ml_cursor_move`，删除死代码 | interaction_factory 减 ~100 行 |
+| T3.1 管线注册表 | P1-4 | ✅ `NEBULA_PIPELINES` 数据驱动分发 + `nebula_register_pipeline()` 公开 API | 新增一种管线类型仅需 1 行注册，无需修改分发逻辑 |
+| T3.2 ComponentCategory 抽象 | P1-5 | ✅ `NEBULA_CATEGORIES` 注册表 + `nebula_register_category()` 公开 API | 新增组件类别仅需注册 emit_record/init/update/draw/deinit hooks |
+| T3.3 WGPU 句柄类型安全 | P1-6 | Deferred | `<cimport, nodecl>` 约束下改为 distinct record 会破坏 C FFI 兼容性，需本地编译验证 |
+| T3.4 Key queue 全量消费 | P1-7 | ✅ key queue 改为 per-frame batch | 高重复率按键无滞后 (PR #21) |
+| T3.5 Surface 重配置提取 | P1-8 | ✅ 共享 helper 函数 | 代码重复消除 (PR #20) |
+| T3.6 multiline cursor 重构 | P1-9 | ✅ 复用 `_emit_ml_cursor_move`，删除死代码 | interaction_factory 减 ~100 行 (PR #20) |
 
 **验收**：77/77 回归全绿 + 新增管线/组件的 demo 验证
 

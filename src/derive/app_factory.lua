@@ -1,8 +1,12 @@
 -- =============================================================================
--- derive/app_factory.lua — Nebula GUI Compiler Phase 4.8-NL
+-- derive/app_factory.lua — Nebula GUI Compiler Phase 4.8-NL / P1-5
 --
 -- 编译期显式编排工厂（App Factory）
 -- 生成 <App> record + init + update + draw
+--
+-- ★ P1-5: 组件类别抽象（NEBULA_CATEGORIES 注册表）
+-- 新增组件类别仅需调用 nebula_register_category() 注册，
+-- 无需修改 gen_app_record/init/update/draw/deinit 等 5 个函数。
 --
 -- ★ Phase 3.8 新增：Arena 内嵌，nebula_frame_render 封装
 -- ★ Phase 3.9 新增：
@@ -518,12 +522,571 @@ function nebula_app_end()
 end
 
 -- =============================================================================
+-- ★ P1-5: 组件类别抽象（NEBULA_CATEGORIES）
+--
+-- 数据驱动的组件类别系统。每个类别注册 6 个可选 hook：
+--   emit_record(reg, emit)        — 生成 App record 中该类别的字段
+--   emit_init(reg, emit)          — 生成 App:init 中该类别的初始化代码
+--   emit_update(reg, emit)        — 生成 App:update 中该类别的更新逻辑
+--   emit_draw(reg, emit)          — 生成 App:draw 中该类别的绘制代码
+--   emit_deinit(reg, emit)        — 生成 App:deinit 中该类别的资源释放
+--   emit_pre_pass(reg, emit)      — 生成离屏预渲染 Pass（仅阴影类别使用）
+--   emit_surface_pass(reg, emit)  — 生成 Surface Pass 合成（仅阴影类别使用）
+--
+-- 新增组件类别仅需调用 nebula_register_category() 注册，
+-- 无需修改 gen_app_record/init/update/draw/deinit 等 5 个函数。
+-- =============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 类别 1: standard（静态组件 + 动态插槽，共享 type_groups 管线）
+-- ---------------------------------------------------------------------------
+local function _emit_record_standard(reg, emit)
+  emit("  -- 组件 Context")
+  for _, comp in ipairs(reg.components) do
+    emit(("  %s: %sContext,"):format(comp.name, comp.base))
+  end
+  emit("")
+  emit("  -- 共享 Pipeline（每种 Visual 类型一个）")
+  local emitted_pipes = {}
+  for vt, group in pairs(reg.type_groups) do
+    if not emitted_pipes[group.pipeline_name] then
+      emit(("  pipe_%s: %s,"):format(group.base:lower(), group.pipeline_name))
+      emitted_pipes[group.pipeline_name] = true
+    end
+  end
+end
+
+local function _emit_init_standard(reg, emit)
+  emit("  -- 初始化所有 Pipeline")
+  local inited_pipes = {}
+  for vt, group in pairs(reg.type_groups) do
+    if not inited_pipes[group.pipeline_name] then
+      local max_inst = 0
+      for _, m in ipairs(group.members) do
+        if not m.is_slot then max_inst = max_inst + 1 end
+      end
+      for _, slot in ipairs(reg.slots) do
+        if slot.visual_type == vt then
+          max_inst = max_inst + slot.max_instances
+        end
+      end
+      if max_inst == 0 then max_inst = 1 end
+      emit(("  if not self.pipe_%s:init(renderer, %d) then return false end"):format(
+        group.base:lower(), max_inst))
+      emit(("  self.pipe_%s:update_viewport(renderer, vw, vh)"):format(group.base:lower()))
+      inited_pipes[group.pipeline_name] = true
+    end
+  end
+end
+
+local function _emit_update_standard(reg, emit)
+  emit("  -- 按注册顺序显式更新所有静态组件")
+  for _, comp in ipairs(reg.components) do
+    emit(("  self.%s:update(input, dt)"):format(comp.name))
+  end
+end
+
+local function _emit_draw_standard(reg, emit)
+  -- 按注册顺序遍历 type_groups
+  local ordered_types = {}
+  local seen_types = {}
+  for _, comp in ipairs(reg.components) do
+    if not seen_types[comp.visual_type] then
+      table.insert(ordered_types, comp.visual_type)
+      seen_types[comp.visual_type] = true
+    end
+  end
+  for _, slot in ipairs(reg.slots) do
+    if not seen_types[slot.visual_type] then
+      table.insert(ordered_types, slot.visual_type)
+      seen_types[slot.visual_type] = true
+    end
+  end
+
+  for _, vt in ipairs(ordered_types) do
+    local group = reg.type_groups[vt]
+    if not group then goto continue end
+
+    local static_members = {}
+    for _, m in ipairs(group.members) do
+      if not m.is_slot then table.insert(static_members, m.name) end
+    end
+
+    local slot_members = {}
+    for _, slot in ipairs(reg.slots) do
+      if slot.visual_type == vt then table.insert(slot_members, slot) end
+    end
+
+    local max_inst = #static_members
+    for _, slot in ipairs(slot_members) do
+      max_inst = max_inst + slot.max_instances
+    end
+    if max_inst == 0 then goto continue end
+
+    local uniforms_record = group.base .. "Uniforms"
+    local pipe_var = "self.pipe_" .. group.base:lower()
+
+    local STACK_BATCH_LIMIT = 128
+
+    emit(("  -- 批量绘制 %s（%d 静态 + %d 动态插槽）"):format(
+      vt, #static_members, #slot_members))
+    emit("  do")
+    if max_inst > STACK_BATCH_LIMIT then
+      emit(("    -- MEM-3: max_inst=%d 超过栈安全阈值 %d，使用分批模式"):format(max_inst, STACK_BATCH_LIMIT))
+      emit(("    local _batch: [%d]%s"):format(STACK_BATCH_LIMIT, uniforms_record))
+    else
+      emit(("    local _batch: [%d]%s"):format(max_inst, uniforms_record))
+    end
+    emit("    local _count: uint32 = 0")
+
+    for _, name in ipairs(static_members) do
+      emit(("    _batch[_count] = self.%s:to_uniforms(self.vw, self.vh)"):format(name))
+      emit("    _count = _count + 1")
+    end
+
+    for _, slot in ipairs(slot_members) do
+      if slot.producer then
+        emit(("    -- ★ Phase 3.9: 动态插槽 %s（Producer: %s）"):format(slot.name, slot.producer))
+        emit("    do")
+        emit("      local _mark = nebula_arena_mark(&self.arena)")
+        emit(("      local _slot_raw = nebula_arena_alloc_array(&self.arena, %d, #%s, 8)"):format(
+          slot.max_instances, uniforms_record))
+        emit("      if _slot_raw ~= nilptr then")
+        emit(("        local _slot_data = (@*[0]%s)(_slot_raw)"):format(uniforms_record))
+        emit("        local _slot_count: uint32 = 0")
+        emit(("        %s(&self.arena, _slot_data, &_slot_count, %d)"):format(
+          slot.producer, slot.max_instances))
+        -- ★ Phase 5.0: slot layout auto-position
+        if slot.layout then
+          local lo = slot.layout
+          local dir = lo.direction or "column"
+          local gap = lo.gap or 0
+          local pad = lo.padding or 0
+          local pad_x, pad_y
+          if type(pad) == "table" then
+            pad_x = pad.left or pad[2] or 0
+            pad_y = pad.top  or pad[1] or 0
+          else
+            pad_x = pad
+            pad_y = pad
+          end
+          local iw = lo.item_size and lo.item_size.w or 100
+          local ih = lo.item_size and lo.item_size.h or 40
+          local stride = dir == "column" and (ih + gap) or (iw + gap)
+          local scroll_expr = lo.scroll_var or "0.0"
+          emit(("        -- ★ Phase 5.0: slot layout (dir=%s, gap=%g, stride=%g)"):format(dir, gap, stride))
+          emit("        do")
+          emit("          local _li: uint32 = 0")
+          emit("          while _li < _slot_count do")
+          if dir == "column" then
+            emit(("            _slot_data[_li].pos = Vec2{ x = %.1f, y = %.1f + (@float32)(_li) * %.1f - %s }"):format(
+              pad_x, pad_y, stride, scroll_expr))
+          else
+            emit(("            _slot_data[_li].pos = Vec2{ x = %.1f + (@float32)(_li) * %.1f - %s, y = %.1f }"):format(
+              pad_x, stride, scroll_expr, pad_y))
+          end
+          emit(("            _slot_data[_li].size = Vec2{ x = %.1f, y = %.1f }"):format(iw, ih))
+          emit("            _li = _li + 1")
+          emit("          end")
+          emit("        end")
+        end
+        emit(("        local _si: uint32 = 0"):format())
+        emit(("        while _si < _slot_count and _count < %d do"):format(max_inst))
+        emit("          _batch[_count] = _slot_data[_si]")
+        emit("          _count = _count + 1")
+        emit("          _si = _si + 1")
+        emit("        end")
+        emit("      end")
+        emit("      nebula_arena_rewind(&self.arena, _mark)")
+        emit("    end")
+      elseif slot.legacy_count_var and slot.legacy_data_var then
+        emit(("    -- [legacy] 动态插槽 %s（外部变量: %s/%s）"):format(
+          slot.name, slot.legacy_count_var, slot.legacy_data_var))
+        emit("    local _si: uint32 = 0")
+        emit(("    while _si < %s and _count < %d do"):format(slot.legacy_count_var, max_inst))
+        emit(("      _batch[_count] = %s[_si]"):format(slot.legacy_data_var))
+        emit("      _count = _count + 1")
+        emit("      _si = _si + 1")
+        emit("    end")
+      end
+    end
+
+    emit("    if _count > 0 then")
+    emit(("      %s:upload(self.renderer, &_batch[0], _count)"):format(pipe_var))
+    emit(("      %s:draw_instanced(pass, _count)"):format(pipe_var))
+    emit("    end")
+    emit("  end")
+
+    ::continue::
+  end
+end
+
+local function _emit_deinit_standard(reg, emit)
+  local deinited_pipes = {}
+  for _, group in pairs(reg.type_groups) do
+    if not deinited_pipes[group.pipeline_name] then
+      emit(("  self.pipe_%s:deinit()"):format(group.base:lower()))
+      deinited_pipes[group.pipeline_name] = true
+    end
+  end
+end
+
+-- ---------------------------------------------------------------------------
+-- 类别 2: texts（文本组件，SDF + Slug 管线）
+-- ---------------------------------------------------------------------------
+local function _emit_record_texts(reg, emit)
+  if #reg.texts == 0 then return end
+  emit("")
+  emit("  -- ★ Phase 3.9 / Phase 4.1: 文本组件 Context（一等公民）")
+  local has_sdf_txt  = false
+  local has_slug_txt = false
+  for _, txt in ipairs(reg.texts) do
+    if txt.text_mode == "slug" then has_slug_txt = true
+    else has_sdf_txt = true end
+  end
+  if has_sdf_txt  then emit("  pipe_text: TextPipeline,") end
+  if has_slug_txt then emit("  pipe_slug_text: SlugTextPipeline,") end
+  for _, txt in ipairs(reg.texts) do
+    emit(("  %s: %sContext,"):format(txt.name, txt.base))
+  end
+end
+
+local function _emit_init_texts(reg, emit)
+  if #reg.texts == 0 then return end
+  local has_sdf_init  = false
+  local has_slug_init = false
+  for _, txt in ipairs(reg.texts) do
+    if txt.text_mode == "slug" then has_slug_init = true
+    else has_sdf_init = true end
+  end
+  emit("")
+  emit("  -- ★ Phase 3.9 / Phase 4.1: 初始化文本管线")
+  if has_sdf_init then
+    emit("  if not self.pipe_text:init(renderer) then return false end")
+  end
+  if has_slug_init then
+    emit("  if not self.pipe_slug_text:init(renderer) then return false end")
+    emit("  -- ★ Phase 4.1: 上传 Slug Storage Buffer（编译期常量数组）")
+    emit("  do")
+    emit("    local _curves_sz = (@csize)(NEBULA_SLUG_TOTAL_CURVES * #NebulaSlugCurve)")
+    emit("    local _metas_sz  = (@csize)(NEBULA_SLUG_TOTAL_BAND_METAS * #NebulaSlugBandMeta)")
+    emit("    local _refs_sz   = (@csize)(NEBULA_SLUG_TOTAL_BAND_REFS * #uint16)")
+    emit("    if not self.pipe_slug_text:upload_slug_buffers(renderer,")
+    emit("      &NEBULA_SLUG_CURVES[0], _curves_sz,")
+    emit("      &NEBULA_SLUG_BAND_METAS[0], _metas_sz,")
+    emit("      &NEBULA_SLUG_BAND_REFS[0], _refs_sz) then return false end")
+    emit("    if not self.pipe_slug_text:update_slug_bind_group(renderer) then return false end")
+    emit("  end")
+  end
+end
+
+local function _emit_update_texts(reg, emit)
+  if #reg.texts == 0 then return end
+  emit("")
+  emit("  -- ★ Phase 3.9 / Phase 3.10.5: 文本组件联动（一等公民）")
+  for _, txt in ipairs(reg.texts) do
+    local mode = txt.mode or "bound"
+    if mode == "bound" then
+      emit(("  -- [bound] %s 绑定到 %s（placeholder: \"%s\", mask: %s）"):format(
+        txt.name, txt.bound_to, txt.placeholder, tostring(txt.mask_password)))
+      emit(("  if self.%s:process_text_input(input) then"):format(txt.bound_to))
+      emit(("    if self.%s:get_text_len() > 0 then"):format(txt.bound_to))
+      emit(("      local _%s_buf: [256]uint8"):format(txt.name))
+      emit(("      local _%s_raw = self.%s:get_text(&_%s_buf[0], 255)"):format(
+        txt.name, txt.bound_to, txt.name))
+      if txt.mask_password then
+        emit(("      local _%s_len = self.%s:get_text_len()"):format(txt.name, txt.bound_to))
+        emit(("      if _%s_len > 255 then _%s_len = 255 end"):format(txt.name, txt.name))
+        emit(("      local _%s_mask: [256]uint8"):format(txt.name))
+        emit(("      local _%s_mi: uint16 = 0"):format(txt.name))
+        emit(("      while _%s_mi < _%s_len do"):format(txt.name, txt.name))
+        emit(("        _%s_mask[_%s_mi] = 0x2A"):format(txt.name, txt.name))
+        emit(("        _%s_mi = _%s_mi + 1"):format(txt.name, txt.name))
+        emit("      end")
+        emit(("      _%s_mask[_%s_len] = 0"):format(txt.name, txt.name))
+        emit(("      self.%s:set_text(self.renderer, (@cstring)(&_%s_mask[0]))"):format(
+          txt.name, txt.name))
+      else
+        emit(("      self.%s:set_text(self.renderer, _%s_raw)"):format(txt.name, txt.name))
+      end
+      emit("    else")
+      if txt.placeholder ~= "" then
+        emit(("      self.%s:set_text(self.renderer, \"%s\")"):format(txt.name, txt.placeholder))
+      else
+        emit(("      self.%s:set_text(self.renderer, \"\")"):format(txt.name))
+      end
+      emit("    end")
+      emit("  end")
+    elseif mode == "dynamic" then
+      emit(("  -- [dynamic] %s 通过 %s 每帧更新"):format(txt.name, txt.updater))
+      emit("  do")
+      emit(("    local _%s_mark = nebula_arena_mark(&self.arena)"):format(txt.name))
+      emit(("    local _%s_str = %s(&self.arena)"):format(txt.name, txt.updater))
+      emit(("    if _%s_str ~= nilptr then"):format(txt.name))
+      emit(("      self.%s:set_text(self.renderer, _%s_str)"):format(txt.name, txt.name))
+      emit("    end")
+      emit(("    nebula_arena_rewind(&self.arena, _%s_mark)"):format(txt.name))
+      emit("  end")
+    end
+    if mode == "static" then
+      emit(("  -- [static] %s: 静态文本，由用户在 App:init 后手动调用 set_text 初始化"):format(txt.name))
+    end
+  end
+end
+
+local function _emit_draw_texts(reg, emit)
+  if #reg.texts == 0 then return end
+  emit("")
+  emit("  -- ★ Phase 3.9 / Phase 4.1: 文本渲染（一等公民，最后绘制）")
+  for _, txt in ipairs(reg.texts) do
+    emit(("  if self.%s.mesh.vertex_count > 0 then"):format(txt.name))
+    if txt.text_mode == "slug" then
+      emit(("    -- ★ Phase 4.1: Slug 渲染 %s"):format(txt.name))
+      emit("    if self.pipe_slug_text:upload_vertices(self.renderer,")
+      emit(("      self.%s.mesh.vertex_buffer, self.%s.mesh.vertex_buffer_size,"):format(txt.name, txt.name))
+      emit(("      self.%s.mesh.vertex_count) then"):format(txt.name))
+      emit("      self.pipe_slug_text:draw(pass)")
+      emit("    end")
+    else
+      emit(("    self.pipe_text:draw_buffer(pass,"))
+      emit(("      self.%s.mesh.vertex_buffer,"):format(txt.name))
+      emit(("      self.%s.mesh.vertex_buffer_size,"):format(txt.name))
+      emit(("      self.%s.mesh.vertex_count)"):format(txt.name))
+    end
+    emit("  end")
+  end
+end
+
+local function _emit_deinit_texts(reg, emit)
+  if #reg.texts == 0 then return end
+  local has_sdf_txt  = false
+  local has_slug_txt = false
+  for _, txt in ipairs(reg.texts) do
+    local mode = txt.text_mode or "sdf"
+    if mode == "sdf" then has_sdf_txt = true end
+    if mode == "slug" then has_slug_txt = true end
+  end
+  if has_sdf_txt  then emit("  self.pipe_text:deinit()") end
+  if has_slug_txt then emit("  self.pipe_slug_text:deinit()") end
+  for _, txt in ipairs(reg.texts) do
+    local mode = txt.text_mode or "sdf"
+    if mode == "sdf" then
+      emit(("  if self.%s.mesh.vertex_buffer ~= nilptr then wgpuBufferRelease(self.%s.mesh.vertex_buffer) end"):format(txt.name, txt.name))
+    end
+  end
+end
+
+-- ---------------------------------------------------------------------------
+-- 类别 3: shadows（阴影组件，多 Pass 管线）
+-- ---------------------------------------------------------------------------
+local function _emit_record_shadows(reg, emit)
+  if #reg.shadows == 0 then return end
+  emit("")
+  emit("  -- ★ Phase 3.10.5: 阴影组件 Context + 多 Pass 管线")
+  for _, shd in ipairs(reg.shadows) do
+    emit(("  %s: %sContext,"):format(shd.name, shd.base))
+    emit(("  pipe_%s: %sPipeline,"):format(shd.base:lower(), shd.base))
+  end
+end
+
+local function _emit_init_shadows(reg, emit)
+  if #reg.shadows == 0 then return end
+  emit("")
+  emit("  -- ★ Phase 3.10.5: 初始化阴影管线（多 Pass）")
+  for _, shd in ipairs(reg.shadows) do
+    emit(("  if not self.pipe_%s:init(renderer, %d, %d) then return false end"):format(
+      shd.base:lower(), shd.win_w, shd.win_h))
+  end
+end
+
+local function _emit_deinit_shadows(reg, emit)
+  if #reg.shadows == 0 then return end
+  for _, shd in ipairs(reg.shadows) do
+    emit(("  self.pipe_%s:deinit()"):format(shd.base:lower()))
+  end
+end
+
+local function _emit_pre_pass_shadows(reg, emit)
+  if #reg.shadows == 0 then return end
+  emit("  -- ★ Phase 3.10.5: 阴影组件离屏 Pass（每个阴影组件执行 3 个离屏 Pass）")
+  for _, shd in ipairs(reg.shadows) do
+    local u_expr = ("self.%s:to_uniforms(self.vw, self.vh)"):format(shd.name)
+    emit(("  -- [shadow] %s: 更新 uniforms 并执行阴影离屏渲染"):format(shd.name))
+    emit("  do")
+    emit(("    local _u = %s"):format(u_expr))
+    emit(("    self.pipe_%s:update_uniforms(renderer, &_u)"):format(shd.base:lower()))
+    emit(("    self.pipe_%s:draw_shadow(encoder, renderer, %.1f)"):format(shd.base:lower(), shd.blur_radius))
+    emit("  end")
+  end
+end
+
+local function _emit_surface_pass_shadows(reg, emit)
+  if #reg.shadows == 0 then return end
+  emit("  -- ★ Phase 3.10.5: 阴影合成层（先合成模糊阴影，再绘制主体）")
+  for _, shd in ipairs(reg.shadows) do
+    emit(("  -- [shadow] %s: 先合成阴影，再绘制主体"):format(shd.name))
+    emit(("  self.pipe_%s:draw_composite(pass)"):format(shd.base:lower()))
+    emit(("  self.pipe_%s:draw(pass)"):format(shd.base:lower()))
+  end
+end
+
+-- ---------------------------------------------------------------------------
+-- 类别 4: dense_texts（高密度文本组件，DenseText 管线）
+-- ---------------------------------------------------------------------------
+local function _emit_record_dense_texts(reg, emit)
+  if #reg.dense_texts == 0 then return end
+  emit("")
+  emit("  -- ★ Phase 4.7-S2: DenseText 管线（高密度文本渲染）")
+  emit("  _dense_font: NebulaAsciiFontAtlas,")
+  for _, dt in ipairs(reg.dense_texts) do
+    emit(("  pipe_dense_%s: %sDenseTextPipeline,"):format(dt.name, dt.base))
+    emit(("  _dense_%s_buf: [%d]DenseCharInstance,"):format(dt.name, dt.max_chars))
+  end
+  local has_layout = false
+  for _, dt in ipairs(reg.dense_texts) do
+    if dt.layout then has_layout = true; break end
+  end
+  if has_layout then
+    emit("  -- ★ Phase 4.7-S3: DenseText 布局坐标（供 Producer 定位）")
+    for _, dt in ipairs(reg.dense_texts) do
+      if dt.layout then
+        emit(("  dense_layout_%s_x: float32,"):format(dt.name))
+        emit(("  dense_layout_%s_y: float32,"):format(dt.name))
+        emit(("  dense_layout_%s_w: float32,"):format(dt.name))
+        emit(("  dense_layout_%s_h: float32,"):format(dt.name))
+      end
+    end
+  end
+end
+
+local function _emit_init_dense_texts(reg, emit)
+  if #reg.dense_texts == 0 then return end
+  emit("")
+  emit("  -- ★ Phase 4.7-S2: 初始化 DenseText 管线（高密度文本渲染）")
+  emit("  if not nebula_text_load_ascii_font(&self._dense_font, renderer) then return false end")
+  for _, dt in ipairs(reg.dense_texts) do
+    emit(("  if not self.pipe_dense_%s:init(renderer, %d) then return false end"):format(
+      dt.name, dt.max_chars))
+    emit(("  if not self.pipe_dense_%s:update_atlas(renderer, self._dense_font.view, self._dense_font.sampler) then return false end"):format(
+      dt.name))
+    emit(("  self.pipe_dense_%s:update_viewport(renderer, vw, vh, %.1f, %.1f)"):format(
+      dt.name, dt.cell_w, dt.cell_h))
+  end
+  if reg.layout_results then
+    for _, dt in ipairs(reg.dense_texts) do
+      local r = reg.layout_results[dt.name]
+      if r then
+        emit(("  -- ★ Phase 4.7-S3: [layout] %s: pos=(%.1f, %.1f) size=(%.1f x %.1f)"):format(
+          dt.name, r.x, r.y, r.w, r.h))
+        emit(("  self.dense_layout_%s_x = %.1f"):format(dt.name, r.x))
+        emit(("  self.dense_layout_%s_y = %.1f"):format(dt.name, r.y))
+        emit(("  self.dense_layout_%s_w = %.1f"):format(dt.name, r.w))
+        emit(("  self.dense_layout_%s_h = %.1f"):format(dt.name, r.h))
+      end
+    end
+  end
+end
+
+local function _emit_draw_dense_texts(reg, emit)
+  if #reg.dense_texts == 0 then return end
+  emit("")
+  emit("  -- ★ Phase 4.7-S2: DenseText 管线绘制（Producer → upload → draw）")
+  for _, dt in ipairs(reg.dense_texts) do
+    emit("  do")
+    emit("    local _dt_count: uint32 = 0")
+    emit(("    %s(self, &self._dense_%s_buf[0], &_dt_count, %d)"):format(
+      dt.producer, dt.name, dt.max_chars))
+    emit("    if _dt_count > 0 then")
+    emit(("      self.pipe_dense_%s:upload(self.renderer, &self._dense_%s_buf[0], _dt_count)"):format(
+      dt.name, dt.name))
+    emit(("      self.pipe_dense_%s:draw(pass, _dt_count)"):format(dt.name))
+    emit("    end")
+    emit("  end")
+  end
+end
+
+local function _emit_deinit_dense_texts(reg, emit)
+  if #reg.dense_texts == 0 then return end
+  emit("")
+  emit("  -- ★ Phase 4.7-S2: 释放 DenseText 管线")
+  for _, dt in ipairs(reg.dense_texts) do
+    emit(("  self.pipe_dense_%s:deinit()"):format(dt.name))
+  end
+end
+
+-- ---------------------------------------------------------------------------
+-- NEBULA_CATEGORIES 注册表
+-- ---------------------------------------------------------------------------
+NEBULA_CATEGORIES = {
+  {
+    name         = "standard",
+    order        = 10,
+    emit_record  = _emit_record_standard,
+    emit_init    = _emit_init_standard,
+    emit_update  = _emit_update_standard,
+    emit_draw    = _emit_draw_standard,
+    emit_deinit  = _emit_deinit_standard,
+  },
+  {
+    name           = "texts",
+    order          = 20,
+    emit_record    = _emit_record_texts,
+    emit_init      = _emit_init_texts,
+    emit_update    = _emit_update_texts,
+    emit_draw      = _emit_draw_texts,
+    emit_deinit    = _emit_deinit_texts,
+  },
+  {
+    name              = "shadows",
+    order             = 30,
+    emit_record       = _emit_record_shadows,
+    emit_init         = _emit_init_shadows,
+    emit_deinit       = _emit_deinit_shadows,
+    emit_pre_pass     = _emit_pre_pass_shadows,
+    emit_surface_pass = _emit_surface_pass_shadows,
+  },
+  {
+    name         = "dense_texts",
+    order        = 40,
+    emit_record  = _emit_record_dense_texts,
+    emit_init    = _emit_init_dense_texts,
+    emit_draw    = _emit_draw_dense_texts,
+    emit_deinit  = _emit_deinit_dense_texts,
+  },
+}
+
+-- 按 order 排序（确保新注册的类别插入正确位置）
+table.sort(NEBULA_CATEGORIES, function(a, b) return a.order < b.order end)
+
+-- 公开 API：注册自定义组件类别
+function nebula_register_category(opts)
+  assert(type(opts) == "table", "nebula_register_category: opts must be a table")
+  assert(opts.name, "nebula_register_category: name required")
+  -- 检查重名
+  for _, cat in ipairs(NEBULA_CATEGORIES) do
+    assert(cat.name ~= opts.name,
+      ("nebula_register_category: category '%s' already registered"):format(opts.name))
+  end
+  table.insert(NEBULA_CATEGORIES, {
+    name           = opts.name,
+    order          = opts.order or 100,
+    emit_record    = opts.emit_record,
+    emit_init      = opts.emit_init,
+    emit_update    = opts.emit_update,
+    emit_draw      = opts.emit_draw,
+    emit_deinit    = opts.emit_deinit,
+    emit_pre_pass     = opts.emit_pre_pass,
+    emit_surface_pass = opts.emit_surface_pass,
+  })
+  table.sort(NEBULA_CATEGORIES, function(a, b) return a.order < b.order end)
+end
+
+-- =============================================================================
 -- 代码生成：nebula_derive_app(app_name)
 -- =============================================================================
 
 -- 生成 <App> record
--- ★ Phase 3.8: 注入 arena + _arena_backing
--- ★ Phase 3.9: 注入 TextContext 字段（文本一等公民）
+-- ★ P1-5: 通过 NEBULA_CATEGORIES 注册表驱动
 local function gen_app_record(app_name, reg)
   local L = {}
   local function emit(s) table.insert(L, s) end
@@ -534,73 +1097,10 @@ local function gen_app_record(app_name, reg)
   emit("  vw: float32,")
   emit("  vh: float32,")
   emit("")
-  emit("  -- 组件 Context")
-  for _, comp in ipairs(reg.components) do
-    emit(("  %s: %sContext,"):format(comp.name, comp.base))
-  end
 
-  -- ★ Phase 3.9 / Phase 4.1: 注入 TextContext 字段
-  if #reg.texts > 0 then
-    emit("")
-    emit("  -- ★ Phase 3.9 / Phase 4.1: 文本组件 Context（一等公民）")
-    -- ★ Phase 4.1: 根据 text_mode 选择管线类型
-    local has_sdf_txt  = false
-    local has_slug_txt = false
-    for _, txt in ipairs(reg.texts) do
-      if txt.text_mode == "slug" then has_slug_txt = true
-      else has_sdf_txt = true end
-    end
-    if has_sdf_txt  then emit("  pipe_text: TextPipeline,") end
-    if has_slug_txt then emit("  pipe_slug_text: SlugTextPipeline,") end
-    for _, txt in ipairs(reg.texts) do
-      emit(("  %s: %sContext,"):format(txt.name, txt.base))
-    end
-  end
-
-  emit("")
-  emit("  -- 共享 Pipeline（每种 Visual 类型一个）")
-  local emitted_pipes = {}
-  for vt, group in pairs(reg.type_groups) do
-    if not emitted_pipes[group.pipeline_name] then
-      emit(("  pipe_%s: %s,"):format(group.base:lower(), group.pipeline_name))
-      emitted_pipes[group.pipeline_name] = true
-    end
-  end
-  -- ★ Phase 3.10.5: 注入阴影组件的 Context + Pipeline
-  if #reg.shadows > 0 then
-    emit("")
-    emit("  -- ★ Phase 3.10.5: 阴影组件 Context + 多 Pass 管线")
-    for _, shd in ipairs(reg.shadows) do
-      emit(("  %s: %sContext,"):format(shd.name, shd.base))
-      emit(("  pipe_%s: %sPipeline,"):format(shd.base:lower(), shd.base))
-    end
-  end
-
-  -- ★ Phase 4.7-S2: 注入 DenseText 管线 + SDF 字体 + Instance 缓冲区
-  if #reg.dense_texts > 0 then
-    emit("")
-    emit("  -- ★ Phase 4.7-S2: DenseText 管线（高密度文本渲染）")
-    emit("  _dense_font: NebulaAsciiFontAtlas,")
-    for _, dt in ipairs(reg.dense_texts) do
-      emit(("  pipe_dense_%s: %sDenseTextPipeline,"):format(dt.name, dt.base))
-      emit(("  _dense_%s_buf: [%d]DenseCharInstance,"):format(dt.name, dt.max_chars))
-    end
-    -- ★ Phase 4.7-S3: 布局坐标字段（供 Producer 读取位置信息）
-    local has_layout = false
-    for _, dt in ipairs(reg.dense_texts) do
-      if dt.layout then has_layout = true; break end
-    end
-    if has_layout then
-      emit("  -- ★ Phase 4.7-S3: DenseText 布局坐标（供 Producer 定位）")
-      for _, dt in ipairs(reg.dense_texts) do
-        if dt.layout then
-          emit(("  dense_layout_%s_x: float32,"):format(dt.name))
-          emit(("  dense_layout_%s_y: float32,"):format(dt.name))
-          emit(("  dense_layout_%s_w: float32,"):format(dt.name))
-          emit(("  dense_layout_%s_h: float32,"):format(dt.name))
-        end
-      end
-    end
+  -- ★ P1-5: 遍历所有已注册类别，生成该类别的 record 字段
+  for _, cat in ipairs(NEBULA_CATEGORIES) do
+    if cat.emit_record then cat.emit_record(reg, emit) end
   end
 
   emit("")
@@ -625,9 +1125,7 @@ local function gen_app_record(app_name, reg)
 end
 
 -- 生成 <App>:init
--- ★ Phase 3.8: 注入 nebula_arena_init
--- ★ Phase 3.9: 注入 TextPipeline:init（文本一等公民）
--- ★ Phase 3.11: 注入编译期布局坐标（消除手写魔法数字）
+-- ★ P1-5: 通过 NEBULA_CATEGORIES 注册表驱动
 local function gen_app_init(app_name, reg)
   local L = {}
   local function emit(s) table.insert(L, s) end
@@ -637,97 +1135,10 @@ local function gen_app_init(app_name, reg)
   emit("  self.vw = vw")
   emit("  self.vh = vh")
   emit("")
-  emit("  -- 初始化所有 Pipeline")
-  local inited_pipes = {}
-  for vt, group in pairs(reg.type_groups) do
-    if not inited_pipes[group.pipeline_name] then
-      -- 计算该类型的最大实例数：静态组件数 + 所有插槽的 max_instances
-      local max_inst = 0
-      for _, m in ipairs(group.members) do
-        if not m.is_slot then
-          max_inst = max_inst + 1
-        end
-      end
-      for _, slot in ipairs(reg.slots) do
-        if slot.visual_type == vt then
-          max_inst = max_inst + slot.max_instances
-        end
-      end
-      if max_inst == 0 then max_inst = 1 end
-      emit(("  if not self.pipe_%s:init(renderer, %d) then return false end"):format(
-        group.base:lower(), max_inst))
-      emit(("  self.pipe_%s:update_viewport(renderer, vw, vh)"):format(group.base:lower()))
-      inited_pipes[group.pipeline_name] = true
-    end
-  end
 
-  -- ★ Phase 3.9 / Phase 4.1: 初始化文本管线
-  if #reg.texts > 0 then
-    local has_sdf_init  = false
-    local has_slug_init = false
-    for _, txt in ipairs(reg.texts) do
-      if txt.text_mode == "slug" then has_slug_init = true
-      else has_sdf_init = true end
-    end
-    emit("")
-    emit("  -- ★ Phase 3.9 / Phase 4.1: 初始化文本管线")
-    if has_sdf_init then
-      emit("  if not self.pipe_text:init(renderer) then return false end")
-    end
-    if has_slug_init then
-      emit("  if not self.pipe_slug_text:init(renderer) then return false end")
-      emit("  -- ★ Phase 4.1: 上传 Slug Storage Buffer（编译期常量数组）")
-      emit("  do")
-      emit("    local _curves_sz = (@csize)(NEBULA_SLUG_TOTAL_CURVES * #NebulaSlugCurve)")
-      emit("    local _metas_sz  = (@csize)(NEBULA_SLUG_TOTAL_BAND_METAS * #NebulaSlugBandMeta)")
-      -- BUG-6 fix: NEBULA_SLUG_BAND_REFS is uint16 array, not uint32
-      emit("    local _refs_sz   = (@csize)(NEBULA_SLUG_TOTAL_BAND_REFS * #uint16)")
-      emit("    if not self.pipe_slug_text:upload_slug_buffers(renderer,")
-      emit("      &NEBULA_SLUG_CURVES[0], _curves_sz,")
-      emit("      &NEBULA_SLUG_BAND_METAS[0], _metas_sz,")
-      emit("      &NEBULA_SLUG_BAND_REFS[0], _refs_sz) then return false end")
-      emit("    if not self.pipe_slug_text:update_slug_bind_group(renderer) then return false end")
-      emit("  end")
-    end
-  end
-
-  -- ★ Phase 3.10.5: 初始化阴影管线（多 Pass）
-  if #reg.shadows > 0 then
-    emit("")
-    emit("  -- ★ Phase 3.10.5: 初始化阴影管线（多 Pass）")
-    for _, shd in ipairs(reg.shadows) do
-      emit(("  if not self.pipe_%s:init(renderer, %d, %d) then return false end"):format(
-        shd.base:lower(), shd.win_w, shd.win_h))
-    end
-  end
-
-  -- ★ Phase 4.7-S2: 初始化 DenseText 管线 + SDF 字体 atlas
-  if #reg.dense_texts > 0 then
-    emit("")
-    emit("  -- ★ Phase 4.7-S2: 初始化 DenseText 管线（高密度文本渲染）")
-    emit("  if not nebula_text_load_ascii_font(&self._dense_font, renderer) then return false end")
-    for _, dt in ipairs(reg.dense_texts) do
-      emit(("  if not self.pipe_dense_%s:init(renderer, %d) then return false end"):format(
-        dt.name, dt.max_chars))
-      emit(("  if not self.pipe_dense_%s:update_atlas(renderer, self._dense_font.view, self._dense_font.sampler) then return false end"):format(
-        dt.name))
-      emit(("  self.pipe_dense_%s:update_viewport(renderer, vw, vh, %.1f, %.1f)"):format(
-        dt.name, dt.cell_w, dt.cell_h))
-    end
-    -- ★ Phase 4.7-S3: 注入 DenseText 布局初始坐标
-    if reg.layout_results then
-      for _, dt in ipairs(reg.dense_texts) do
-        local r = reg.layout_results[dt.name]
-        if r then
-          emit(("  -- ★ Phase 4.7-S3: [layout] %s: pos=(%.1f, %.1f) size=(%.1f x %.1f)"):format(
-            dt.name, r.x, r.y, r.w, r.h))
-          emit(("  self.dense_layout_%s_x = %.1f"):format(dt.name, r.x))
-          emit(("  self.dense_layout_%s_y = %.1f"):format(dt.name, r.y))
-          emit(("  self.dense_layout_%s_w = %.1f"):format(dt.name, r.w))
-          emit(("  self.dense_layout_%s_h = %.1f"):format(dt.name, r.h))
-        end
-      end
-    end
+  -- ★ P1-5: 遍历所有已注册类别，生成该类别的初始化代码
+  for _, cat in ipairs(NEBULA_CATEGORIES) do
+    if cat.emit_init then cat.emit_init(reg, emit) end
   end
 
   emit("")
@@ -735,7 +1146,6 @@ local function gen_app_init(app_name, reg)
   emit(("  nebula_arena_init(&self.arena, &self._arena_backing[0], %d)"):format(reg.arena_size))
 
   -- ★ Phase 3.11: 延迟布局坐标注入标志
-  -- pos/size 将在 update 第一帧执行，确保在用户 Context_init 之后注入
   if reg.layout_results and next(reg.layout_results) then
     emit("")
     emit("  -- ★ Phase 3.11: 延迟布局注入标志（在 update 第一帧执行）")
@@ -749,8 +1159,8 @@ local function gen_app_init(app_name, reg)
 end
 
 -- 生成 <App>:update
--- ★ Phase 3.8: 自动调用 nebula_arena_reset
--- ★ Phase 3.9: 注入 process_text_input + set_text 联动逻辑（文本一等公民）
+-- ★ P1-5: 组件更新逻辑通过 NEBULA_CATEGORIES 驱动
+-- 响应式重排（Phase 3.12）仍为跨类别共享基础设施
 local function gen_app_update(app_name, reg)
   local L = {}
   local function emit(s) table.insert(L, s) end
@@ -799,66 +1209,9 @@ local function gen_app_update(app_name, reg)
     emit("  end")
   end
 
-  emit("  -- 按注册顺序显式更新所有静态组件")
-  for _, comp in ipairs(reg.components) do
-    emit(("  self.%s:update(input, dt)"):format(comp.name))
-  end
-
-  -- ★ Phase 3.9 / Phase 3.10.5: 文本组件联动逻辑
-  if #reg.texts > 0 then
-    emit("")
-    emit("  -- ★ Phase 3.9 / Phase 3.10.5: 文本组件联动（一等公民）")
-    for _, txt in ipairs(reg.texts) do
-      local mode = txt.mode or "bound"
-      if mode == "bound" then
-        -- 原有绑定模式：联动 editable 组件
-        emit(("  -- [bound] %s 绑定到 %s（placeholder: \"%s\", mask: %s）"):format(
-          txt.name, txt.bound_to, txt.placeholder, tostring(txt.mask_password)))
-        emit(("  if self.%s:process_text_input(input) then"):format(txt.bound_to))
-        emit(("    if self.%s:get_text_len() > 0 then"):format(txt.bound_to))
-        emit(("      local _%s_buf: [256]uint8"):format(txt.name))
-        emit(("      local _%s_raw = self.%s:get_text(&_%s_buf[0], 255)"):format(
-          txt.name, txt.bound_to, txt.name))
-        if txt.mask_password then
-          emit(("      local _%s_len = self.%s:get_text_len()"):format(txt.name, txt.bound_to))
-          emit(("      if _%s_len > 255 then _%s_len = 255 end"):format(txt.name, txt.name))
-          emit(("      local _%s_mask: [256]uint8"):format(txt.name))
-          emit(("      local _%s_mi: uint16 = 0"):format(txt.name))
-          emit(("      while _%s_mi < _%s_len do"):format(txt.name, txt.name))
-          emit(("        _%s_mask[_%s_mi] = 0x2A"):format(txt.name, txt.name))
-          emit(("        _%s_mi = _%s_mi + 1"):format(txt.name, txt.name))
-          emit(("      end"):format())
-          emit(("      _%s_mask[_%s_len] = 0"):format(txt.name, txt.name))
-          emit(("      self.%s:set_text(self.renderer, (@cstring)(&_%s_mask[0]))"):format(
-            txt.name, txt.name))
-        else
-          emit(("      self.%s:set_text(self.renderer, _%s_raw)"):format(txt.name, txt.name))
-        end
-        emit(("    else"):format())
-        if txt.placeholder ~= "" then
-          emit(("      self.%s:set_text(self.renderer, \"%s\")"):format(txt.name, txt.placeholder))
-        else
-          emit(("      self.%s:set_text(self.renderer, \"\")"):format(txt.name))
-        end
-        emit(("    end"):format())
-        emit(("  end"):format())
-      elseif mode == "dynamic" then
-        -- ★ Phase 3.10.5: 动态模式：每帧调用 updater 函数
-        emit(("  -- [dynamic] %s 通过 %s 每帧更新"):format(txt.name, txt.updater))
-        emit(("  do"):format())
-        emit(("    local _%s_mark = nebula_arena_mark(&self.arena)"):format(txt.name))
-        emit(("    local _%s_str = %s(&self.arena)"):format(txt.name, txt.updater))
-        emit(("    if _%s_str ~= nilptr then"):format(txt.name))
-        emit(("      self.%s:set_text(self.renderer, _%s_str)"):format(txt.name, txt.name))
-        emit(("    end"):format())
-        emit(("    nebula_arena_rewind(&self.arena, _%s_mark)"):format(txt.name))
-        emit(("  end"):format())
-      end
-      -- static 模式：不在 update 中生成任何代码（由用户在 main 中手动调用 set_text 一次）
-      if mode == "static" then
-        emit(("  -- [static] %s: 静态文本，由用户在 App:init 后手动调用 set_text 初始化"):format(txt.name))
-      end
-    end
+  -- ★ P1-5: 遍历所有已注册类别，生成该类别的更新逻辑
+  for _, cat in ipairs(NEBULA_CATEGORIES) do
+    if cat.emit_update then cat.emit_update(reg, emit) end
   end
 
   -- ★ Phase 3.12: 响应式重排——分段线性插値更新代码
@@ -986,248 +1339,44 @@ local function gen_app_update(app_name, reg)
   return table.concat(L, "\n")
 end
 
--- ★ Phase 3.10.5: 生成 <App>:draw_pre_pass（阴影离屏 Pass 1-3）
--- 仅当 App 有阴影组件时才生成此方法；否则生成一个空实现以兼容 nebula_frame_render_multipass
+-- ★ P1-5: 生成 <App>:draw_pre_pass — 通过 NEBULA_CATEGORIES 驱动
 local function gen_app_pre_pass(app_name, reg)
   local L = {}
   local function emit(s) table.insert(L, s) end
 
   emit(("function %s:draw_pre_pass(encoder: WGPUCommandEncoder, renderer: *NebulaRenderer): void"):format(app_name))
-  if #reg.shadows > 0 then
-    emit("  -- ★ Phase 3.10.5: 阴影组件离屏 Pass（每个阴影组件执行 3 个离屏 Pass）")
-    for _, shd in ipairs(reg.shadows) do
-      local u_expr = ("self.%s:to_uniforms(self.vw, self.vh)"):format(shd.name)
-      emit(("  -- [shadow] %s: 更新 uniforms 并执行阴影离屏渲染"):format(shd.name))
-      emit(("  do"):format())
-      emit(("    local _u = %s"):format(u_expr))
-      emit(("    self.pipe_%s:update_uniforms(renderer, &_u)"):format(shd.base:lower()))
-      emit(("    self.pipe_%s:draw_shadow(encoder, renderer, %.1f)"):format(shd.base:lower(), shd.blur_radius))
-      emit(("  end"):format())
-    end
+  for _, cat in ipairs(NEBULA_CATEGORIES) do
+    if cat.emit_pre_pass then cat.emit_pre_pass(reg, emit) end
   end
   emit("end")
 
   return table.concat(L, "\n")
 end
 
--- ★ Phase 3.10.5: 生成 <App>:draw_surface_pass（在 Surface Pass 中合成阴影+绘制主体）
--- 仅当 App 有阴影组件时才生成此方法；否则生成一个空实现
+-- ★ P1-5: 生成 <App>:draw_surface_pass — 通过 NEBULA_CATEGORIES 驱动
 local function gen_app_surface_pass(app_name, reg)
   local L = {}
   local function emit(s) table.insert(L, s) end
 
   emit(("function %s:draw_surface_pass(pass: WGPURenderPassEncoder): void"):format(app_name))
-  if #reg.shadows > 0 then
-    emit("  -- ★ Phase 3.10.5: 阴影合成层（先合成模糊阴影，再绘制主体）")
-    for _, shd in ipairs(reg.shadows) do
-      emit(("  -- [shadow] %s: 先合成阴影，再绘制主体"):format(shd.name))
-      emit(("  self.pipe_%s:draw_composite(pass)"):format(shd.base:lower()))
-      emit(("  self.pipe_%s:draw(pass)"):format(shd.base:lower()))
-    end
+  for _, cat in ipairs(NEBULA_CATEGORIES) do
+    if cat.emit_surface_pass then cat.emit_surface_pass(reg, emit) end
   end
   emit("end")
 
   return table.concat(L, "\n")
 end
 
--- 生成 <App>:draw（按类型分组 upload + draw_instanced）
--- ★ Phase 3.9: 文本管线在所有标准管线之后绘制（确保文本在最上层）
--- ★ Phase 3.9: Slot Producer 模式（mark/rewind 局部内存管理）
+-- ★ P1-5: 生成 <App>:draw — 通过 NEBULA_CATEGORIES 驱动
 local function gen_app_draw(app_name, reg)
   local L = {}
   local function emit(s) table.insert(L, s) end
 
   emit(("function %s:draw(pass: WGPURenderPassEncoder): void"):format(app_name))
 
-  -- 按注册顺序遍历 type_groups
-  local ordered_types = {}
-  local seen_types = {}
-  for _, comp in ipairs(reg.components) do
-    if not seen_types[comp.visual_type] then
-      table.insert(ordered_types, comp.visual_type)
-      seen_types[comp.visual_type] = true
-    end
-  end
-  for _, slot in ipairs(reg.slots) do
-    if not seen_types[slot.visual_type] then
-      table.insert(ordered_types, slot.visual_type)
-      seen_types[slot.visual_type] = true
-    end
-  end
-
-  for _, vt in ipairs(ordered_types) do
-    local group = reg.type_groups[vt]
-    if not group then goto continue end
-
-    -- 统计静态成员
-    local static_members = {}
-    for _, m in ipairs(group.members) do
-      if not m.is_slot then
-        table.insert(static_members, m.name)
-      end
-    end
-
-    -- 统计动态插槽
-    local slot_members = {}
-    for _, slot in ipairs(reg.slots) do
-      if slot.visual_type == vt then
-        table.insert(slot_members, slot)
-      end
-    end
-
-    -- 计算最大实例数
-    local max_inst = #static_members
-    for _, slot in ipairs(slot_members) do
-      max_inst = max_inst + slot.max_instances
-    end
-    if max_inst == 0 then goto continue end
-
-    local uniforms_record = group.base .. "Uniforms"
-    local pipe_var = "self.pipe_" .. group.base:lower()
-
-    -- ★ MEM-3 fix: 限制栈分配 batch 大小，超限时分批处理
-    -- 典型 Uniforms 约 64-96 字节，128 实例 ≈ 12KB，安全阈值
-    local STACK_BATCH_LIMIT = 128
-
-    emit(("  -- 批量绘制 %s（%d 静态 + %d 动态插槽）"):format(
-      vt, #static_members, #slot_members))
-    emit(("  do"):format())
-    if max_inst > STACK_BATCH_LIMIT then
-      -- 超限时仍分配 STACK_BATCH_LIMIT 大小的 batch，分批上传和绘制
-      emit(("    -- MEM-3: max_inst=%d 超过栈安全阈值 %d，使用分批模式"):format(max_inst, STACK_BATCH_LIMIT))
-      emit(("    local _batch: [%d]%s"):format(STACK_BATCH_LIMIT, uniforms_record))
-    else
-      emit(("    local _batch: [%d]%s"):format(max_inst, uniforms_record))
-    end
-    emit(("    local _count: uint32 = 0"):format())
-
-    -- 收集静态组件的 Uniforms
-    for _, name in ipairs(static_members) do
-      emit(("    _batch[_count] = self.%s:to_uniforms(self.vw, self.vh)"):format(name))
-      emit(("    _count = _count + 1"):format())
-    end
-
-    -- ★ Phase 3.9: 收集动态插槽数据（Producer 模式）
-    for _, slot in ipairs(slot_members) do
-      if slot.producer then
-        -- 新 API：Producer 函数模式（原语 4）
-        emit(("    -- ★ Phase 3.9: 动态插槽 %s（Producer: %s）"):format(slot.name, slot.producer))
-        emit(("    do"):format())
-        emit(("      local _mark = nebula_arena_mark(&self.arena)"):format())
-        emit(("      local _slot_raw = nebula_arena_alloc_array(&self.arena, %d, #%s, 8)"):format(
-          slot.max_instances, uniforms_record))
-        emit(("      if _slot_raw ~= nilptr then"):format())
-        emit(("        local _slot_data = (@*[0]%s)(_slot_raw)"):format(uniforms_record))
-        emit(("        local _slot_count: uint32 = 0"):format())
-        emit(("        %s(&self.arena, _slot_data, &_slot_count, %d)"):format(
-          slot.producer, slot.max_instances))
-        -- ★ Phase 5.0: slot layout auto-position（编译期常量内联）
-        if slot.layout then
-          local lo = slot.layout
-          local dir = lo.direction or "column"
-          local gap = lo.gap or 0
-          local pad = lo.padding or 0
-          local pad_x, pad_y
-          if type(pad) == "table" then
-            pad_x = pad.left or pad[2] or 0
-            pad_y = pad.top  or pad[1] or 0
-          else
-            pad_x = pad
-            pad_y = pad
-          end
-          local iw = lo.item_size and lo.item_size.w or 100
-          local ih = lo.item_size and lo.item_size.h or 40
-          local stride = dir == "column" and (ih + gap) or (iw + gap)
-          local scroll_expr = lo.scroll_var or "0.0"
-          emit(("        -- ★ Phase 5.0: slot layout (dir=%s, gap=%g, stride=%g)"):format(dir, gap, stride))
-          emit(("        do"):format())
-          emit(("          local _li: uint32 = 0"):format())
-          emit(("          while _li < _slot_count do"):format())
-          if dir == "column" then
-            emit(("            _slot_data[_li].pos = Vec2{ x = %.1f, y = %.1f + (@float32)(_li) * %.1f - %s }"):format(
-              pad_x, pad_y, stride, scroll_expr))
-          else
-            emit(("            _slot_data[_li].pos = Vec2{ x = %.1f + (@float32)(_li) * %.1f - %s, y = %.1f }"):format(
-              pad_x, stride, scroll_expr, pad_y))
-          end
-          emit(("            _slot_data[_li].size = Vec2{ x = %.1f, y = %.1f }"):format(iw, ih))
-          emit(("            _li = _li + 1"):format())
-          emit(("          end"):format())
-          emit(("        end"):format())
-        end
-        emit(("        local _si: uint32 = 0"):format())
-        emit(("        while _si < _slot_count and _count < %d do"):format(max_inst))
-        emit(("          _batch[_count] = _slot_data[_si]"):format())
-        emit(("          _count = _count + 1"):format())
-        emit(("          _si = _si + 1"):format())
-        emit(("        end"):format())
-        emit(("      end"):format())
-        emit(("      nebula_arena_rewind(&self.arena, _mark)"):format())
-        emit(("    end"):format())
-      elseif slot.legacy_count_var and slot.legacy_data_var then
-        -- 旧 API：外部全局变量模式（向后兼容）
-        emit(("    -- [legacy] 动态插槽 %s（外部变量: %s/%s）"):format(
-          slot.name, slot.legacy_count_var, slot.legacy_data_var))
-        emit(("    local _si: uint32 = 0"):format())
-        emit(("    while _si < %s and _count < %d do"):format(slot.legacy_count_var, max_inst))
-        emit(("      _batch[_count] = %s[_si]"):format(slot.legacy_data_var))
-        emit(("      _count = _count + 1"):format())
-        emit(("      _si = _si + 1"):format())
-        emit(("    end"):format())
-      end
-    end
-
-    -- upload + draw_instanced
-    emit(("    if _count > 0 then"):format())
-    emit(("      %s:upload(self.renderer, &_batch[0], _count)"):format(pipe_var))
-    emit(("      %s:draw_instanced(pass, _count)"):format(pipe_var))
-    emit(("    end"):format())
-    emit(("  end"):format())
-
-    ::continue::
-  end
-
-  -- ★ Phase 3.9 / Phase 4.1: 文本管线在最后绘制（确保文本始终在最上层）
-  if #reg.texts > 0 then
-    emit("")
-    emit("  -- ★ Phase 3.9 / Phase 4.1: 文本渲染（一等公民，最后绘制）")
-    for _, txt in ipairs(reg.texts) do
-      emit(("  if self.%s.mesh.vertex_count > 0 then"):format(txt.name))
-      if txt.text_mode == "slug" then
-        -- ★ Phase 4.1: Slug 渲染路径
-        emit(("    -- ★ Phase 4.1: Slug 渲染 %s"):format(txt.name))
-        emit(("    if self.pipe_slug_text:upload_vertices(self.renderer,"))
-        emit(("      self.%s.mesh.vertex_buffer, self.%s.mesh.vertex_buffer_size,"):format(txt.name, txt.name))
-        emit(("      self.%s.mesh.vertex_count) then"):format(txt.name))
-        emit(("      self.pipe_slug_text:draw(pass)"))
-        emit(("    end"))
-      else
-        -- 原有 SDF 路径
-        emit(("    self.pipe_text:draw_buffer(pass,"):format())
-        emit(("      self.%s.mesh.vertex_buffer,"):format(txt.name))
-        emit(("      self.%s.mesh.vertex_buffer_size,"):format(txt.name))
-        emit(("      self.%s.mesh.vertex_count)"):format(txt.name))
-      end
-      emit(("  end"):format())
-    end
-  end
-
-  -- ★ Phase 4.7-S2: DenseText 管线绘制（在所有其他管线之后，最顶层）
-  if #reg.dense_texts > 0 then
-    emit("")
-    emit("  -- ★ Phase 4.7-S2: DenseText 管线绘制（Producer → upload → draw）")
-    for _, dt in ipairs(reg.dense_texts) do
-      emit(("  do"):format())
-      emit(("    local _dt_count: uint32 = 0"):format())
-      emit(("    %s(self, &self._dense_%s_buf[0], &_dt_count, %d)"):format(
-        dt.producer, dt.name, dt.max_chars))
-      emit(("    if _dt_count > 0 then"):format())
-      emit(("      self.pipe_dense_%s:upload(self.renderer, &self._dense_%s_buf[0], _dt_count)"):format(
-        dt.name, dt.name))
-      emit(("      self.pipe_dense_%s:draw(pass, _dt_count)"):format(dt.name))
-      emit(("    end"):format())
-      emit(("  end"):format())
-    end
+  -- ★ P1-5: 遍历所有已注册类别，生成该类别的绘制代码
+  for _, cat in ipairs(NEBULA_CATEGORIES) do
+    if cat.emit_draw then cat.emit_draw(reg, emit) end
   end
 
   emit("end")
@@ -1236,7 +1385,7 @@ local function gen_app_draw(app_name, reg)
 end
 
 -- =============================================================================
--- ★ Phase 4.2.2-fix: gen_app_deinit
+-- ★ P1-5: gen_app_deinit — 通过 NEBULA_CATEGORIES 驱动
 -- 生成 <App>:deinit() 方法，释放所有管线 GPU 资源
 -- 公理 B：L0 资源在 deinit 时销毁
 -- =============================================================================
@@ -1247,48 +1396,9 @@ local function gen_app_deinit(app_name, reg)
   emit(("-- === %s:deinit — GPU 资源释放（公理 B） ==="):format(app_name))
   emit(("function %s:deinit(): void"):format(app_name))
 
-  -- 释放所有管线（去重：同一 pipeline_name 只释放一次）
-  local deinited_pipes = {}
-  for _, group in pairs(reg.type_groups) do
-    if not deinited_pipes[group.pipeline_name] then
-      emit(("  self.pipe_%s:deinit()"):format(group.base:lower()))
-      deinited_pipes[group.pipeline_name] = true
-    end
-  end
-
-  -- 释放阴影管线
-  for _, shd in ipairs(reg.shadows) do
-    emit(("  self.pipe_%s:deinit()"):format(shd.base:lower()))
-  end
-
-  -- 释放文本管线
-  if #reg.texts > 0 then
-    local has_sdf_txt  = false
-    local has_slug_txt = false
-    for _, txt in ipairs(reg.texts) do
-      local mode = txt.text_mode or "sdf"
-      if mode == "sdf" then has_sdf_txt = true end
-      if mode == "slug" then has_slug_txt = true end
-    end
-    if has_sdf_txt  then emit("  self.pipe_text:deinit()") end
-    if has_slug_txt then emit("  self.pipe_slug_text:deinit()") end
-
-    -- 释放文本 mesh 的 vertex buffer
-    for _, txt in ipairs(reg.texts) do
-      local mode = txt.text_mode or "sdf"
-      if mode == "sdf" then
-        emit(("  if self.%s.mesh.vertex_buffer ~= nilptr then wgpuBufferRelease(self.%s.mesh.vertex_buffer) end"):format(txt.name, txt.name))
-      end
-    end
-  end
-
-  -- ★ Phase 4.7-S2: 释放 DenseText 管线
-  if #reg.dense_texts > 0 then
-    emit("")
-    emit("  -- ★ Phase 4.7-S2: 释放 DenseText 管线")
-    for _, dt in ipairs(reg.dense_texts) do
-      emit(("  self.pipe_dense_%s:deinit()"):format(dt.name))
-    end
+  -- ★ P1-5: 遍历所有已注册类别，生成该类别的资源释放代码
+  for _, cat in ipairs(NEBULA_CATEGORIES) do
+    if cat.emit_deinit then cat.emit_deinit(reg, emit) end
   end
 
   emit("end")
