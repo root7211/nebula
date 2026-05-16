@@ -75,7 +75,9 @@ global NebulaInputState = @record{
   -- 键盘事件
   char_input:         [64]uint32,
   char_count:         uint8,
-  key_pressed:        NebulaKey,
+  key_pressed:        NebulaKey,   -- 首个控制键（向后兼容，等价于 key_input[0]）
+  key_input:          [16]NebulaKey, -- ★ P1-7: 本帧全部控制键（全量消费）
+  key_count:          uint8,       -- key_input 中有效键数量
   scroll_dy:          float32,
   -- 修饰键实时状态
   mod_shift:          boolean,

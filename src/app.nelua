@@ -177,10 +177,17 @@ global function nebula_collect_input(
     _nebula_char_head = (_nebula_char_head + 1) % 64
   end
 
-  -- ---- 控制键：每帧取一个（FIFO，支持按键重复） ----
-  if _nebula_key_head ~= _nebula_key_tail then
-    input.key_pressed = _nebula_key_queue[_nebula_key_head]
+  -- ---- 控制键：全量消费（FIFO，消除按键滞后） ----
+  -- ★ P1-7: 与字符输入保持一致，每帧排空整个键队列。
+  -- key_pressed 保留第一个键以保持向后兼容。
+  input.key_count = 0
+  while _nebula_key_head ~= _nebula_key_tail and input.key_count < 16 do
+    input.key_input[input.key_count] = _nebula_key_queue[_nebula_key_head]
+    input.key_count = input.key_count + 1
     _nebula_key_head = (_nebula_key_head + 1) % 64
+  end
+  if input.key_count > 0 then
+    input.key_pressed = input.key_input[0]
   else
     input.key_pressed = NebulaKey.None
   end
