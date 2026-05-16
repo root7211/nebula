@@ -2006,7 +2006,7 @@ require "nebula_constants"
 ##   local app_cell_h = (spec.cell and spec.cell.h) or _cfg.DEFAULT_CELL_H
 ##   -- ★ 默认 layout：省略时自动使用 1280x800，消除布局样板
 ##   if not spec.layout then
-##     local _cfg = require("nebula_config")
+##     local _cfg = require("derive.nebula_config")
 ##     spec.layout = { direction = "column", width = _cfg.DEFAULT_WIN_WIDTH, height = _cfg.DEFAULT_WIN_HEIGHT }
 ##   end
 ##   -- 设置根布局

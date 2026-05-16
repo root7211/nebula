@@ -38,7 +38,7 @@
 nebula_app_registry = nebula_app_registry or {}
 
 -- ★ P2-8: 加载编译期配置常量
-local _cfg = require("nebula_config")
+local _cfg = require("derive.nebula_config")
 
 -- 当前正在构建的 App 名称
 local _current_app = nil

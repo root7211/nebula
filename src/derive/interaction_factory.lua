@@ -148,7 +148,7 @@ end
 --                                   function(spec) -> string (额外 Nelua 源码)
 -- =============================================================================
 -- ★ P2-8: 加载编译期配置常量
-local _cfg = require("nebula_config")
+local _cfg = require("derive.nebula_config")
 
 NEBULA_PRIMITIVES = {}
 

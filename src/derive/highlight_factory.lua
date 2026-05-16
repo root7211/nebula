@@ -30,7 +30,7 @@
 local VERSION = "nebula_highlight_factory_v0.1_phase4.7-s4"
 
 -- ★ P2-8: 加载编译期配置常量（高亮颜色）
-local _cfg = require("nebula_config")
+local _cfg = require("derive.nebula_config")
 
 -- 全局注册表：存放所有 nebula_highlight_rules 注册的规则
 nebula_highlight_registry = nebula_highlight_registry or {}

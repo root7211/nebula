@@ -31,7 +31,7 @@ require "nebula_builtins"
 --
 -- =============================================================================
 ## function nebula_main(app_type, opts)
-##   local _cfg = require("nebula_config")
+##   local _cfg = require("derive.nebula_config")
 ##   opts = opts or {}
 ##   local title  = opts.title  or "Nebula App"
 ##   local width  = opts.width  or _cfg.DEFAULT_VIEWPORT_WIDTH
