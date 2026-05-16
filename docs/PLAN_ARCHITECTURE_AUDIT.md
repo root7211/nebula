@@ -41,7 +41,7 @@
 | P1-2 | 编辑器逻辑侵入框架（违反 Axiom B） | `app.nelua` L551-689 | ~140 行编辑器专属代码（搜索/替换状态、文件路径、修改标记、`nebula_editor_update_title` 等）定义在框架层。非编辑器应用被迫携带。 | 提取为 `nebula_editor.nelua` 模块，通过 `require` 按需引入。框架层仅保留 input 收集和 frame render。 |
 | P1-3 | wgpu 绑定 48 处条件编译 | `wgpu_bindings.nelua` (1121行) | native/WASM 结构体大量重复定义。`WGPUShaderStage` 类型宽度不同（uint64 vs uint32），布局错误难以发现。 | 拆分为 `wgpu_types_shared.nelua` + `wgpu_types_native.nelua` + `wgpu_types_wasm.nelua`。共享类型定义一次，平台差异隔离到专属文件。 |
 | P1-4 | ~~管线类型无扩展点~~ | `pipeline_factory.lua` | ~~硬编码 if/elseif/else 分发 5 种管线。~~ | ✅ 已修复：引入 `NEBULA_PIPELINES` 注册表 + `nebula_register_pipeline()` API，数据驱动分发。新增管线类型仅需 1 行注册调用。 |
-| P1-5 | app_factory 线性膨胀 | `app_factory.lua` | 6 种组件类别 × 5 个 gen_app_* 函数。每新增一种类别需修改 5 个函数。 | 抽象 `ComponentCategory` 接口（包含 record_fields / init_code / update_code / draw_code / deinit_code 生成器），gen_app_* 遍历注册的 category 列表。 |
+| P1-5 | app_factory 线性膨胀 | `app_factory.lua` | 6 种组件类别 × 5 个 gen_app_* 函数。每新增一种类别需修改 5 个函数。 | **Deferred**：改动半径大（5 个 gen_app_* 函数 × 6 种类别各有不同逻辑），需分步实施。待组件类别数量进一步增长时再抽象 ComponentCategory 接口。 |
 | P1-6 | WGPU 句柄类型擦除 | `wgpu_bindings_shared.nelua` L22-39 | 18 种 GPU 句柄全部 alias 到 `@pointer`，传错类型编译不报错。 | **Deferred**：Nelua 的 `<cimport, nodecl>` 要求类型与 C ABI 兼容，record 包装会破坏所有 C FFI 互操作。需要语言层面支持 distinct pointer 类型。 |
 | P1-7 | 每帧仅消费一个按键 | `app.nelua` L180-186 | char queue 全量消费，但 key queue 每帧只弹出一个。高重复率按键场景下输入滞后。 | 改为 key queue 也全量消费，将 `key_pressed` 改为 `key_queue_snapshot: [N]NebulaKey` + `key_count`，或循环处理直到队列空。 |
 | P1-8 | Surface 重配置代码重复 | `app.nelua` L317-337 / L433-454 | `nebula_frame_render` 与 `nebula_frame_render_multipass` 中 surface resize + config 逻辑完全相同（~20 行）。 | 提取为 `_nebula_reconfigure_surface(renderer, width, height)` 共享函数。 |
