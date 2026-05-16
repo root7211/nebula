@@ -1,0 +1,134 @@
+-- =============================================================================
+-- counter_binding_demo.nelua
+-- Nebula GUI Compiler — Phase 5.0 S2.5
+--
+-- ★ S2.5 验证 Demo：使用 nebula_state / nebula_bind / nebula_on
+--   验证 Phase 5.0 S2 代码生成的 Nelua 类型正确性
+--
+-- 此文件的目的是通过 `nelua -c` 编译，而非运行。
+-- 它验证 binding_factory 生成的代码在 Nelua 类型系统下是合法的。
+-- =============================================================================
+## cinclude "<stdio.h>"
+
+require "nebula_core"
+require "glfw_bindings"
+require "wgpu_bindings"
+require "renderer"
+require "app"
+require "nebula_arena"
+
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+
+-- =============================================================================
+-- 视觉规格（复用 ButtonVisual 模板）
+-- =============================================================================
+global CounterButtonVisual = @record{
+  pos:    Vec2,
+  size:   Vec2,
+  radius: float32,
+
+  default_bg_color:     Color,
+  default_border_color: Color,
+  default_border_width: float32,
+
+  hovered_bg_color:     Color,
+  hovered_border_color: Color,
+  hovered_border_width: float32,
+
+  pressed_bg_color:     Color,
+  pressed_border_color: Color,
+  pressed_border_width: float32,
+}
+
+##[[
+nebula_annotate("CounterButtonVisual", {
+  states     = {"default", "hovered", "pressed"},
+  primitives = {"hoverable", "clickable"},
+  transitions = {
+    {from="default", to="hovered", on="hover_enter"},
+    {from="hovered", to="default", on="hover_leave"},
+    {from="hovered", to="pressed", on="press"},
+    {from="pressed", to="hovered", on="release"},
+  },
+})
+]]
+## nebula_derive("CounterButtonVisual")
+
+-- =============================================================================
+-- ★ Phase 5.0 S2.5: App 声明 — 使用 state / bind / on
+-- =============================================================================
+##[[
+  nebula_app_begin("CounterApp")
+    nebula_app_register_component("btn", "CounterButtonVisual")
+
+    -- 声明可变状态
+    nebula_state("count", { type = "int32", default = 0 })
+
+    -- 声明绑定（派生状态）
+    nebula_bind("doubled", {
+      depends = { "count" },
+      compute = "self.doubled = self.count * 2",
+    })
+
+    -- 声明事件处理
+    nebula_on("btn", "click", {
+      mutation = "self.count = self.count + 1",
+    })
+
+  nebula_app_end()
+]]
+## nebula_derive_app("CounterApp")
+
+-- =============================================================================
+-- 主程序（最小化，仅验证编译通过）
+-- =============================================================================
+local function main(): int32
+  if glfwInit() == 0 then printf("glfw: init failed\n") return 1 end
+  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE)
+
+  local window = glfwCreateWindow(800, 600, "Nebula Phase 5.0 S2.5 — Counter Binding Demo", nilptr, nilptr)
+  if window == nilptr then printf("glfw: window creation failed\n") return 1 end
+
+  nebula_input_install_callbacks(window)
+
+  local renderer: NebulaRenderer
+  if not renderer:init(window, 800, 600) then return 1 end
+
+  local app: CounterApp
+  if not app:init(&renderer, 800, 600) then return 1 end
+
+  -- ★ 验证 state 字段可以访问
+  printf("initial count = %d\n", app.count)
+  printf("initial doubled = %d\n", app.doubled)
+
+  local input: NebulaInputState
+  local prev_time = glfwGetTime()
+
+  while glfwWindowShouldClose(window) == 0 do
+    glfwPollEvents()
+    local now = glfwGetTime()
+    local dt  = (@float32)(now - prev_time)
+    prev_time = now
+    nebula_collect_input(window, &input, dt)
+
+    -- ★ 验证 state 字段在运行时可读写
+    if app.btn.click.just_clicked then
+      printf("count = %d, doubled = %d\n", app.count, app.doubled)
+    end
+
+    nebula_frame_render(&renderer, &app, &input, dt, 0.09, 0.09, 0.10)
+  end
+
+  app:deinit()
+  wgpuSurfaceRelease(renderer.surface)
+  wgpuDeviceRelease(renderer.device)
+  wgpuAdapterRelease(renderer.adapter)
+  wgpuInstanceRelease(renderer.instance)
+  glfwDestroyWindow(window)
+  glfwTerminate()
+  printf("nebula: clean exit\n")
+  return 0
+end
+
+main()

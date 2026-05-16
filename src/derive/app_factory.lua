@@ -466,6 +466,7 @@ function nebula_bind(target, config)
     depends = config.depends or {},
     compute = config.compute,
     affects = config.affects,
+    type    = config.type,  -- ★ Phase 5.0 S2: 派生状态类型（默认 int32）
   })
 end
 
@@ -1602,19 +1603,21 @@ function nebula_app_generate(app_name)
   local parts = {
     gen_app_record(app_name, reg),
     gen_app_init(app_name, reg),
-    gen_app_update(app_name, reg),
-    gen_app_draw(app_name, reg),
-    -- ★ Phase 3.10.5: 多 Pass 渲染支持
-    gen_app_pre_pass(app_name, reg),
-    gen_app_surface_pass(app_name, reg),
-    -- ★ Phase 4.2.2-fix: GPU 资源释放
-    gen_app_deinit(app_name, reg),
   }
 
-  -- ★ Phase 5.0 S2: 追加事件 handler / _commit / _route_input 代码
+  -- ★ Phase 5.0 S2: 事件 handler / _commit / _route_input 必须在 update 之前
+  --   Nelua 要求方法在调用点之前已定义
   if reg._binding_code and reg._binding_code.handlers_code ~= "" then
     parts[#parts + 1] = reg._binding_code.handlers_code
   end
+
+  parts[#parts + 1] = gen_app_update(app_name, reg)
+  parts[#parts + 1] = gen_app_draw(app_name, reg)
+  -- ★ Phase 3.10.5: 多 Pass 渲染支持
+  parts[#parts + 1] = gen_app_pre_pass(app_name, reg)
+  parts[#parts + 1] = gen_app_surface_pass(app_name, reg)
+  -- ★ Phase 4.2.2-fix: GPU 资源释放
+  parts[#parts + 1] = gen_app_deinit(app_name, reg)
 
   local source = table.concat(parts, "\n\n")
 

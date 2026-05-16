@@ -172,7 +172,7 @@ do
 
   -- 2.7: _route_input 应有 click hit-test
   assert_match("counter route_input has click hit-test",
-    result.handlers_code, "mouse_clicked")
+    result.handlers_code, "mouse_left_pressed")
 
   -- 2.8: update 应包含路由调用
   assert_match("counter update has _route_input call",

@@ -292,7 +292,7 @@ function BindingFactory.emit_input_router(graph, declared, app_name, emit)
   -- Click 事件路由（使用 hit-test）
   if has_click_events then
     emit("  -- [click events]")
-    emit("  if input.mouse_clicked then")
+    emit("  if input.mouse_left_pressed then")
     for _, target in ipairs(sorted_targets) do
       for _, evt in ipairs(by_target[target]) do
         if evt.event_type == "click" then
@@ -314,12 +314,12 @@ function BindingFactory.emit_input_router(graph, declared, app_name, emit)
       for _, evt in ipairs(by_target[target]) do
         if evt.event_type == "key_press" then
           emit(("  -- key_press → %s"):format(target))
-          emit(("  if input.key_pressed then"))
+          emit(("  if input.key_count > 0 then"))
           emit(("    self:_on_%s_key_press()"):format(target))
           emit("  end")
         elseif evt.event_type == "key_down" then
           emit(("  -- key_down → %s"):format(target))
-          emit(("  if input.key_down then"))
+          emit(("  if input.key_count > 0 then"))
           emit(("    self:_on_%s_key_down()"):format(target))
           emit("  end")
         end
@@ -420,6 +420,32 @@ function BindingFactory.generate(app_name, reg)
     state_count = state_count + 1
   end
 
+  -- ★ Phase 5.0 S2: binding targets（派生状态）也需要 record 字段
+  -- 它们不在 _states 中，而是在 _bindings 中声明
+  local sorted_binding_targets = {}
+  for _, binding in ipairs(graph.bindings or {}) do
+    if not graph.states[binding.target] then
+      sorted_binding_targets[#sorted_binding_targets + 1] = binding.target
+    end
+  end
+  table.sort(sorted_binding_targets)
+
+  if #sorted_binding_targets > 0 then
+    emit_record("  -- ★ Phase 5.0 S2: 派生状态字段（nebula_bind target）")
+    for _, name in ipairs(sorted_binding_targets) do
+      -- 从 binding 推断类型：尝试从 compute 表达式的 write target 推断
+      -- 默认 int32（与 state 默认类型一致）
+      local binding_type = "int32"
+      for _, b in ipairs(graph.bindings) do
+        if b.target == name and b.type then
+          binding_type = b.type
+          break
+        end
+      end
+      emit_record(("  %s: %s,"):format(name, binding_type))
+    end
+  end
+
   if bit_count > 0 then
     local storage = DirtyMap.storage_type(bit_count)
     emit_record(("  -- ★ Phase 5.0 S2: dirty bit（%d 个钻石节点）"):format(bit_count))
@@ -444,6 +470,10 @@ function BindingFactory.generate(app_name, reg)
     else
       emit_init(("  self.%s = 0"):format(name))
     end
+  end
+  -- ★ Phase 5.0 S2: 派生状态默认值初始化
+  for _, name in ipairs(sorted_binding_targets) do
+    emit_init(("  self.%s = 0"):format(name))
   end
   if bit_count > 0 then
     emit_init("  " .. DirtyMap.gen_clear(bit_count))
