@@ -59,6 +59,47 @@ local function _load_omniscient_graph()
   return _OmniscientGraph
 end
 
+-- ★ Phase 5.0 S2: 延迟加载 binding_factory 模块
+local _BindingFactory
+local function _load_binding_factory()
+  if _BindingFactory then return _BindingFactory end
+  local ok, mod = pcall(require, "derive.binding_factory")
+  if ok then
+    _BindingFactory = mod
+  else
+    local _this_dir = debug.getinfo(1, "S").source:match("^@(.+/)") or ""
+    _BindingFactory = dofile(_this_dir .. "binding_factory.lua")
+  end
+  return _BindingFactory
+end
+
+-- ★ Phase 5.0 S2: 延迟加载 MutationAST + EffectModel（供 omniscient_graph.build 使用）
+local _MutationAST
+local function _load_mutation_ast()
+  if _MutationAST then return _MutationAST end
+  local ok, mod = pcall(require, "derive.mutation_ast")
+  if ok then
+    _MutationAST = mod
+  else
+    local _this_dir = debug.getinfo(1, "S").source:match("^@(.+/)") or ""
+    _MutationAST = dofile(_this_dir .. "mutation_ast.lua")
+  end
+  return _MutationAST
+end
+
+local _EffectModel
+local function _load_effect_model()
+  if _EffectModel then return _EffectModel end
+  local ok, mod = pcall(require, "derive.effect_model")
+  if ok then
+    _EffectModel = mod
+  else
+    local _this_dir = debug.getinfo(1, "S").source:match("^@(.+/)") or ""
+    _EffectModel = dofile(_this_dir .. "effect_model.lua")
+  end
+  return _EffectModel
+end
+
 -- 当前正在构建的 App 名称
 local _current_app = nil
 
@@ -611,9 +652,12 @@ function nebula_app_end()
   local reg = nebula_app_registry[_current_app]
   -- ★ Phase 3.11: 自动解算布局
   _solve_layout(reg)
-  -- ★ Phase 5.0 S1a: 如果有 states/bindings/events 声明，构建全知图
+  -- ★ Phase 5.0 S2: 如果有 states/bindings/events 声明，构建全知图（带 AST + Effect 分析）
   if reg._states or reg._bindings or reg._events then
-    reg._omniscient_graph = _load_omniscient_graph().build(reg)
+    reg._omniscient_graph = _load_omniscient_graph().build(reg, {
+      MutationAST = _load_mutation_ast(),
+      EffectModel = _load_effect_model(),
+    })
   end
   _current_app = nil
 end
@@ -1200,6 +1244,12 @@ local function gen_app_record(app_name, reg)
     if cat.emit_record then cat.emit_record(reg, emit) end
   end
 
+  -- ★ Phase 5.0 S2: 注入状态字段 + dirty bit（来自 binding_factory）
+  if reg._binding_code and reg._binding_code.record_fields ~= "" then
+    emit("")
+    emit(reg._binding_code.record_fields)
+  end
+
   emit("")
   emit("  -- ★ Phase 3.8: FrameArena（内嵌后备内存，无堆分配）")
   emit("  arena: NebulaArena,")
@@ -1241,6 +1291,12 @@ local function gen_app_init(app_name, reg)
   emit("")
   emit("  -- ★ Phase 3.8: 初始化 FrameArena（绑定内嵌后备内存）")
   emit(("  nebula_arena_init(&self.arena, &self._arena_backing[0], %d)"):format(reg.arena_size))
+
+  -- ★ Phase 5.0 S2: 状态默认值初始化
+  if reg._binding_code and reg._binding_code.init_code ~= "" then
+    emit("")
+    emit(reg._binding_code.init_code)
+  end
 
   -- ★ Phase 3.11: 延迟布局坐标注入标志
   if reg.layout_results and next(reg.layout_results) then
@@ -1431,6 +1487,12 @@ local function gen_app_update(app_name, reg)
     emit("  end  -- viewport_resized")
   end
 
+  -- ★ Phase 5.0 S2: 注入输入路由 + 钻石 commit（来自 binding_factory）
+  if reg._binding_code and reg._binding_code.update_code ~= "" then
+    emit("")
+    emit(reg._binding_code.update_code)
+  end
+
   emit("end")
 
   return table.concat(L, "\n")
@@ -1532,6 +1594,11 @@ function nebula_app_generate(app_name)
     end
   end
 
+  -- ★ Phase 5.0 S2: 在代码生成之前，调用 binding_factory 生成绑定代码
+  if reg._omniscient_graph then
+    reg._binding_code = _load_binding_factory().generate(app_name, reg)
+  end
+
   local parts = {
     gen_app_record(app_name, reg),
     gen_app_init(app_name, reg),
@@ -1543,6 +1610,11 @@ function nebula_app_generate(app_name)
     -- ★ Phase 4.2.2-fix: GPU 资源释放
     gen_app_deinit(app_name, reg),
   }
+
+  -- ★ Phase 5.0 S2: 追加事件 handler / _commit / _route_input 代码
+  if reg._binding_code and reg._binding_code.handlers_code ~= "" then
+    parts[#parts + 1] = reg._binding_code.handlers_code
+  end
 
   local source = table.concat(parts, "\n\n")
 
@@ -1576,4 +1648,4 @@ function nebula_app_generate(app_name)
   return source
 end
 
-return "nebula_app_factory_v0.11_phase5.0-s1a"
+return "nebula_app_factory_v0.12_phase5.0-s2"
