@@ -410,6 +410,7 @@ nebula/
 | [`PLAN_PHASE4_X_JSON_VIEWER.md`](docs/PLAN_PHASE4_X_JSON_VIEWER.md) | JSON Viewer 实施方案（DenseText + 折叠 + 着色） |
 | [`PLAN_PHASE5_OMNISCIENT_GRAPH.md`](docs/PLAN_PHASE5_OMNISCIENT_GRAPH.md) | ★ Phase 5.0 — 全知图与端到端特化路径（状态/绑定/事件编译期消解） |
 | [`PLAN_PHASE5_PATCH.md`](docs/PLAN_PHASE5_PATCH.md) | ★ Phase 5.0 完整补丁（mutation AST + Effect 模型 + 路由去重 + dirty bit + 回归测试） |
+| [`PLAN_PHASE5_IMPLEMENTATION.md`](docs/PLAN_PHASE5_IMPLEMENTATION.md) | ★ Phase 5.0 实施计划（5 梯队，整合补丁，里程碑与验收标准） |
 | [`PLAN_PHASE4_7_BEFORE_4_5.md`](docs/PLAN_PHASE4_7_BEFORE_4_5.md) | Phase 4.7→4.5 调序方案（先积累样本再提炼语法糖） |
 | [`PLAN_PHASE4_5_S3_SUGAR.md`](docs/PLAN_PHASE4_5_S3_SUGAR.md) | Phase 4.5-S3 语法糖深化实施方案（nebula_visual + init_themed + frame_begin） |
 | [`PLAN_PHASE4_8_EDITOR.md`](docs/PLAN_PHASE4_8_EDITOR.md) | Phase 4.8 编辑器功能规划 |
