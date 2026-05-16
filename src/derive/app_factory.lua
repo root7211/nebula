@@ -38,7 +38,12 @@
 nebula_app_registry = nebula_app_registry or {}
 
 -- ★ P2-8: 加载编译期配置常量
-local _cfg = require("derive.nebula_config")
+-- pcall 兼容两种加载路径：Nelua 预处理器（-L src）和 plain Lua 烟雾测试（dofile from repo root）
+local _cfg_ok, _cfg = pcall(require, "derive.nebula_config")
+if not _cfg_ok then
+  local _this_dir = debug.getinfo(1, "S").source:match("^@(.+/)") or ""
+  _cfg = dofile(_this_dir .. "nebula_config.lua")
+end
 
 -- 当前正在构建的 App 名称
 local _current_app = nil

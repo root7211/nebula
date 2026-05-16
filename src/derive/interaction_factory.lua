@@ -148,7 +148,11 @@ end
 --                                   function(spec) -> string (额外 Nelua 源码)
 -- =============================================================================
 -- ★ P2-8: 加载编译期配置常量
-local _cfg = require("derive.nebula_config")
+local _cfg_ok, _cfg = pcall(require, "derive.nebula_config")
+if not _cfg_ok then
+  local _this_dir = debug.getinfo(1, "S").source:match("^@(.+/)") or ""
+  _cfg = dofile(_this_dir .. "nebula_config.lua")
+end
 
 NEBULA_PRIMITIVES = {}
 
