@@ -3,19 +3,7 @@ require "jetbrains_mono_ascii_48_metrics"
 require "jetbrains_mono_slug_metrics"  -- ★ BUG-7 修复：Slug 路径所需的 NebulaSlugGlyph 等符号
 require "cjk_shaping_tables"            -- ★ Phase 4.2.3-S2: CJK shaping 表（GB2312 一级 3755 字）
 
-## cinclude "<stdio.h>"
-## cinclude "<string.h>"
-## cinclude "<stdlib.h>"
-
-global FILE: type <cimport,nodecl,forwarddecl> = @record{}
-global function fopen(path: cstring, mode: cstring): *FILE <cimport, nodecl> end
-global function fclose(fp: *FILE): cint <cimport, nodecl> end
-global function fread(ptr: pointer, size: csize, count: csize, fp: *FILE): csize <cimport, nodecl> end
-global function fscanf(fp: *FILE, fmt: cstring, ...: cvarargs): cint <cimport, nodecl> end
-global function fgetc(fp: *FILE): cint <cimport, nodecl> end
-global function malloc(size: csize): pointer <cimport, nodecl> end
-global function free(ptr: pointer): void <cimport, nodecl> end
-global function strlen(s: cstring): csize <cimport, nodecl> end
+require "cstdlib_bindings"
 
 -- ★ MEM-2 fix: 模块级静态缓冲区替代 malloc/free，保持零堆设计一致性
 -- 已知 atlas 最大尺寸为 1024x1024 = 1MB

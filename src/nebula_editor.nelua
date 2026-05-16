@@ -16,11 +16,7 @@
 -- =============================================================================
 
 require "glfw_bindings"
-
-## cinclude "<stdio.h>"
-
-global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
-global function snprintf(buf: cstring, size: csize, fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+require "cstdlib_bindings"
 
 -- 搜索状态类型和全局变量
 -- 使用编译期守卫避免与手动声明冲突（如 text_editor_demo v1）

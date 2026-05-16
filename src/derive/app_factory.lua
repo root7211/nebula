@@ -170,9 +170,8 @@ function nebula_app_register_text(name, visual_type, opts)
   assert(_current_app, "nebula_app_register_text: must be called between nebula_app_begin and nebula_app_end")
   opts = opts or {}
   local reg = nebula_app_registry[_current_app]
-  local base = visual_type:sub(-#"Visual") == "Visual"
-    and visual_type:sub(1, #visual_type - #"Visual")
-    or visual_type
+  -- ★ P2-5 fix: 复用 _extract_base helper（消除内联重复）
+  local base = _extract_base(visual_type)
 
   -- ★ Phase 3.10.5: 自动推断模式
   local mode = opts.mode
@@ -224,9 +223,8 @@ function nebula_app_register_slot(name, visual_type, opts)
   assert(_current_app, "nebula_app_register_slot: must be called between nebula_app_begin and nebula_app_end")
   opts = opts or {}
   local reg = nebula_app_registry[_current_app]
-  local base = visual_type:sub(-#"Visual") == "Visual"
-    and visual_type:sub(1, #visual_type - #"Visual")
-    or visual_type
+  -- ★ P2-5 fix: 复用 _extract_base helper（消除内联重复）
+  local base = _extract_base(visual_type)
 
   -- ★ Phase 3.9: producer 模式（新 API）
   local producer = opts.producer
@@ -279,9 +277,8 @@ function nebula_app_register_shadow(name, visual_type, opts)
   assert(_current_app, "nebula_app_register_shadow: must be called between nebula_app_begin and nebula_app_end")
   opts = opts or {}
   local reg = nebula_app_registry[_current_app]
-  local base = visual_type:sub(-#"Visual") == "Visual"
-    and visual_type:sub(1, #visual_type - #"Visual")
-    or visual_type
+  -- ★ P2-5 fix: 复用 _extract_base helper（消除内联重复）
+  local base = _extract_base(visual_type)
 
   table.insert(reg.shadows, {
     name         = name,

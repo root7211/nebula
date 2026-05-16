@@ -5,8 +5,7 @@
 -- Nelua 的 require 是编译期包含，未使用符号自动 DCE（dead code elimination）。
 -- =============================================================================
 
-## cinclude "<stdio.h>"
-## cinclude "<string.h>"
+require "cstdlib_bindings"
 
 require "nebula_core"
 require "nebula_builtins"
@@ -19,6 +18,3 @@ require "text_runtime"
 require "nebula_cursor"
 require "nebula_arena"
 require "nebula_theme"
-
-global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
-global function snprintf(buf: cstring, size: csize, fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end

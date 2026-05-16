@@ -23,10 +23,7 @@
 --   · 建议默认容量 2 MB，足以支撑绝大多数 UI 场景
 -- =============================================================================
 
-## cinclude "<stdint.h>"
-## cinclude "<string.h>"
-
-global function memset(ptr: pointer, val: cint, n: csize): pointer <cimport, nodecl> end
+require "cstdlib_bindings"
 
 -- =============================================================================
 -- NebulaArena：线性分配器状态

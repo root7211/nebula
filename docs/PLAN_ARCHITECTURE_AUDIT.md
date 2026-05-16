@@ -52,10 +52,10 @@
 | # | 问题 | 涉及文件 | 描述 | 修复方案 |
 |:--|:-----|:---------|:-----|:---------|
 | P2-1 | UTF-8 解码重复 4 次 | `text_runtime.nelua` ×3, `nebula_apps.nelua` ×1 | 相同的 `b0 < 0x80 / 0xE0 / 0xF0` 分支逻辑。 | 提取 `nebula_utf8_decode(bytes, i, len) -> (codepoint, byte_len)` 共享函数。 |
-| P2-2 | WASM RenderPassAttachment 重复 6 次 | `pipeline_factory.lua` | shadow 管线 3 pass × WASM/native 分支。 | 提取 `_emit_render_pass_attachment(target_view, wasm_mode)` Lua helper。 |
-| P2-3 | C stdlib 声明重复 4 次 | 3× `font_preprocessor*.nelua`, `nebula_arena.nelua` | `fopen/fclose/malloc/free/memset` 各自独立声明。 | 创建 `src/cstdlib_bindings.nelua`，统一声明后 require 引入。 |
-| P2-4 | `printf`/`snprintf` 重复声明 | `app.nelua` L548, `renderer.nelua` L28 | 两文件独立声明相同函数。 | 合并到共享绑定模块。 |
-| P2-5 | `_extract_base` 逻辑内联 3 次 | `app_factory.lua` L173/L227/L283 | helper 函数已存在（L38）但 3 处未使用。 | 统一调用 `_extract_base()`。 |
+| P2-2 | ✅ WASM RenderPassAttachment 重复 6 次 | `pipeline_factory.lua` | shadow 管线 3 pass × WASM/native 分支。 | 提取 `emit_render_pass_begin(emit, view_expr)` Lua helper。(PR #23) |
+| P2-3 | ✅ C stdlib 声明重复 4 次 | 3× `font_preprocessor*.nelua`, `nebula_arena.nelua` | `fopen/fclose/malloc/free/memset` 各自独立声明。 | 创建 `src/cstdlib_bindings.nelua`，统一声明后 require 引入。(PR #23) |
+| P2-4 | ✅ `printf`/`snprintf` 重复声明 | `app.nelua` L548, `renderer.nelua` L28 | 两文件独立声明相同函数。 | 合并到共享绑定模块。(PR #23) |
+| P2-5 | ✅ `_extract_base` 逻辑内联 3 次 | `app_factory.lua` L173/L227/L283 | helper 函数已存在（L38）但 3 处未使用。 | 统一调用 `_extract_base()`。(PR #23) |
 | P2-6 | ButtonVisual 重复 8 次 | 8 个 example 文件 | 相同的 record 字段 + 状态机 + derive 调用。 | 创建 `examples/common/button_visual.nelua` 共享定义，各 demo require 引入。 |
 | P2-7 | WASM 主循环样板重复 6 次 | 6 个 example 文件 | 15-20 行相同的全局变量 + frame callback。 | 提供 `nebula_wasm_main(app, renderer)` 宏，一行生成 WASM 主循环。 |
 | P2-8 | 魔法数字散落 | 全代码库 | `18.0`（行高）、`124`（pipe）、`1280×800`（窗口）、高亮 RGBA 值等无常量名。 | 创建 `src/nebula_constants.nelua`（运行时）和 `src/derive/nebula_config.lua`（编译期），集中定义所有常量。 |
