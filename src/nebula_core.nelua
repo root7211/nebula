@@ -98,6 +98,9 @@
 -- 以及数学工具函数 lerp_f32, lerp_color, lerp_vec2, ease_out, ease_in
 require "nebula_types"
 
+-- ★ P2-8: 集中化运行时常量（队列尺寸、行高、字符码位、缓冲区、GPU 枚举等）
+require "nebula_constants"
+
 -- =============================================================================
 -- 编译期推导引擎（Compile-Time Derivation Engine）
 -- =============================================================================
@@ -1999,11 +2002,12 @@ require "nebula_types"
 ##   _nebula_last_app_spec = spec
 ##   _nebula_last_app_name = app_name
 ##   -- ★ Phase 4.9.1: app 级 cell 默认值
-##   local app_cell_w = (spec.cell and spec.cell.w) or 10.0
-##   local app_cell_h = (spec.cell and spec.cell.h) or 16.0
+##   local app_cell_w = (spec.cell and spec.cell.w) or _cfg.DEFAULT_CELL_W
+##   local app_cell_h = (spec.cell and spec.cell.h) or _cfg.DEFAULT_CELL_H
 ##   -- ★ 默认 layout：省略时自动使用 1280x800，消除布局样板
 ##   if not spec.layout then
-##     spec.layout = { direction = "column", width = 1280, height = 800 }
+##     local _cfg = require("nebula_config")
+##     spec.layout = { direction = "column", width = _cfg.DEFAULT_WIN_WIDTH, height = _cfg.DEFAULT_WIN_HEIGHT }
 ##   end
 ##   -- 设置根布局
 ##   nebula_app_set_root_layout(app_name, spec.layout)

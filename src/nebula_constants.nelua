@@ -1,0 +1,86 @@
+-- =============================================================================
+-- nebula_constants.nelua — Centralized runtime constants
+--
+-- ★ P2-8: 魔法数字集中化
+--
+-- 所有跨模块共享的数值常量集中定义于此，消除散落在代码库中的魔法数字。
+-- 每个常量使用 <comptime> 标注，确保零运行时开销。
+--
+-- 分区规则：
+--   1. Input & Queue   — 输入事件队列尺寸
+--   2. Editor          — 文本编辑器度量
+--   3. Character Codes — ASCII 字符码位
+--   4. Buffer Sizes    — 搜索/路径等固定缓冲区
+--   5. GPU Constants   — WGPU 枚举/标志位
+-- =============================================================================
+
+-- =============================================================================
+-- 1. Input & Queue
+-- =============================================================================
+
+-- 字符/按键环形队列容量（GLFW 回调写入，nebula_collect_input 消费）
+global NEBULA_INPUT_QUEUE_SIZE: uint32 <comptime> = 64
+
+-- 每帧最大控制键消费数（key_input snapshot 上限）
+global NEBULA_KEY_BATCH_SIZE: uint8 <comptime> = 16
+
+-- =============================================================================
+-- 2. Editor
+-- =============================================================================
+
+-- DenseText 行高（像素），用于滚动偏移 ↔ 行号换算
+global NEBULA_EDITOR_LINE_HEIGHT: float32 <comptime> = 18.0
+
+-- 光标闪烁半周期（秒）：前半秒可见，后半秒不可见
+global NEBULA_CURSOR_BLINK_PERIOD: float64 <comptime> = 0.5
+
+-- =============================================================================
+-- 3. Character Codes
+-- =============================================================================
+
+-- 管道符 '|' — 行号栏右侧分隔符
+global NEBULA_CHAR_PIPE: uint32 <comptime> = 124
+
+-- 波浪号 '~' — 无内容行的 Vim 风格标记
+global NEBULA_CHAR_TILDE: uint32 <comptime> = 126
+
+-- 空格 ' ' — 空白填充
+global NEBULA_CHAR_SPACE: uint32 <comptime> = 32
+
+-- 问号 '?' — 不可识别字符的回退字形
+global NEBULA_CHAR_FALLBACK: cint <comptime> = 63
+
+-- 斜杠 '/' — 路径分隔符（POSIX）
+global NEBULA_CHAR_SLASH: uint8 <comptime> = 47
+
+-- =============================================================================
+-- 4. Buffer Sizes
+-- =============================================================================
+
+-- 搜索查询缓冲区
+global NEBULA_SEARCH_BUF_SIZE: uint32 <comptime> = 1024
+
+-- 替换文本缓冲区
+global NEBULA_REPLACE_BUF_SIZE: uint32 <comptime> = 1024
+
+-- 最大搜索匹配数
+global NEBULA_MAX_SEARCH_MATCHES: uint32 <comptime> = 4096
+
+-- 文件路径缓冲区
+global NEBULA_FILE_PATH_BUF_SIZE: uint32 <comptime> = 4096
+
+-- 窗口标题缓冲区
+global NEBULA_TITLE_BUF_SIZE: uint32 <comptime> = 256
+
+-- 行高亮颜色数组 / 行展开缓冲区
+global NEBULA_LINE_BUF_SIZE: uint32 <comptime> = 1024
+
+-- =============================================================================
+-- 5. GPU Constants
+-- =============================================================================
+
+-- WGPUTextureUsage_RenderAttachment（wgpu-native v29）
+global NEBULA_TEXTURE_USAGE_RENDER_ATTACHMENT: uint32 <comptime> = 0x00000010
+
+-- WGPURenderPassColorAttachment.depthSlice 全层标记
+global NEBULA_DEPTH_SLICE_ALL: uint32 <comptime> = 0xFFFFFFFF

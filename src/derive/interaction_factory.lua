@@ -147,6 +147,9 @@ end
 --   extra_source_hook : function? — 在 source_parts 拼装中、process_input 之后执行的钩子
 --                                   function(spec) -> string (额外 Nelua 源码)
 -- =============================================================================
+-- ★ P2-8: 加载编译期配置常量
+local _cfg = require("nebula_config")
+
 NEBULA_PRIMITIVES = {}
 
 -- ---- 1. hoverable ----
@@ -343,12 +346,12 @@ NEBULA_PRIMITIVES["scrollable"] = {
     table.insert(lines, "  if self.max_scroll < 0.0 then self.max_scroll = 0.0 end")
     -- 滚轮滚动（仅在 hovered 状态下响应）
     table.insert(lines, "  if self.hover.is_hovered then")
-    table.insert(lines, "    local scroll_speed = 30.0")
+    table.insert(lines, ("    local scroll_speed = %.1f"):format(_cfg.SCROLL_SPEED))
     table.insert(lines, "    self.scroll_offset_y = self.scroll_offset_y - input.scroll_dy * scroll_speed")
     table.insert(lines, "  end")
     -- 滚动条拖拽逻辑
     table.insert(lines, "  if self.click.just_clicked then")
-    table.insert(lines, "    local bar_x = self.visual.pos.x + self.visual.size.x - 10.0")
+    table.insert(lines, ("    local bar_x = self.visual.pos.x + self.visual.size.x - %.1f"):format(_cfg.SCROLLBAR_WIDTH))
     table.insert(lines, "    if input.mouse_x >= bar_x then")
     table.insert(lines, "      self.is_dragging_bar = true")
     table.insert(lines, "      self.drag_start_y = input.mouse_y")

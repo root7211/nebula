@@ -58,7 +58,7 @@
 | P2-5 | ✅ `_extract_base` 逻辑内联 3 次 | `app_factory.lua` L173/L227/L283 | helper 函数已存在（L38）但 3 处未使用。 | 统一调用 `_extract_base()`。(PR #23) |
 | P2-6 | ButtonVisual 重复 8 次 | 8 个 example 文件 | 相同的 record 字段 + 状态机 + derive 调用。 | 创建 `examples/common/button_visual.nelua` 共享定义，各 demo require 引入。 |
 | P2-7 | WASM 主循环样板重复 6 次 | 6 个 example 文件 | 15-20 行相同的全局变量 + frame callback。 | 提供 `nebula_wasm_main(app, renderer)` 宏，一行生成 WASM 主循环。 |
-| P2-8 | 魔法数字散落 | 全代码库 | `18.0`（行高）、`124`（pipe）、`1280×800`（窗口）、高亮 RGBA 值等无常量名。 | 创建 `src/nebula_constants.nelua`（运行时）和 `src/derive/nebula_config.lua`（编译期），集中定义所有常量。 |
+| P2-8 | ✅ 魔法数字散落 | 全代码库 | `nebula_constants.nelua`（运行时 18 个常量）+ `nebula_config.lua`（编译期 16 个常量），消除 ~60+ 散落的魔法数字。 | ✅ 已完成 |
 | P2-9 | 主题双色彩表示 | `nebula_theme.nelua` L21-100 | uint32 packed RGBA 与 `Color{r,g,b,a}` float 混用。 | 统一为 `NebulaColor` record，提供 `to_packed() -> uint32` 和 `to_float() -> Color` 转换。 |
 | P2-10 | 主题无运行时切换 | `nebula_theme.nelua` | 100 个独立函数返回硬编码色值，无 theme struct。 | 引入 `NebulaTheme` record 包含所有色值字段，全局 `_nebula_active_theme` 指针，函数改为读取 active theme 字段。 |
 | P2-11 | Deferred | 回调 callback 类型擦除 | `wgpu_bindings.nelua` L416-448 | `WGPURequestAdapterCallbackInfo.callback` 类型为 `pointer`，签名错误编译不报错。 | 需本地编译验证 Nelua 对 `<cimport>` record 中 function pointer 类型的支持。 |
@@ -141,7 +141,7 @@
 | B2 UTF-8 统一 | 提取 `nebula_utf8_decode` 共享函数 | P2-1 |
 | B3 代码生成 helper | 提取 WASM RenderPassAttachment + `_extract_base` 复用 | P2-2, P2-5 |
 | B4 主题系统升级 | 引入 `NebulaTheme` record，统一色彩表示，支持运行时切换 | P2-9, P2-10 |
-| B5 常量集中化 | 创建 `nebula_constants.nelua` + `nebula_config.lua` | P2-8 |
+| B5 常量集中化 | ✅ `nebula_constants.nelua` + `nebula_config.lua` | P2-8 |
 | B6 示例共享 | 创建 `examples/common/` 目录，提取 ButtonVisual 等共享定义 | P2-6, P2-7 |
 | B7 框架增强 | 组件 visible 标志 + 回调类型安全 | P2-11, P2-12 |
 

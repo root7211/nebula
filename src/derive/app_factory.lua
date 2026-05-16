@@ -8,6 +8,8 @@
 -- 新增组件类别仅需调用 nebula_register_category() 注册，
 -- 无需修改 gen_app_record/init/update/draw/deinit 等 5 个函数。
 --
+-- ★ P2-8: 编译期默认值通过 nebula_config.lua 集中管理
+--
 -- ★ Phase 3.8 新增：Arena 内嵌，nebula_frame_render 封装
 -- ★ Phase 3.9 新增：
 --   · nebula_app_register_text  — 文本一等公民（原语 3）
@@ -34,6 +36,9 @@
 
 -- 全局应用注册表（导出为全局，供测试和 nebula_derive_app 访问）
 nebula_app_registry = nebula_app_registry or {}
+
+-- ★ P2-8: 加载编译期配置常量
+local _cfg = require("nebula_config")
 
 -- 当前正在构建的 App 名称
 local _current_app = nil
@@ -289,8 +294,8 @@ function nebula_app_register_shadow(name, visual_type, opts)
     visual_type  = visual_type,
     base         = base,
     blur_radius  = opts.blur_radius or 8.0,
-    win_w        = opts.win_w or 800,
-    win_h        = opts.win_h or 600,
+    win_w        = opts.win_w or _cfg.DEFAULT_VIEWPORT_WIDTH,
+    win_h        = opts.win_h or _cfg.DEFAULT_VIEWPORT_HEIGHT,
   })
 end
 
@@ -322,9 +327,9 @@ function nebula_app_register_dense_text(name, visual_type, opts)
     name        = name,
     visual_type = visual_type,
     base        = base,
-    max_chars   = opts.max_chars or 6000,
-    cell_w      = opts.cell_w or 10.0,
-    cell_h      = opts.cell_h or 16.0,
+    max_chars   = opts.max_chars or _cfg.DEFAULT_MAX_DENSE_CHARS,
+    cell_w      = opts.cell_w or _cfg.DEFAULT_CELL_W,
+    cell_h      = opts.cell_h or _cfg.DEFAULT_CELL_H,
     producer    = opts.producer,
     layout      = opts.layout or nil,  -- ★ Phase 4.7-S3: 布局约束
     -- ★ Phase 4.8-NL: 布局注册顺序
@@ -486,8 +491,8 @@ local function _solve_layout(reg)
   end
 
   -- 使用 root_layout 指定的视口尺寸，或默认 800x600
-  local base_vw = reg.root_layout.width  or 800
-  local base_vh = reg.root_layout.height or 600
+  local base_vw = reg.root_layout.width  or _cfg.DEFAULT_VIEWPORT_WIDTH
+  local base_vh = reg.root_layout.height or _cfg.DEFAULT_VIEWPORT_HEIGHT
 
   -- ★ Phase 3.11: 保留单次解算结果（用于 init 中的初始坐标注入）
   local root = nebula_layout_node(root_spec)
@@ -626,7 +631,7 @@ local function _emit_draw_standard(reg, emit)
     local uniforms_record = group.base .. "Uniforms"
     local pipe_var = "self.pipe_" .. group.base:lower()
 
-    local STACK_BATCH_LIMIT = 128
+    local STACK_BATCH_LIMIT = _cfg.STACK_BATCH_LIMIT
 
     emit(("  -- 批量绘制 %s（%d 静态 + %d 动态插槽）"):format(
       vt, #static_members, #slot_members))
@@ -1114,8 +1119,8 @@ local function gen_app_record(app_name, reg)
   emit("}")
 
   -- ★ 窗口尺寸常量（从 root_layout 推导，供 nebula_init / init_themed 使用）
-  local win_w = (reg.root_layout and reg.root_layout.width)  or 1280
-  local win_h = (reg.root_layout and reg.root_layout.height) or 800
+  local win_w = (reg.root_layout and reg.root_layout.width)  or _cfg.DEFAULT_WIN_WIDTH
+  local win_h = (reg.root_layout and reg.root_layout.height) or _cfg.DEFAULT_WIN_HEIGHT
   emit("")
   emit("-- ★ 窗口尺寸常量（供 nebula_init / init_themed 使用）")
   emit(("global %s_WIN_WIDTH: integer <comptime> = %d"):format(app_name, win_w))
