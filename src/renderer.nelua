@@ -21,12 +21,7 @@ require "nebula_core"
 require "wgpu_bindings"
 require "glfw_bindings"
 
-## cinclude "<stdio.h>"
-## cinclude "<string.h>"
-## cinclude "<stdlib.h>"
-
-global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
-global function memcpy(dst: pointer, src: pointer, n: csize): pointer <cimport, nodecl> end
+require "cstdlib_bindings"
 
 -- =============================================================================
 -- NebulaRenderer：WebGPU 设备与 Surface 的生命周期管理

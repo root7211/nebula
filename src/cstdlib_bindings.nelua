@@ -1,0 +1,32 @@
+-- =============================================================================
+-- cstdlib_bindings.nelua — C Standard Library Bindings
+--
+-- ★ P2-3/P2-4 refactor: 统一 C stdlib 函数声明，消除跨模块重复。
+-- 所有需要 C 标准库函数的模块统一 require 本文件。
+--
+-- Nelua 的 require 是幂等的，重复 require 不会产生副作用。
+-- =============================================================================
+
+## cinclude "<stdio.h>"
+## cinclude "<string.h>"
+## cinclude "<stdlib.h>"
+## cinclude "<stdint.h>"
+
+-- ===== stdio.h =====
+global FILE: type <cimport,nodecl,forwarddecl> = @record{}
+global function printf(fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+global function snprintf(buf: cstring, size: csize, fmt: cstring, ...: cvarargs): int32 <cimport, nodecl> end
+global function fopen(path: cstring, mode: cstring): *FILE <cimport, nodecl> end
+global function fclose(fp: *FILE): cint <cimport, nodecl> end
+global function fread(ptr: pointer, size: csize, count: csize, fp: *FILE): csize <cimport, nodecl> end
+global function fscanf(fp: *FILE, fmt: cstring, ...: cvarargs): cint <cimport, nodecl> end
+global function fgetc(fp: *FILE): cint <cimport, nodecl> end
+
+-- ===== string.h =====
+global function memcpy(dst: pointer, src: pointer, n: csize): pointer <cimport, nodecl> end
+global function memset(ptr: pointer, val: cint, n: csize): pointer <cimport, nodecl> end
+global function strlen(s: cstring): csize <cimport, nodecl> end
+
+-- ===== stdlib.h =====
+global function malloc(size: csize): pointer <cimport, nodecl> end
+global function free(ptr: pointer): void <cimport, nodecl> end
