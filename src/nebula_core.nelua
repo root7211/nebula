@@ -1997,6 +1997,7 @@ require "nebula_constants"
 ## --   dense_texts : table[]? — DenseText [{name, type, max_chars?, cell_w?, cell_h?, producer?, layout?}]（向后兼容）
 ## --   shadows     : table[]? — 阴影组件 [{name, type, blur_radius?}]
 ## function nebula_app(app_name, spec)
+##   local _cfg = require("derive.nebula_config")
 ##   spec = spec or {}
 ##   -- ★ Phase 4.6-S3: 缓存 spec 供 nebula_terminal_main 等后续 sugar 读取
 ##   _nebula_last_app_spec = spec
@@ -2006,7 +2007,6 @@ require "nebula_constants"
 ##   local app_cell_h = (spec.cell and spec.cell.h) or _cfg.DEFAULT_CELL_H
 ##   -- ★ 默认 layout：省略时自动使用 1280x800，消除布局样板
 ##   if not spec.layout then
-##     local _cfg = require("derive.nebula_config")
 ##     spec.layout = { direction = "column", width = _cfg.DEFAULT_WIN_WIDTH, height = _cfg.DEFAULT_WIN_HEIGHT }
 ##   end
 ##   -- 设置根布局
