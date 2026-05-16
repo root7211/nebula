@@ -45,6 +45,13 @@ if not _cfg_ok then
   _cfg = dofile(_this_dir .. "nebula_config.lua")
 end
 
+-- ★ Phase 5.0 S1a: 加载全知图构建模块
+local _og_ok, _OmniscientGraph = pcall(require, "derive.omniscient_graph")
+if not _og_ok then
+  local _this_dir = debug.getinfo(1, "S").source:match("^@(.+/)") or ""
+  _OmniscientGraph = dofile(_this_dir .. "omniscient_graph.lua")
+end
+
 -- 当前正在构建的 App 名称
 local _current_app = nil
 
@@ -366,6 +373,74 @@ function nebula_app_register_layout_node(name, layout)
   })
 end
 
+-- =============================================================================
+-- ★ Phase 5.0 S1a: 全知图注册 API
+-- =============================================================================
+
+--- 声明一个可变状态。
+--- 在 nebula_app_end 时，所有 states/bindings/events 一起构建全知图。
+---
+--- @param name string 状态名（如 "count"）
+--- @param config table 配置：{type, default}
+function nebula_state(name, config)
+  assert(_current_app, "nebula_state: must be called between nebula_app_begin and nebula_app_end")
+  assert(name, "nebula_state: name required")
+  config = config or {}
+  local reg = nebula_app_registry[_current_app]
+  if not reg._states then reg._states = {} end
+  assert(not reg._states[name],
+    ("nebula_state: state '%s' already declared in app '%s'"):format(name, _current_app))
+  reg._states[name] = {
+    name    = name,
+    type    = config.type or "int32",
+    default = config.default,
+  }
+end
+
+--- 声明一个绑定（派生状态）。
+--- 当 depends 中的状态变化时，compute 函数重新计算 target 的值。
+---
+--- @param target string 绑定目标状态名（如 "label_text"）
+--- @param config table 配置：{depends, compute, affects}
+function nebula_bind(target, config)
+  assert(_current_app, "nebula_bind: must be called between nebula_app_begin and nebula_app_end")
+  assert(target, "nebula_bind: target required")
+  config = config or {}
+  local reg = nebula_app_registry[_current_app]
+  if not reg._bindings then reg._bindings = {} end
+  -- 检查重复
+  for _, b in ipairs(reg._bindings) do
+    assert(b.target ~= target,
+      ("nebula_bind: binding target '%s' already declared in app '%s'"):format(target, _current_app))
+  end
+  table.insert(reg._bindings, {
+    target  = target,
+    depends = config.depends or {},
+    compute = config.compute,
+    affects = config.affects,
+  })
+end
+
+--- 声明一个事件处理。
+--- 指定组件的事件类型及对应的 mutation 代码。
+---
+--- @param target string 目标组件名（如 "button"）
+--- @param event_type string 事件类型（如 "click"）
+--- @param config table 配置：{mutation}
+function nebula_on(target, event_type, config)
+  assert(_current_app, "nebula_on: must be called between nebula_app_begin and nebula_app_end")
+  assert(target, "nebula_on: target required")
+  assert(event_type, "nebula_on: event_type required")
+  config = config or {}
+  local reg = nebula_app_registry[_current_app]
+  if not reg._events then reg._events = {} end
+  table.insert(reg._events, {
+    target     = target,
+    event_type = event_type,
+    mutation   = config.mutation,
+  })
+end
+
 -- ★ Phase 3.11: 内部辅助函数 — 将组件的 layout 字段转换为 layout_engine 节点
 -- 递归处理 layout.children（允许容器组件声明嵌套布局）
 local function _build_layout_node(name, layout_spec)
@@ -523,11 +598,16 @@ end
 
 -- 结束 App 声明
 -- ★ Phase 3.11: 在 end 时自动执行布局解算
+-- ★ Phase 5.0 S1a: 在 end 时构建全知图
 function nebula_app_end()
   assert(_current_app, "nebula_app_end: no app currently being declared")
   local reg = nebula_app_registry[_current_app]
   -- ★ Phase 3.11: 自动解算布局
   _solve_layout(reg)
+  -- ★ Phase 5.0 S1a: 如果有 states/bindings/events 声明，构建全知图
+  if reg._states or reg._bindings or reg._events then
+    reg._omniscient_graph = _OmniscientGraph.build(reg)
+  end
   _current_app = nil
 end
 
@@ -1489,4 +1569,4 @@ function nebula_app_generate(app_name)
   return source
 end
 
-return "nebula_app_factory_v0.10_phase4.8-nl"
+return "nebula_app_factory_v0.11_phase5.0-s1a"
