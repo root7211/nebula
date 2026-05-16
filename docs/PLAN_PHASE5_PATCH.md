@@ -1,8 +1,9 @@
 # Phase 5.0 全知图方案：完整补丁文档
 
-**基准文档**：`docs/PLAN_PHASE5_OMNISCIENT_GRAPH.md`（2026-05-16 提交）
+**基准文档**：`PLAN_PHASE5_OMNISCIENT_GRAPH.md`（2026-05-16 提交，补丁整合版）
 **评估来源**：`Phase5_0_全知图方案_契合度评估.md`
 **目标**：将评估文档中的 6 项补丁清单落地为具体的 API/数据结构变更草案，使原始方案从"设计正确"升级为"可实现、可审计、可控"。
+**更新日期**：2026-05-16（补充 affects 强制校验、DSL 回退策略、hit-test 动态岛清单）
 
 ---
 
@@ -30,7 +31,7 @@
 | 逻辑运算 | `and`, `or`, `not` | `self.visible = self.active and not self.hidden` |
 | 字段访问 | 仅 `self.<state>` | `self.label_text = self.count` |
 | 白名单函数 | `snprintf`, `math.floor`, `math.ceil`, `math.max`, `math.min` | `snprintf(buf, 32, "Count: %d", self.count)` |
-| 条件表达式 | `if <cond> then <expr> else <expr>` | `self.status = self.count > 0 and "ok" or "idle"` |
+| 条件表达式 | `if <cond> then <expr> else <expr>` | `self.status = if self.count > 0 then "ok" else "idle"` |
 | 字面量 | 整数、浮点、布尔、字符串（双引号） | `self.enabled = true` |
 
 #### 禁止的语法
@@ -41,6 +42,8 @@
 | 外部变量 | 非 `self.` 开头的变量 | 破坏编译期封闭性 |
 | 循环 | `for`, `while`, `repeat` | 复杂度不可控 |
 | 表构造 | `{}` 表字面量 | 需要运行时分配 |
+| 表索引访问 | `self.data[i]` | 运行时索引无法静态分析 |
+| 方法调用 | `self:do_something()` | side effects 不可追踪 |
 | 元方法 | `__index`, `__newindex` 等 | 运行时行为不可预测 |
 
 ### 1.3 AST 数据结构
@@ -127,6 +130,7 @@ nebula_bind("label_text", {
 | 禁止语法 | `nebula: mutation uses disallowed 'for' loop (allowed: assign, arithmetic, comparison, logic, whitelist functions)` |
 | 未知状态 | `nebula: mutation references unknown state 'self.coutn' (did you mean 'count'?)` |
 | 类型不匹配 | `nebula: mutation assigns string to state 'count' (declared as int32)` |
+| 非白名单函数 | `nebula: mutation calls 'table.insert' which is not in whitelist` |
 
 ### 1.7 与 axiom_validator 的集成
 
@@ -136,6 +140,19 @@ nebula_bind("label_text", {
 -- Rule 6: compute 的 read_set 必须是 depends 的超集（depends 中声明的状态必须被使用）
 -- Rule 7: mutation 不得调用非白名单函数
 ```
+
+### 1.8 不支持语法的回退策略
+
+**新增**：当用户的逻辑超出受限 DSL 范围时，有以下回退路径：
+
+| 场景 | 回退方案 |
+|:-----|:---------|
+| 需要循环逻辑 | 在 `process_input` 中手写循环，或使用白名单函数 + 条件表达式组合 |
+| 需要表索引访问 | 将数据操作封装为编译期可展开的固定大小循环（unroll），或使用 `process_input` |
+| 需要方法调用 | 将方法体展开为 DSL 支持的语句序列，或在 `process_input` 中调用 |
+| 需要复杂控制流 | 拆分多个 `nebula_on` 声明，或在 `process_input` 中处理 |
+
+**重要声明**：受限 DSL 是 Phase 5.0 的初始版本限制。后续版本可能扩展语法子集（如支持表索引、更多白名单函数）。在 DSL 不支持的场景下，用户应回退到 `process_input` 手动处理，这不会影响应用的其他部分使用全知图。
 
 ---
 
@@ -223,6 +240,11 @@ function derive_effects_from_graph(graph)
         depends_on = binding.target,
       })
     end
+    
+    -- ★ 规则 3（axiom_validator Rule 8）：
+    -- 如果既不是 text component 的 bound_state，也不是 visual binding，
+    -- 且用户未显式声明 affects，则编译报错。
+    -- 理由：纯逻辑中间变量的变更不会触发任何渲染更新，必须显式声明影响目标。
   end
   
   return effects
@@ -297,6 +319,8 @@ nebula_bind("label_text", {
   compute = '...',
   -- ★ 新增：显式声明此绑定影响哪些组件/字段
   -- 如果不指定，编译器自动推导
+  -- 如果 target 既不是 text component 的 bound_state 也不是 visual binding，
+  -- 则必须显式声明（axiom_validator Rule 8）
   affects = {
     { target = "label", field = "text", invalidation = "text_update" },
   },
@@ -408,11 +432,7 @@ hit-test 语义规则：
 
 1. 路由链的结构（hit-test 顺序、组件遍历顺序）在编译期确定
 2. bounds 的来源允许运行时变化，从 self.<comp>.visual.bounds 读取
-3. 暂不支持的复杂场景明确标记为"动态岛"：
-   - 滚动容器内的子组件 hit-test
-   - 嵌套裁剪区域
-   - z-order 动态变化（运行时排序）
-   - 文字组件的局部命中（富文本）
+3. 不支持的复杂场景明确标记为"动态岛"（见 §4.4）
 ```
 
 #### 实现
@@ -451,23 +471,6 @@ end
 -- function hit_test_rect(mx, my, bounds: Rect): bool
 ```
 
-#### 不支持场景的声明
-
-```lua
--- 在文档中明确标注：
--- Phase 5.0 的 hit-test 模型仅支持：
--- - 静态/半静态布局的矩形命中测试
--- - 无嵌套滚动的平面布局
--- 
--- 以下场景标记为"动态岛"，需使用 process_input 手动处理：
--- - 滚动容器内的子组件
--- - 嵌套裁剪（clip）
--- - 动态 z-order
--- - 富文本局部命中
--- 
--- 这些将在 Phase 5.x 中作为扩展处理。
-```
-
 ### 4.3 与 interaction_factory 的关系
 
 ```
@@ -478,6 +481,20 @@ interaction_factory（已有）生成的 process_input 仍然保留，作为：
 
 全知图的 _route_input 是主路径，处理所有可静态确定的事件分发。
 ```
+
+### 4.4 动态岛清单（新增）
+
+**Phase 5.0 不支持以下场景，需使用 `process_input` 手动处理：**
+
+| # | 场景 | 原因 | 替代方案 | 计划解决 |
+|:--|:-----|:-----|:---------|:---------|
+| 1 | 滚动容器内的子组件 hit-test | bounds 随滚动偏移动态变化，编译期无法确定最终位置 | `process_input` + 手动计算滚动后 bounds | Phase 5.x |
+| 2 | 嵌套裁剪区域（clip） | clip 区域可能运行时变化，hit-test 需要裁剪判断 | `process_input` + 手动裁剪检测 | Phase 5.x |
+| 3 | 动态 z-order（运行时排序） | 组件层级顺序运行时变化，编译期分发链无法覆盖 | `process_input` + 运行时 z-order 排序 | Phase 5.x |
+| 4 | 富文本局部命中 | 文字组件内不同字符有不同 bounds | `process_input` + 字符级 hit-test | Phase 5.x |
+| 5 | 拖拽过程中的动态目标 | 拖拽目标在运行时变化 | `process_input` + 拖拽状态机 | Phase 5.x |
+
+**迁移注意事项**：在第五梯队迁移 `text_editor_demo` 时，需要逐一审视其 hit-test 场景。编辑器的搜索栏、状态栏、行号栏如果是平面布局（无滚动/裁剪嵌套），可以迁移到 `nebula_on`。如果存在滚动容器内的子组件，则保留该场景的 `process_input` 处理。
 
 ---
 
@@ -730,17 +747,17 @@ return Snapshot
 
 | 原始文档章节 | 补丁 | 变更类型 |
 |:-------------|:-----|:---------|
-| §2.2 `nebula_bind` | 补丁 2 | 新增 `affects` 字段（可选） |
+| §2.2 `nebula_bind` | 补丁 2 | 新增 `affects` 字段（可选）+ Rule 8 强制校验 |
 | §2.3 `nebula_on` | 补丁 1, 3 | `mutation` 改为 AST 解析；新增路由去重规则 |
 | §3.1 `nebula_build_omniscient_graph` | 补丁 2 | 新增 `graph.effects_for_state` |
 | §3.3 `trace_propagation` | 补丁 2 | `find_gpu_effect` 替换为 Effect 模型 |
 | §3.4 emit_event_handler | 补丁 1 | mutation 通过 AST.write_set 解析 |
-| §3.5 emit_input_router | 补丁 4 | hit-test 改用运行时 bounds |
+| §3.5 emit_input_router | 补丁 4 | hit-test 改用运行时 bounds + 动态岛清单 |
 | §3.4 emit_commit | 补丁 5 | dirty bit 分配使用 DirtyMap 模块 |
 | §4.2 向后兼容性 | 补丁 3 | 新增路由去重规则表 |
 | §7 风险与缓解 | 补丁 1, 5 | 更新 mutation DSL 和 dirty bit 策略 |
-| 新文件 | 补丁 1 | `derive/mutation_ast.lua` |
-| 新文件 | 补丁 2 | `derive/effect_model.lua` |
+| 新文件 | 补丁 1 | `derive/mutation_ast.lua` + §1.8 回退策略 |
+| 新文件 | 补丁 2 | `derive/effect_model.lua` + Rule 8 |
 | 新文件 | 补丁 5 | `derive/dirty_map.lua` |
 | 新文件 | 补丁 6 | `tests/smoke_phase5_0_structure.lua` |
 | 新文件 | 补丁 6 | `tests/test_snapshot.lua` |
@@ -752,12 +769,12 @@ return Snapshot
 
 | 文件 | 改动类型 | 描述 |
 |:-----|:---------|:-----|
-| `src/derive/omniscient_graph.lua` | 修改 | 新增 Effect 推导集成 |
+| `src/derive/omniscient_graph.lua` | 修改 | 新增 Effect 推导集成 + dirty bit 分配 |
 | `src/derive/binding_factory.lua` | 修改 | 使用 AST 解析 mutation，使用 DirtyMap 分配 dirty bit |
-| `src/derive/event_router.lua` | 修改 | 运行时 bounds hit-test，路由去重逻辑 |
-| `src/derive/app_factory.lua` | 修改 | 路由去重集成 |
-| `src/derive/mutation_ast.lua` | **新增** | mutation/compute 受限语法解析器 |
-| `src/derive/effect_model.lua` | **新增** | Effect/Invalidation 模型与自动推导 |
+| `src/derive/event_router.lua` | 修改 | 运行时 bounds hit-test，路由去重逻辑，动态岛文档 |
+| `src/derive/app_factory.lua` | 修改 | 路由去重集成 + axiom_validator Rule 8 校验 |
+| `src/derive/mutation_ast.lua` | **新增** | mutation/compute 受限语法解析器 + 回退策略文档 |
+| `src/derive/effect_model.lua` | **新增** | Effect/Invalidation 模型与自动推导 + Rule 8 |
 | `src/derive/dirty_map.lua` | **新增** | dirty bit 分配与多 chunk 支持 |
 | `src/nebula_core.nelua` | 修改 | 新增 `hit_test_rect` 辅助函数 |
 | `tests/smoke_phase5_0.lua` | 修改 | 保持行为回归测试 |
@@ -769,16 +786,16 @@ return Snapshot
 
 ## 实施建议
 
-这 6 个补丁可以分两批实施：
+这 6 个补丁分两批实施：
 
 ### 第一批（必须，阻塞 Phase 5.0 实作）
 
-1. **补丁 1**：mutation AST 解析器（没有它，静态分析不稳）
+1. **补丁 1**：mutation AST 解析器（没有它，静态分析不稳）+ §1.8 回退策略
 2. **补丁 3**：路由去重规则（没有它，会出现双重触发 bug）
 3. **补丁 5**：dirty bit 分配策略（没有它，超过 64 状态时行为未定义）
 
 ### 第二批（重要，但可在 Phase 5.0 第一梯队后追加）
 
-4. **补丁 2**：Effect 模型（可以先用 find_gpu_effect 临时方案，再迁移）
-5. **补丁 4**：hit-test 语义（可以先用 bounds 运行时读取，复杂场景后续扩展）
+4. **补丁 2**：Effect 模型 + Rule 8 强制校验（可先用临时方案，再迁移）
+5. **补丁 4**：hit-test 语义 + 动态岛清单（可先用 bounds 运行时读取，复杂场景后续扩展）
 6. **补丁 6**：结构稳定性回归测试（可以在代码生成稳定后追加）
