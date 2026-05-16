@@ -400,6 +400,7 @@ local function main(): int32
         end
       end
       input.key_pressed = NebulaKey.None
+      input.key_count = 0  -- ★ P1-7: 清空键队列，防止下游组件重复处理
       input.char_count = 0
     end
 

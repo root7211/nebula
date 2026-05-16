@@ -170,6 +170,10 @@ require "nebula_builtins"
 ##     local dt  = (@float32)(now - prev_time)
 ##     prev_time = now
 ##     nebula_collect_input(_nebula_window, &input, dt)
+##     -- ★ P1-7: loop over all keys queued this frame
+##     local _eki: uint8 = 0
+##     while _eki < input.key_count do
+##     input.key_pressed = input.key_input[_eki]
 ##     -- Ctrl+S 保存
 ##     if input.key_pressed == NebulaKey.Save then
 ##       if _editor_has_file then
@@ -264,8 +268,11 @@ require "nebula_builtins"
 ##         end
 ##       end
 ##       input.key_pressed = NebulaKey.None
+##       input.key_count = 0  -- ★ P1-7: 清空键队列，防止下游组件重复处理
 ##       input.char_count = 0
 ##     end
+##     _eki = _eki + 1
+##     end  -- ★ P1-7: end key loop
 ##     -- 修改检测
 ##     if app.%s.undo_stack.cursor ~= prev_undo_cursor then
 ##       _editor_modified = true
