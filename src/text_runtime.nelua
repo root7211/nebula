@@ -545,29 +545,32 @@ global function nebula_cjk_char_display_width(codepoint: uint32): uint32
   return 1
 end
 
+-- ★ P2-1 refactor: UTF-8 单字符解码（消除 3 处重复）
+-- 从 text_bytes[i] 解码一个 UTF-8 字符，返回 (codepoint, byte_length)。
+-- 如果序列不完整或首字节无效，返回 (0, 1) 跳过一个字节。
+local function nebula_utf8_decode_one(text_bytes: *[0]uint8, i: csize, text_len: csize): (uint32, csize)
+  local b0 = text_bytes[i]
+  if b0 < 0x80 then
+    return (@uint32)(b0), 1
+  elseif b0 < 0xE0 and i + 1 < text_len then
+    return ((@uint32)(b0 & 0x1F) << 6) | (@uint32)(text_bytes[i+1] & 0x3F), 2
+  elseif b0 < 0xF0 and i + 2 < text_len then
+    return ((@uint32)(b0 & 0x0F) << 12) | ((@uint32)(text_bytes[i+1] & 0x3F) << 6) | (@uint32)(text_bytes[i+2] & 0x3F), 3
+  elseif i + 3 < text_len then
+    return ((@uint32)(b0 & 0x07) << 18) | ((@uint32)(text_bytes[i+1] & 0x3F) << 12) | ((@uint32)(text_bytes[i+2] & 0x3F) << 6) | (@uint32)(text_bytes[i+3] & 0x3F), 4
+  end
+  return 0, 1
+end
+
 -- ★ Phase 4.7-S1: UTF-8 文本显示宽度计算
 -- 计算 UTF-8 文本的总显示列宽度（CJK=2, ASCII=1）
 global function nebula_utf8_display_width(text: *[0]uint8, byte_len: uint16): uint32
   local width: uint32 = 0
   local i: uint16 = 0
   while i < byte_len do
-    local b0 = text[i]
-    local codepoint: uint32 = 0
-    local blen: uint16 = 1
-    if b0 < 0x80 then
-      codepoint = (@uint32)(b0)
-    elseif b0 < 0xE0 and i + 1 < byte_len then
-      codepoint = ((@uint32)(b0 & 0x1F) << 6) | (@uint32)(text[i+1] & 0x3F)
-      blen = 2
-    elseif b0 < 0xF0 and i + 2 < byte_len then
-      codepoint = ((@uint32)(b0 & 0x0F) << 12) | ((@uint32)(text[i+1] & 0x3F) << 6) | (@uint32)(text[i+2] & 0x3F)
-      blen = 3
-    elseif i + 3 < byte_len then
-      codepoint = ((@uint32)(b0 & 0x07) << 18) | ((@uint32)(text[i+1] & 0x3F) << 12) | ((@uint32)(text[i+2] & 0x3F) << 6) | (@uint32)(text[i+3] & 0x3F)
-      blen = 4
-    end
+    local codepoint: uint32, blen: csize = nebula_utf8_decode_one(text, (@csize)(i), (@csize)(byte_len))
     width = width + nebula_cjk_char_display_width(codepoint)
-    i = i + blen
+    i = i + (@uint16)(blen)
   end
   return width
 end
@@ -604,23 +607,9 @@ global function nebula_cjk_text_compute_advances(
 
   while i < text_len and count + 1 < max_chars do
     out_advances[count] = pen_x
-    local b0 = text_bytes[i]
 
     -- UTF-8 解码
-    local codepoint: uint32 = 0
-    local byte_len: csize = 1
-    if b0 < 0x80 then
-      codepoint = (@uint32)(b0)
-    elseif b0 < 0xE0 and i + 1 < text_len then
-      codepoint = ((@uint32)(b0 & 0x1F) << 6) | (@uint32)(text_bytes[i+1] & 0x3F)
-      byte_len = 2
-    elseif b0 < 0xF0 and i + 2 < text_len then
-      codepoint = ((@uint32)(b0 & 0x0F) << 12) | ((@uint32)(text_bytes[i+1] & 0x3F) << 6) | (@uint32)(text_bytes[i+2] & 0x3F)
-      byte_len = 3
-    elseif i + 3 < text_len then
-      codepoint = ((@uint32)(b0 & 0x07) << 18) | ((@uint32)(text_bytes[i+1] & 0x3F) << 12) | ((@uint32)(text_bytes[i+2] & 0x3F) << 6) | (@uint32)(text_bytes[i+3] & 0x3F)
-      byte_len = 4
-    end
+    local codepoint: uint32, byte_len: csize = nebula_utf8_decode_one(text_bytes, i, text_len)
 
     -- 跳过换行
     if codepoint ~= 10 and codepoint ~= 13 then
@@ -696,23 +685,8 @@ global function nebula_cjk_slug_text_build_vertices(
 
   local i: csize = 0
   while i < text_len do
-    local b0 = text_bytes[i]
-
     -- UTF-8 解码
-    local codepoint: uint32 = 0
-    local byte_len: csize = 1
-    if b0 < 0x80 then
-      codepoint = (@uint32)(b0)
-    elseif b0 < 0xE0 and i + 1 < text_len then
-      codepoint = ((@uint32)(b0 & 0x1F) << 6) | (@uint32)(text_bytes[i+1] & 0x3F)
-      byte_len = 2
-    elseif b0 < 0xF0 and i + 2 < text_len then
-      codepoint = ((@uint32)(b0 & 0x0F) << 12) | ((@uint32)(text_bytes[i+1] & 0x3F) << 6) | (@uint32)(text_bytes[i+2] & 0x3F)
-      byte_len = 3
-    elseif i + 3 < text_len then
-      codepoint = ((@uint32)(b0 & 0x07) << 18) | ((@uint32)(text_bytes[i+1] & 0x3F) << 12) | ((@uint32)(text_bytes[i+2] & 0x3F) << 6) | (@uint32)(text_bytes[i+3] & 0x3F)
-      byte_len = 4
-    end
+    local codepoint: uint32, byte_len: csize = nebula_utf8_decode_one(text_bytes, i, text_len)
 
     if codepoint == 10 or codepoint == 13 then
       i = i + byte_len

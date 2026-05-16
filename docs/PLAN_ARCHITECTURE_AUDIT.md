@@ -51,7 +51,7 @@
 
 | # | 问题 | 涉及文件 | 描述 | 修复方案 |
 |:--|:-----|:---------|:-----|:---------|
-| P2-1 | UTF-8 解码重复 4 次 | `text_runtime.nelua` ×3, `nebula_apps.nelua` ×1 | 相同的 `b0 < 0x80 / 0xE0 / 0xF0` 分支逻辑。 | 提取 `nebula_utf8_decode(bytes, i, len) -> (codepoint, byte_len)` 共享函数。 |
+| P2-1 | ✅ UTF-8 解码重复 4 次 | `text_runtime.nelua` ×3 | 相同的 `b0 < 0x80 / 0xE0 / 0xF0` 分支逻辑。 | 提取 `nebula_utf8_decode_one(text_bytes, i, len) -> (codepoint, byte_len)` 共享函数。(PR #24) |
 | P2-2 | ✅ WASM RenderPassAttachment 重复 6 次 | `pipeline_factory.lua` | shadow 管线 3 pass × WASM/native 分支。 | 提取 `emit_render_pass_begin(emit, view_expr)` Lua helper。(PR #23) |
 | P2-3 | ✅ C stdlib 声明重复 4 次 | 3× `font_preprocessor*.nelua`, `nebula_arena.nelua` | `fopen/fclose/malloc/free/memset` 各自独立声明。 | 创建 `src/cstdlib_bindings.nelua`，统一声明后 require 引入。(PR #23) |
 | P2-4 | ✅ `printf`/`snprintf` 重复声明 | `app.nelua` L548, `renderer.nelua` L28 | 两文件独立声明相同函数。 | 合并到共享绑定模块。(PR #23) |
@@ -61,7 +61,7 @@
 | P2-8 | 魔法数字散落 | 全代码库 | `18.0`（行高）、`124`（pipe）、`1280×800`（窗口）、高亮 RGBA 值等无常量名。 | 创建 `src/nebula_constants.nelua`（运行时）和 `src/derive/nebula_config.lua`（编译期），集中定义所有常量。 |
 | P2-9 | 主题双色彩表示 | `nebula_theme.nelua` L21-100 | uint32 packed RGBA 与 `Color{r,g,b,a}` float 混用。 | 统一为 `NebulaColor` record，提供 `to_packed() -> uint32` 和 `to_float() -> Color` 转换。 |
 | P2-10 | 主题无运行时切换 | `nebula_theme.nelua` | 100 个独立函数返回硬编码色值，无 theme struct。 | 引入 `NebulaTheme` record 包含所有色值字段，全局 `_nebula_active_theme` 指针，函数改为读取 active theme 字段。 |
-| P2-11 | 回调 callback 类型擦除 | `wgpu_bindings.nelua` L416-448 | `WGPURequestAdapterCallbackInfo.callback` 类型为 `pointer`，签名错误编译不报错。 | 定义 typed function pointer 别名。 |
+| P2-11 | Deferred | 回调 callback 类型擦除 | `wgpu_bindings.nelua` L416-448 | `WGPURequestAdapterCallbackInfo.callback` 类型为 `pointer`，签名错误编译不报错。 | 需本地编译验证 Nelua 对 `<cimport>` record 中 function pointer 类型的支持。 |
 | P2-12 | dropdown hack: y=-1000 隐藏 | `dropdown_demo.nelua` L287-298 | 无 visibility/enabled 标志，用屏幕外坐标模拟隐藏。 | 框架层新增 `visible: boolean` 字段，draw 时跳过 visible=false 的组件。 |
 
 ### 1.4 P3 — 测试与工程化
