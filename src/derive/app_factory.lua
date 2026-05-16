@@ -45,11 +45,18 @@ if not _cfg_ok then
   _cfg = dofile(_this_dir .. "nebula_config.lua")
 end
 
--- ★ Phase 5.0 S1a: 加载全知图构建模块
-local _og_ok, _OmniscientGraph = pcall(require, "derive.omniscient_graph")
-if not _og_ok then
-  local _this_dir = debug.getinfo(1, "S").source:match("^@(.+/)") or ""
-  _OmniscientGraph = dofile(_this_dir .. "omniscient_graph.lua")
+-- ★ Phase 5.0 S1a: 延迟加载全知图构建模块（仅在需要时加载，避免影响无状态 App）
+local _OmniscientGraph
+local function _load_omniscient_graph()
+  if _OmniscientGraph then return _OmniscientGraph end
+  local ok, mod = pcall(require, "derive.omniscient_graph")
+  if ok then
+    _OmniscientGraph = mod
+  else
+    local _this_dir = debug.getinfo(1, "S").source:match("^@(.+/)") or ""
+    _OmniscientGraph = dofile(_this_dir .. "omniscient_graph.lua")
+  end
+  return _OmniscientGraph
 end
 
 -- 当前正在构建的 App 名称
@@ -606,7 +613,7 @@ function nebula_app_end()
   _solve_layout(reg)
   -- ★ Phase 5.0 S1a: 如果有 states/bindings/events 声明，构建全知图
   if reg._states or reg._bindings or reg._events then
-    reg._omniscient_graph = _OmniscientGraph.build(reg)
+    reg._omniscient_graph = _load_omniscient_graph().build(reg)
   end
   _current_app = nil
 end
