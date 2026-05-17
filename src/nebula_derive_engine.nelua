@@ -1,0 +1,1489 @@
+-- =============================================================================
+-- nebula_derive_engine.nelua
+-- Nebula GUI Compiler — 编译期推导引擎（Compile-Time Derivation Engine）
+--
+-- 从 nebula_core.nelua 拆分而来（Phase 5.1 架构拆分）。
+-- 职责：将 Visual 声明转换为 Nelua 运行时代码。
+--
+-- 包含：
+--   · 注解注册表（nebula_annotate / nebula_registry）
+--   · Shape Parser + Uniform 布局生成器（std140）
+--   · WGSL 着色器生成器
+--   · derive/*.lua 模块加载（8 个工厂模块）
+--   · State 枚举 / StateMachine / Context 代码生成
+--   · NEBULA_THEME_DEFAULTS 编译期主题默认值表
+--   · nebula_derive / nebula_derive_app 主入口
+--
+-- 对外暴露的 API：
+--   nebula_registry, nebula_annotate, nebula_derive, nebula_derive_app
+--   nebula_gen_uniform_layout, nebula_gen_wgsl_shader
+--   NEBULA_THEME_DEFAULTS
+--   以及由 derive/*.lua 模块注入全局空间的函数
+--
+-- 依赖：nebula_types.nelua, nebula_constants.nelua（必须先于本文件 require）
+-- =============================================================================
+-- =============================================================================
+-- 编译期推导引擎（Compile-Time Derivation Engine）
+-- =============================================================================
+## nebula_registry = nebula_registry or {}
+## local WGSL_TYPE_MAP = {
+##   Vec2    = "vec2<f32>",
+##   Vec4    = "vec4<f32>",
+##   Color   = "vec4<f32>",
+##   float32 = "f32",
+## }
+## local TYPE_SIZE_MAP = {
+##   Vec2    = 8,
+##   Vec4    = 16,
+##   Color   = 16,
+##   float32 = 4,
+## }
+## local LERP_FN_MAP = {
+##   Color   = "lerp_color",
+##   float32 = "lerp_f32",
+##   Vec2    = "lerp_vec2",
+## }
+## function nebula_annotate(type_name, spec)
+##   nebula_registry[type_name] = {
+##     states        = spec.states        or {"default"},
+##     primitives    = spec.primitives    or {},
+##     transitions   = spec.transitions   or {},
+##     component_id  = spec.component_id  or 0,
+##     text_mode     = spec.text_mode     or nil,
+##     max_chars     = spec.max_chars     or 256,
+##     instanced     = spec.instanced     or false,
+##     max_instances = spec.max_instances or 128,
+##     max_text_len  = spec.max_text_len  or 255,
+##     max_lines     = spec.max_lines     or nil,
+##   }
+## end
+
+## -- ===== Shape Parser：解析 record 字段，分组到各状态 =====
+## function nebula_parse_shape(type_name)
+##   local reg = nebula_registry[type_name]
+##   assert(reg, "nebula_parse_shape: type '" .. type_name .. "' not annotated")
+## 
+##   local T = symbols[type_name]
+##   assert(T, "nebula_parse_shape: type '" .. type_name .. "' not found in symbols")
+## 
+##   local base_fields  = {}
+##   local state_fields = {}
+## 
+##   for _, state in ipairs(reg.states) do
+##     state_fields[state] = {}
+##   end
+## 
+##   for _, field in ipairs(T.value.fields) do
+##     local fname = field.name
+##     local ftype = field.type and (field.type.nickname or field.type.name) or "unknown"
+## 
+##     local matched = false
+##     for _, state in ipairs(reg.states) do
+##       local prefix = state .. "_"
+##       if fname:sub(1, #prefix) == prefix then
+##         local prop = fname:sub(#prefix + 1)
+##         state_fields[state][prop] = { name = fname, type = ftype }
+##         matched = true
+##         break
+##       end
+##     end
+## 
+##     if not matched then
+##       table.insert(base_fields, { name = fname, type = ftype })
+##     end
+##   end
+## 
+##   return base_fields, state_fields
+## end
+## 
+## -- 收集"所有出现过的视觉属性"（按首次出现顺序去重）
+## local function collect_all_props(reg, state_fields)
+##   local list, seen = {}, {}
+##   for _, state in ipairs(reg.states) do
+##     -- 为了稳定顺序，使用 pairs；首次出现即记录
+##     for prop, info in pairs(state_fields[state]) do
+##       if not seen[prop] then
+##         table.insert(list, { name = prop, type = info.type })
+##         seen[prop] = true
+##       end
+##     end
+##   end
+##   -- 字典序排序使生成代码确定性更强（避免 Lua pairs 顺序差异）
+##   table.sort(list, function(a, b) return a.name < b.name end)
+##   return list
+## end
+## 
+## -- ===== WGSL 生成器（Phase 0 API，保留向后兼容） =====
+## function nebula_gen_wgsl_uniform(type_name)
+##   local base_fields, state_fields = nebula_parse_shape(type_name)
+##   local reg = nebula_registry[type_name]
+##   local lines = {"struct NebulaUniforms {"}
+## 
+##   for _, f in ipairs(base_fields) do
+##     local wgsl_type = WGSL_TYPE_MAP[f.type]
+##     if wgsl_type then
+##       table.insert(lines, "  " .. f.name .. ": " .. wgsl_type .. ",")
+##     end
+##   end
+## 
+##   local all_props = collect_all_props(reg, state_fields)
+##   for _, p in ipairs(all_props) do
+##     local wgsl_type = WGSL_TYPE_MAP[p.type]
+##     if wgsl_type then
+##       table.insert(lines, "  " .. p.name .. ": " .. wgsl_type .. ",")
+##     end
+##   end
+## 
+##   table.insert(lines, "  viewport: vec2<f32>,")
+##   table.insert(lines, "}")
+##   return table.concat(lines, "\n")
+## end
+## 
+## function nebula_calc_uniform_size(type_name)
+##   local base_fields, state_fields = nebula_parse_shape(type_name)
+##   local reg = nebula_registry[type_name]
+##   local total = 0
+##   for _, f in ipairs(base_fields) do
+##     total = total + (TYPE_SIZE_MAP[f.type] or 0)
+##   end
+##   local all_props = collect_all_props(reg, state_fields)
+##   for _, p in ipairs(all_props) do
+##     total = total + (TYPE_SIZE_MAP[p.type] or 0)
+##   end
+##   total = total + 8 -- viewport: vec2<f32>
+##   return total
+## end
+## 
+## function nebula_gen_state_machine(type_name)
+##   local reg = nebula_registry[type_name]
+##   local _, state_fields = nebula_parse_shape(type_name)
+##   return {
+##     states       = reg.states,
+##     transitions  = reg.transitions,
+##     all_props    = collect_all_props(reg, state_fields),
+##     state_fields = state_fields,
+##   }
+## end
+## 
+## -- =============================================================================
+## -- ★ Phase 2.1: nebula_gen_uniform_layout(type_name)
+## --
+## -- 根据注解按 std140 规则推导 Uniform 完整布局，返回：
+## --   {
+## --     fields              = { {name, type, offset, size, is_pad}, ... },
+## --     total_size          = 16-aligned bytes,
+## --     wgsl_struct         = "struct <Name>Uniforms { ... }",
+## --     nelua_record_source = "global <Name>Uniforms = @record{ ... }",
+## --     pad_count           = N,
+## --   }
+## --
+## -- std140 子集（足以支撑 Phase 2 以内的 Visual）：
+## --   f32      : align 4,  size 4
+## --   Vec2     : align 8,  size 8
+## --   Vec4/Color: align 16, size 16
+## -- struct 总大小向 16 对齐。
+## -- 不支持 vec3/array/嵌套 struct（Phase 2.5 蛋增量）。
+## -- =============================================================================
+## 
+## local STD140_ALIGN_MAP = {
+##   Vec2    = 8,
+##   Vec4    = 16,
+##   Color   = 16,
+##   float32 = 4,
+## }
+## 
+## -- 在所有字段列表中追加必要的 _pad<N> 使下一字段起始 offset 满足 align
+## local function pad_to(layout_fields, current_offset, target_align, pad_seq)
+##   local rem = current_offset % target_align
+##   if rem == 0 then return current_offset, pad_seq end
+##   local pad_bytes = target_align - rem
+##   local n_floats  = pad_bytes // 4
+##   for _ = 1, n_floats do
+##     table.insert(layout_fields, {
+##       name = "_pad" .. pad_seq,
+##       type = "float32",
+##       wgsl_type = "f32",
+##       offset = current_offset,
+##       size = 4,
+##       is_pad = true,
+##     })
+##     current_offset = current_offset + 4
+##     pad_seq = pad_seq + 1
+##   end
+##   return current_offset, pad_seq
+## end
+## 
+## -- 按顺序依次放入字段，自动插入 _pad
+## local function place_field(layout_fields, current_offset, pad_seq, field_name, field_type)
+##   local align = STD140_ALIGN_MAP[field_type]
+##   assert(align, ("std140: unsupported field type '%s' for field '%s'"):format(
+##     tostring(field_type), tostring(field_name)))
+##   current_offset, pad_seq = pad_to(layout_fields, current_offset, align, pad_seq)
+##   local size      = TYPE_SIZE_MAP[field_type]
+##   local wgsl_type = WGSL_TYPE_MAP[field_type]
+##   table.insert(layout_fields, {
+##     name      = field_name,
+##     type      = field_type,
+##     wgsl_type = wgsl_type,
+##     offset    = current_offset,
+##     size      = size,
+##     is_pad    = false,
+##   })
+##   return current_offset + size, pad_seq
+## end
+## 
+## -- opts (可选):
+## --   record_name           : string  — 生成的 record 名称（默认 = type_name .. "Uniforms"）
+## --   wgsl_struct_name      : string  — WGSL struct 名称（默认与 record_name 同）
+## --   force_viewport_align  : number  — 强制把 viewport 对齐到该边界（默认 nil = std140 原生）
+## --                                     用于保持与 Phase 0/1 手写 NebulaRectUniforms 二进制等价
+## function nebula_gen_uniform_layout(type_name, opts)
+##   opts = opts or {}
+##   local record_name      = opts.record_name      or (type_name .. "Uniforms")
+##   local wgsl_struct_name = opts.wgsl_struct_name or record_name
+## 
+##   local base_fields, state_fields = nebula_parse_shape(type_name)
+##   local reg = nebula_registry[type_name]
+##   local all_props = collect_all_props(reg, state_fields)
+## 
+##   local fields = {}
+##   local offset = 0
+##   local pad_seq = 0
+## 
+##   -- 1. base 字段（原始顺序）
+##   for _, f in ipairs(base_fields) do
+##     if STD140_ALIGN_MAP[f.type] then
+##       offset, pad_seq = place_field(fields, offset, pad_seq, f.name, f.type)
+##     end
+##   end
+## 
+##   -- 2. 视觉属性（collect_all_props 已依字典序排序）
+##   for _, p in ipairs(all_props) do
+##     if STD140_ALIGN_MAP[p.type] then
+##       offset, pad_seq = place_field(fields, offset, pad_seq, p.name, p.type)
+##     end
+##   end
+## 
+##   -- 3. viewport 服务于像素坐标转换（与 Phase 0/1 一致）
+##   if opts.force_viewport_align then
+##     offset, pad_seq = pad_to(fields, offset, opts.force_viewport_align, pad_seq)
+##   end
+##   offset, pad_seq = place_field(fields, offset, pad_seq, "viewport", "Vec2")
+## 
+##   -- 4. struct 末尾补齐到 16 字节
+##   offset, pad_seq = pad_to(fields, offset, 16, pad_seq)
+## 
+##   local total_size = offset
+## 
+##   -- ---- 生成 Nelua record 源代码 ----
+##   local rec_lines = { ("global %s = @record{"):format(record_name) }
+##   for _, f in ipairs(fields) do
+##     table.insert(rec_lines, ("  %-12s %s,  -- offset %d"):format(
+##       f.name .. ":", f.type, f.offset))
+##   end
+##   table.insert(rec_lines, ("}                  -- total: %d bytes"):format(total_size))
+##   local nelua_record_source = table.concat(rec_lines, "\n")
+## 
+##   -- ---- 生成 WGSL struct 源代码 ----
+##   local wgsl_lines = { ("struct %s {"):format(wgsl_struct_name) }
+##   for _, f in ipairs(fields) do
+##     table.insert(wgsl_lines, ("  %-12s %s,  // offset %d"):format(
+##       f.name .. ":", f.wgsl_type, f.offset))
+##   end
+##   table.insert(wgsl_lines, "}")
+##   local wgsl_struct = table.concat(wgsl_lines, "\n")
+## 
+##   return {
+##     fields              = fields,
+##     total_size          = total_size,
+##     wgsl_struct         = wgsl_struct,
+##     nelua_record_source = nelua_record_source,
+##     record_name         = record_name,
+##     wgsl_struct_name    = wgsl_struct_name,
+##     pad_count           = pad_seq,
+##   }
+## end
+## 
+## -- 在调用点 emit Nelua record 源码
+## function nebula_emit_uniform_record(type_name, opts)
+##   local layout = nebula_gen_uniform_layout(type_name, opts)
+##   print(("[uniform] %s: %d fields (%d real + %d pad), total %d bytes"):format(
+##     layout.record_name, #layout.fields,
+##     #layout.fields - layout.pad_count, layout.pad_count, layout.total_size))
+##   local block_ast = aster.parse(layout.nelua_record_source,
+##                                 "<nebula_uniform:" .. layout.record_name .. ">")
+##   for _, stat in ipairs(block_ast) do
+##     inject_statement(stat)
+##   end
+## end
+## 
+## -- ---------------------------------------------------------------------------
+## -- nebula_gen_uniform_layout_from_fields(spec)
+## --   spec = {
+## --     record_name           = "NebulaRectUniforms",
+## --     wgsl_struct_name      = "Uniforms",   -- 可选
+## --     fields                = {              -- 序列依次放入
+## --       {name="pos",          type="Vec2"},
+## --       {name="size",         type="Vec2"},
+## --       {name="radius",       type="float32"},
+## --       {name="bg_color",     type="Color"},
+## --       ...
+## --     },
+## --     append_viewport       = true,          -- 末尾追加 viewport: Vec2
+## --     force_viewport_align  = 16,            -- 与 Phase 0/1 手写 96B 等价
+## --   }
+## -- 不依赖 nebula_annotate / nebula_parse_shape，供 renderer 这种独立于
+## -- 具体 Visual 类型的代码使用。
+## function nebula_gen_uniform_layout_from_fields(spec)
+##   assert(spec.record_name, "nebula_gen_uniform_layout_from_fields: record_name required")
+##   assert(spec.fields, "nebula_gen_uniform_layout_from_fields: fields required")
+##   local wgsl_struct_name = spec.wgsl_struct_name or spec.record_name
+## 
+##   local out_fields = {}
+##   local offset = 0
+##   local pad_seq = 0
+## 
+##   for _, f in ipairs(spec.fields) do
+##     if STD140_ALIGN_MAP[f.type] then
+##       offset, pad_seq = place_field(out_fields, offset, pad_seq, f.name, f.type)
+##     end
+##   end
+## 
+##   if spec.append_viewport then
+##     if spec.force_viewport_align then
+##       offset, pad_seq = pad_to(out_fields, offset, spec.force_viewport_align, pad_seq)
+##     end
+##     offset, pad_seq = place_field(out_fields, offset, pad_seq, "viewport", "Vec2")
+##   end
+## 
+##   offset, pad_seq = pad_to(out_fields, offset, 16, pad_seq)
+##   local total_size = offset
+## 
+##   local rec_lines = { ("global %s = @record{"):format(spec.record_name) }
+##   for _, f in ipairs(out_fields) do
+##     table.insert(rec_lines, ("  %-12s %s,  -- offset %d"):format(
+##       f.name .. ":", f.type, f.offset))
+##   end
+##   table.insert(rec_lines, ("}                  -- total: %d bytes"):format(total_size))
+##   local nelua_record_source = table.concat(rec_lines, "\n")
+## 
+##   local wgsl_lines = { ("struct %s {"):format(wgsl_struct_name) }
+##   for _, f in ipairs(out_fields) do
+##     table.insert(wgsl_lines, ("  %-12s %s,  // offset %d"):format(
+##       f.name .. ":", f.wgsl_type, f.offset))
+##   end
+##   table.insert(wgsl_lines, "}")
+##   local wgsl_struct = table.concat(wgsl_lines, "\n")
+## 
+##   return {
+##     fields              = out_fields,
+##     total_size          = total_size,
+##     wgsl_struct         = wgsl_struct,
+##     nelua_record_source = nelua_record_source,
+##     record_name         = spec.record_name,
+##     wgsl_struct_name    = wgsl_struct_name,
+##     pad_count           = pad_seq,
+##   }
+## end
+## 
+## function nebula_emit_uniform_record_from_fields(spec)
+##   local layout = nebula_gen_uniform_layout_from_fields(spec)
+##   print(("[uniform] %s: %d fields (%d real + %d pad), total %d bytes"):format(
+##     layout.record_name, #layout.fields,
+##     #layout.fields - layout.pad_count, layout.pad_count, layout.total_size))
+##   local block_ast = aster.parse(layout.nelua_record_source,
+##                                 "<nebula_uniform:" .. layout.record_name .. ">")
+##   for _, stat in ipairs(block_ast) do
+##     inject_statement(stat)
+##   end
+##   return layout
+## end
+## 
+## -- =============================================================================
+## -- ★ Phase 2.2: nebula_gen_wgsl_shader(type_name, opts)
+## --
+## -- 根据 Visual 规格中声明的字段，自动拼装出对应的 WGSL 着色器代码。
+## -- 本阶段仅支持单 Pass 渲染（radius / fill / border 条件组合）。
+## -- 多 Pass（如 Shadow）留给 Phase 2.3。
+## --
+## -- 返回值：
+## --   {
+## --     source          = "完整 WGSL 源码",
+## --     features        = {"radius", "fill", "border"},
+## --     required_passes = {"main"},
+## --   }
+## -- =============================================================================
+## 
+## -- 加载着色器组合器模块
+## local shader_compose_mod = require "derive.shader_compose"
+## assert(shader_compose_mod == "nebula_shader_compose_v0.9_phase4.X",
+##   "nebula: failed to load derive/shader_compose.lua")  -- ★ Phase 4.X 升级
+## 
+## -- ★ Phase 2.3.2: 加载管线工厂模块
+## local pipeline_factory_mod = require "derive.pipeline_factory"
+## assert(pipeline_factory_mod == "nebula_pipeline_factory_v0.8_phase4.1",
+##   "nebula: failed to load derive/pipeline_factory.lua")  -- ★ Phase 4.1 升级
+## 
+## -- ★ Phase 2.4: 加载交互原语工厂模块
+## local interaction_factory_mod = require "derive.interaction_factory"
+## assert(interaction_factory_mod == "nebula_interaction_factory_v0.7_phase3.10",
+##   "nebula: failed to load derive/interaction_factory.lua")
+## 
+## -- ★ Phase 3.1: 加载编译期布局引擎模块
+## local layout_engine_mod = require "derive.layout_engine"
+## assert(layout_engine_mod == "nebula_layout_engine_v0.4_phase4.8-nl",
+##   "nebula: failed to load derive/layout_engine.lua")  -- ★ Phase 4.8-NL 升级
+##
+## -- ★ Phase 3.5.2: 加载应用编排工厂模块
+## local app_factory_mod = require "derive.app_factory"
+## assert(app_factory_mod == "nebula_app_factory_v0.12_phase5.0-s2",
+##   "nebula: failed to load derive/app_factory.lua")  -- ★ Phase 5.0-S2 升级
+## 
+## -- ★ Phase 4.0: 加载公理校验器模块
+## local axiom_validator_mod = require "derive.axiom_validator"
+## assert(axiom_validator_mod == "nebula_axiom_validator_v2.0_phase4.3",
+##   "nebula: failed to load derive/axiom_validator.lua")  -- ★ Phase 4.3 升级（任务 D）
+## 
+## -- ★ Phase 3.6: 加载 Gap Buffer 工厂模块（使 nebula_gen_gap_buffer_type 在所有 require nebula_core 的文件中可用）
+## local gap_buffer_factory_mod = require "derive.gap_buffer_factory"
+## assert(gap_buffer_factory_mod == "nebula_gap_buffer_factory_v0.4_phase4.7_s6",
+##   "nebula: failed to load derive/gap_buffer_factory.lua")
+##
+## -- ★ Phase 4.7-S4: 加载语法高亮工厂模块
+## local highlight_factory_mod = require "derive.highlight_factory"
+## assert(highlight_factory_mod == "nebula_highlight_factory_v0.1_phase4.7-s4",
+##   "nebula: failed to load derive/highlight_factory.lua")
+## 
+## -- 从 Visual 字段集合中检测着色器特性
+## local function detect_shader_features(base_fields, all_props)
+##   local has_radius   = false
+##   local has_bg_color = false
+##   local has_border_color = false
+##   local has_border_width = false
+##   local has_shadow_color  = false
+##   local has_shadow_offset = false
+##   local has_shadow_blur   = false
+## 
+##   -- 扫描 base_fields（如 radius / shadow_offset / shadow_blur）
+##   for _, f in ipairs(base_fields) do
+##     if f.name == "radius"        then has_radius        = true end
+##     if f.name == "shadow_offset" then has_shadow_offset = true end
+##     if f.name == "shadow_blur"   then has_shadow_blur   = true end
+##   end
+## 
+##   -- 扫描 all_props（动画属性，如 bg_color / border_color / shadow_color）
+##   for _, p in ipairs(all_props) do
+##     if p.name == "bg_color"      then has_bg_color      = true end
+##     if p.name == "border_color"  then has_border_color  = true end
+##     if p.name == "border_width"  then has_border_width  = true end
+##     if p.name == "shadow_color"  then has_shadow_color  = true end
+##     if p.name == "shadow_offset" then has_shadow_offset = true end
+##     if p.name == "shadow_blur"   then has_shadow_blur   = true end
+##   end
+## 
+##   -- Phase 2.5: 阴影需要 shadow_color + shadow_offset + shadow_blur 三者齐备
+##   local has_shadow = has_shadow_color and has_shadow_offset and has_shadow_blur
+## 
+##   return {
+##     has_radius   = has_radius,
+##     has_bg_color = has_bg_color,
+##     has_shadow   = has_shadow,
+##     has_border   = has_border_color and has_border_width,
+##   }
+## end
+## 
+## -- 公开 API：根据注解类型名生成完整的 WGSL 着色器
+## function nebula_gen_wgsl_shader(type_name, opts)
+##   opts = opts or {}
+##   local base_fields, state_fields = nebula_parse_shape(type_name)
+##   local reg = nebula_registry[type_name]
+##   local all_props = collect_all_props(reg, state_fields)
+## 
+##   -- 获取 uniform 布局（复用 Phase 2.1 的 API）
+##   local layout_opts = {
+##     record_name      = opts.record_name      or nil,
+##     wgsl_struct_name = opts.wgsl_struct_name  or "Uniforms",
+##     force_viewport_align = opts.force_viewport_align or nil,
+##   }
+##   local layout = nebula_gen_uniform_layout(type_name, layout_opts)
+## 
+##   -- 检测着色器特性
+##   local features = detect_shader_features(base_fields, all_props)
+## 
+##   -- 调用着色器组合器（Phase 3.7+ 使用 instanced 路径）
+##   local result = nebula_compose_shader_instanced({
+##     wgsl_struct  = layout.wgsl_struct,
+##     struct_name  = layout.wgsl_struct_name,
+##     has_radius   = features.has_radius,
+##     has_border   = features.has_border,
+##   })
+## 
+##   -- 编译期日志
+##   print(("[shader] %s: features=[%s]  (%dB uniforms, %d pass)"):format(
+##     type_name,
+##     table.concat(result.features, ", "),
+##     layout.total_size,
+##     #result.required_passes))
+## 
+##   return result
+## end
+## 
+## -- 便捷 API：根据手动指定的字段列表生成着色器（供 renderer.nelua 使用）
+## function nebula_gen_wgsl_shader_from_fields(spec)
+##   assert(spec.fields, "nebula_gen_wgsl_shader_from_fields: fields required")
+## 
+##   -- 生成 uniform 布局
+##   local layout = nebula_gen_uniform_layout_from_fields(spec)
+## 
+##   -- 从字段列表中检测特性
+##   local has_radius   = false
+##   local has_bg_color = false
+##   local has_border_color = false
+##   local has_border_width = false
+##   for _, f in ipairs(spec.fields) do
+##     if f.name == "radius"       then has_radius       = true end
+##     if f.name == "bg_color"     then has_bg_color     = true end
+##     if f.name == "border_color" then has_border_color = true end
+##     if f.name == "border_width" then has_border_width = true end
+##   end
+## 
+##   local result = nebula_compose_shader_instanced({
+##     wgsl_struct  = layout.wgsl_struct,
+##     struct_name  = layout.wgsl_struct_name,
+##     has_radius   = has_radius,
+##     has_border   = has_border_color and has_border_width,
+##   })
+## 
+##   -- 编译期日志
+##   print(("[shader] %s: features=[%s]  (%dB uniforms, %d pass)"):format(
+##     spec.record_name or "<anonymous>",
+##     table.concat(result.features, ", "),
+##     layout.total_size,
+##     #result.required_passes))
+## 
+##   return result, layout
+## end
+## 
+## -- =============================================================================
+## -- ★ Phase 1 核心：nebula_derive(type_name)
+## --
+## -- 在调用点编译期生成：
+## --   global <T>State          : enum
+## --   global <T>StateMachine   : record + methods
+## --   global <T>Context        : record + methods
+## -- =============================================================================
+## 
+## -- 字符串首字母大写
+## local function cap(s)
+##   return s:sub(1, 1):upper() .. s:sub(2)
+## end
+## 
+## -- tween 名称 -> 数值编码（与运行时 get_t() 中的判断保持一致）
+## local TWEEN_CODE = { none = 0, ease_out = 1, ease_in = 2 }
+## 
+## -- ★ Phase 3.10: has_prim 已移除，原语判断现在通过 NEBULA_PRIMITIVES 注册表驱动
+## 
+
+## -- ---- 生成 State 枚举源代码 ----
+## local function gen_state_enum(type_name, reg)
+##   local lines = {("global %sState = @enum{"):format(type_name)}
+##   if #reg.states > 0 then
+##     for i, s in ipairs(reg.states) do
+##       table.insert(lines, ("  %s = %d,"):format(cap(s), i - 1))
+##     end
+##   else
+##     table.insert(lines, "  Default = 0,")
+##   end
+##   table.insert(lines, "}")
+##   return table.concat(lines, "\n")
+## end
+## 
+## -- ---- 生成 StateMachine 记录 + 方法 ----
+## local function gen_state_machine(type_name, reg)
+##   local sm = type_name .. "StateMachine"
+##   local st = type_name .. "State"
+##   local lines = {}
+## 
+##   table.insert(lines, ("global %s = @record{"):format(sm))
+##   table.insert(lines, ("  current:  %s,"):format(st))
+##   table.insert(lines, ("  target:   %s,"):format(st))
+##   table.insert(lines,  "  progress: float32,")
+##   table.insert(lines,  "  duration: float32,")
+##   table.insert(lines,  "  tween:    uint8,")
+##   table.insert(lines,  "}")
+## 
+##   -- init
+##   table.insert(lines, ("function %s:init(): void"):format(sm))
+##   local initial_state = reg.states[1] or "default"
+##   table.insert(lines, ("  self.current  = %s.%s"):format(st, cap(initial_state)))
+##   table.insert(lines, ("  self.target   = %s.%s"):format(st, cap(initial_state)))
+##   table.insert(lines,  "  self.progress = 1.0")
+##   table.insert(lines,  "  self.duration = 0.0")
+##   table.insert(lines,  "  self.tween    = 0")
+##   table.insert(lines,  "end")
+## 
+##   -- transition_to —— 展开 transitions 为 if-else 链
+##   table.insert(lines, ("function %s:transition_to(new_target: %s): void"):format(sm, st))
+##   table.insert(lines,  "  if new_target == self.target and self.progress >= 1.0 then return end")
+##   table.insert(lines,  "  if new_target ~= self.target then")
+##   table.insert(lines,  "    self.target   = new_target")
+##   table.insert(lines,  "    self.progress = 0.0")
+##   if #reg.transitions > 0 then
+##     for i, tr in ipairs(reg.transitions) do
+##       local kw = (i == 1) and "if" or "elseif"
+##       local code = TWEEN_CODE[tr.tween] or 0
+##       table.insert(lines, ("    %s self.current == %s.%s and new_target == %s.%s then"):format(
+##         kw, st, cap(tr.from), st, cap(tr.to)))
+##       table.insert(lines, ("      self.duration = %s"):format(tostring(tr.duration or 0.0)))
+##       table.insert(lines, ("      self.tween    = %d"):format(code))
+##     end
+##     table.insert(lines, "    else")
+##     table.insert(lines, "      self.duration = 0.0")
+##     table.insert(lines, "      self.tween    = 0")
+##     table.insert(lines, "    end")
+##   else
+##     table.insert(lines, "    self.duration = 0.0")
+##     table.insert(lines, "    self.tween    = 0")
+##   end
+##   table.insert(lines, "  end")
+##   table.insert(lines, "end")
+## 
+##   -- update
+##   table.insert(lines, ("function %s:update(dt: float32): void"):format(sm))
+##   table.insert(lines,  "  if self.progress >= 1.0 then")
+##   table.insert(lines,  "    self.current  = self.target")
+##   table.insert(lines,  "    self.progress = 1.0")
+##   table.insert(lines,  "    return")
+##   table.insert(lines,  "  end")
+##   table.insert(lines,  "  if self.duration <= 0.0 then")
+##   table.insert(lines,  "    self.progress = 1.0")
+##   table.insert(lines,  "    self.current  = self.target")
+##   table.insert(lines,  "    return")
+##   table.insert(lines,  "  end")
+##   table.insert(lines,  "  self.progress = self.progress + dt / self.duration")
+##   table.insert(lines,  "  if self.progress >= 1.0 then")
+##   table.insert(lines,  "    self.progress = 1.0")
+##   table.insert(lines,  "    self.current  = self.target")
+##   table.insert(lines,  "  end")
+##   table.insert(lines,  "end")
+## 
+##   -- get_t
+##   table.insert(lines, ("function %s:get_t(): float32"):format(sm))
+##   table.insert(lines,  "  local t = self.progress")
+##   table.insert(lines,  "  if self.tween == 1 then return ease_out(t) end")
+##   table.insert(lines,  "  if self.tween == 2 then return ease_in(t) end")
+##   table.insert(lines,  "  return t")
+##   table.insert(lines,  "end")
+## 
+##   return table.concat(lines, "\n")
+## end
+##
+## -- ★ Phase 4.5-S3: NEBULA_THEME_DEFAULTS — 编译期主题默认值表
+## -- 用户可在 require "nebula_core" 后、调用 nebula_derive 前覆盖：
+## --   ##[[ NEBULA_THEME_DEFAULTS.hovered.border = { r=1.0, g=0.4, b=0.0, a=1.0 } ]]
+## NEBULA_THEME_DEFAULTS = {
+##   default = {
+##     bg     = { r=0.22, g=0.22, b=0.24, a=1.0 },
+##     border = { r=0.40, g=0.40, b=0.45, a=1.0 },
+##     border_width = 1.0,
+##     track  = { r=0.20, g=0.20, b=0.25, a=1.0 },
+##     thumb  = { r=0.45, g=0.45, b=0.50, a=1.0 },
+##   },
+##   hovered = {
+##     bg     = { r=0.28, g=0.28, b=0.32, a=1.0 },
+##     border = { r=0.40, g=0.60, b=1.00, a=1.0 },
+##     border_width = 2.0,
+##     track  = { r=0.22, g=0.22, b=0.28, a=1.0 },
+##     thumb  = { r=0.55, g=0.65, b=0.90, a=1.0 },
+##   },
+##   pressed = {
+##     bg     = { r=0.16, g=0.16, b=0.20, a=1.0 },
+##     border = { r=0.60, g=0.80, b=1.00, a=1.0 },
+##     border_width = 2.5,
+##     track  = { r=0.16, g=0.16, b=0.22, a=1.0 },
+##     thumb  = { r=0.65, g=0.80, b=1.00, a=1.0 },
+##   },
+##   focused = {
+##     bg     = { r=0.16, g=0.18, b=0.24, a=1.0 },
+##     border = { r=0.35, g=0.60, b=1.00, a=1.0 },
+##     border_width = 2.0,
+##     track  = { r=0.18, g=0.20, b=0.28, a=1.0 },
+##     thumb  = { r=0.50, g=0.70, b=1.00, a=1.0 },
+##   },
+##   draggingbar = {
+##     bg     = { r=0.16, g=0.16, b=0.22, a=1.0 },
+##     border = { r=0.50, g=0.80, b=1.00, a=1.0 },
+##     border_width = 2.5,
+##     track  = { r=0.25, g=0.25, b=0.32, a=1.0 },
+##     thumb  = { r=0.65, g=0.80, b=1.00, a=1.0 },
+##   },
+## }
+##
+## -- ---- 生成 Context 记录 + 方法 ----
+## -- visual_type_name: 原始视觉规格名（如 "ButtonVisual"）——用于字段类型引用
+## -- base:             派生基名（如 "Button"）——用于生成 Context/SM/State 名称
+## --
+## -- Phase 2.3.4 清理：原先的 opts.emit_to_uniforms 参数已移除。
+## -- to_uniforms 完全由 nebula_gen_to_uniforms_typed 生成强类型版本，
+## -- 不再需要 gen_context_for 此处再重复生成硬编码分支。
+## local function gen_context_for(visual_type_name, base, reg, state_fields, all_props, base_fields)
+##   local type_name = visual_type_name  -- 保持下文代码语义：*字段类型*仍指原规格
+##   local ctx = base .. "Context"
+##   local sm  = base .. "StateMachine"
+##   local st  = base .. "State"
+## 
+##   local lines = {}
+## 
+##   -- ===== record =====
+##   table.insert(lines, ("global %s = @record{"):format(ctx))
+##   table.insert(lines, ("  visual: %s,"):format(type_name))
+##   table.insert(lines, ("  sm:     %s,"):format(sm))
+##   -- ★ Phase 3.10: 通过 NEBULA_PRIMITIVES 注册表驱动字段注入（替代硬编码分支）
+##   local prim_fields = nebula_get_context_fields(reg.primitives or {})
+##   for _, f in ipairs(prim_fields) do
+##     table.insert(lines, ("  %s: %s,"):format(f.name, f.type))
+##   end
+##   -- ★ Phase 4.7-S5: 动态 context 字段注入（类型依赖编译期参数，如 undo_stack）
+##   local resolved_prims = nebula_resolve_primitives(reg.primitives or {})
+##   for _, prim_name in ipairs(resolved_prims) do
+##     local meta = NEBULA_PRIMITIVES[prim_name]
+##     if meta and meta.dynamic_context_fields then
+##       local dyn_fields = meta.dynamic_context_fields(reg)
+##       for _, f in ipairs(dyn_fields) do
+##         table.insert(lines, ("  %s: %s,"):format(f.name, f.type))
+##       end
+##     end
+##   end
+##   for _, p in ipairs(all_props) do
+##     table.insert(lines, ("  current_%s: %s,"):format(p.name, p.type))
+##   end
+##   table.insert(lines, "}")
+## 
+##   -- ===== init(vis) =====
+##   table.insert(lines, ("function %s:init(vis: %s): void"):format(ctx, type_name))
+##   table.insert(lines,  "  self.visual = vis")
+##   table.insert(lines,  "  self.sm:init()")
+##   -- ★ Phase 3.10: 通过 NEBULA_PRIMITIVES 注册表驱动初始化（替代硬编码分支）
+##   local prim_inits = nebula_get_context_init(reg.primitives or {})
+##   for _, init in ipairs(prim_inits) do
+##     if init.type == "record_init" then
+##       table.insert(lines, ("  self.%s = %s{}"):format(init.field, init.record_name))
+##     end
+##   end
+##   -- ★ Phase 4.7-S5: 初始化动态 context 字段（undo_stack）
+##   for _, prim_name in ipairs(resolved_prims) do
+##     local meta = NEBULA_PRIMITIVES[prim_name]
+##     if meta and meta.dynamic_context_fields then
+##       local dyn_fields = meta.dynamic_context_fields(reg)
+##       for _, f in ipairs(dyn_fields) do
+##         table.insert(lines, ("  self.%s:init()"):format(f.name))
+##       end
+##     end
+##   end
+##   -- 用初始状态（states[1]）的视觉值初始化 current_*
+##   local init_state = reg.states[1]
+##   for _, p in ipairs(all_props) do
+##     -- 优先用初始状态的值；若初始状态没有该属性，回退到第一个出现该属性的状态
+##     local field_name = nil
+##     if state_fields[init_state] and state_fields[init_state][p.name] then
+##       field_name = state_fields[init_state][p.name].name
+##     else
+##       for _, s in ipairs(reg.states) do
+##         if state_fields[s][p.name] then
+##           field_name = state_fields[s][p.name].name
+##           break
+##         end
+##       end
+##     end
+##     if field_name then
+##       table.insert(lines, ("  self.current_%s = vis.%s"):format(p.name, field_name))
+##     end
+##   end
+##   table.insert(lines, "end")
+##
+##   -- ===== init_themed(pos, size, radius) — Phase 4.5-S3 =====
+##   -- 使用 NEBULA_THEME_DEFAULTS 编译期主题表生成默认颜色的 init 快捷方法。
+##   -- 仅对非 DenseText 的交互型 Visual 生成（DenseText 无颜色字段）。
+##   -- 只为 Visual record 中实际存在的字段生成赋值。
+##   if reg.text_mode ~= "dense" and reg.states and #reg.states > 0 then
+##     -- 检查 Visual 是否有 radius 字段
+##     local has_radius = false
+##     for _, f in ipairs(base_fields) do
+##       if f.name == "radius" then has_radius = true; break end
+##     end
+##     if has_radius then
+##       table.insert(lines, ("function %s:init_themed(pos: Vec2, size: Vec2, radius: float32): void"):format(ctx))
+##       table.insert(lines, ("  self:init(%s{"):format(type_name))
+##       table.insert(lines, "    pos = pos, size = size, radius = radius,")
+##     else
+##       table.insert(lines, ("function %s:init_themed(pos: Vec2, size: Vec2): void"):format(ctx))
+##       table.insert(lines, ("  self:init(%s{"):format(type_name))
+##       table.insert(lines, "    pos = pos, size = size,")
+##     end
+##     -- 辅助：检查某状态某属性是否存在于 Visual record
+##     local function has_field(state, prop)
+##       return state_fields and state_fields[state] and state_fields[state][prop]
+##     end
+##     for _, s in ipairs(reg.states) do
+##       local theme = NEBULA_THEME_DEFAULTS[s] or NEBULA_THEME_DEFAULTS["default"]
+##       if theme then
+##         if has_field(s, "bg_color") then
+##           local c = theme.bg
+##           table.insert(lines, ("    %s_bg_color = Color{ r=%.3f, g=%.3f, b=%.3f, a=%.1f },"):format(
+##             s, c.r, c.g, c.b, c.a))
+##         end
+##         if has_field(s, "border_color") then
+##           local c = theme.border
+##           table.insert(lines, ("    %s_border_color = Color{ r=%.3f, g=%.3f, b=%.3f, a=%.1f },"):format(
+##             s, c.r, c.g, c.b, c.a))
+##         end
+##         if has_field(s, "border_width") then
+##           table.insert(lines, ("    %s_border_width = %.1f,"):format(s, theme.border_width))
+##         end
+##         if has_field(s, "track_color") and theme.track then
+##           local c = theme.track
+##           table.insert(lines, ("    %s_track_color = Color{ r=%.3f, g=%.3f, b=%.3f, a=%.1f },"):format(
+##             s, c.r, c.g, c.b, c.a))
+##         end
+##         if has_field(s, "thumb_color") and theme.thumb then
+##           local c = theme.thumb
+##           table.insert(lines, ("    %s_thumb_color = Color{ r=%.3f, g=%.3f, b=%.3f, a=%.1f },"):format(
+##             s, c.r, c.g, c.b, c.a))
+##         end
+##       end
+##     end
+##     table.insert(lines, "  })")
+##
+##     -- ★ multiline_editable: init_themed 自动初始化附带字段
+##     local has_ml = false
+##     for _, p in ipairs(reg.primitives or {}) do
+##       if p == "multiline_editable" then has_ml = true; break end
+##     end
+##     if has_ml then
+##       -- Visual 字段
+##       table.insert(lines, "  self.visual.pixel_height = 16.0")
+##       table.insert(lines, "  self.visual.text_origin_x = 10.0")
+##       table.insert(lines, "  self.visual.content_height = self.visual.size.y")
+##       -- Context 字段
+##       table.insert(lines, "  self.cursor_row = 0")
+##       table.insert(lines, "  self.cursor_col = 0")
+##       table.insert(lines, "  self.line_count = 1")
+##       -- Buffer 初始化
+##       table.insert(lines, "  self.visual.multi_buf:init()")
+##       table.insert(lines, "  self.visual.gap_buf:init()")
+##       print(("[sugar] %s: init_themed auto-initialized multiline_editable fields"):format(ctx))
+##     end
+##     table.insert(lines, "end")
+##     print(("[sugar] %s: generated init_themed with %d states"):format(ctx, #reg.states))
+##   end
+##
+##   -- ===== 每个属性的 state-取值 helper =====
+##   -- 用作内部的 if-else 选择器
+##   for _, p in ipairs(all_props) do
+##     local fn = ("%s_get_%s"):format(ctx, p.name)
+##     table.insert(lines, ("local function %s(vis: *%s, s: %s): %s"):format(
+##       fn, type_name, st, p.type))
+##     -- 默认回退到第一个有此属性的状态
+##     local default_field = nil
+##     for _, s in ipairs(reg.states) do
+##       if state_fields[s][p.name] then
+##         default_field = state_fields[s][p.name].name
+##         break
+##       end
+##     end
+##     -- 为非默认状态生成 if 分支
+##     for _, s in ipairs(reg.states) do
+##       if state_fields[s][p.name] and s ~= reg.states[1] then
+##         table.insert(lines, ("  if s == %s.%s then return vis.%s end"):format(
+##           st, cap(s), state_fields[s][p.name].name))
+##       end
+##     end
+##     -- 默认（第一个状态）
+##     local first_state = reg.states[1]
+##     if first_state then
+##       local first_state_field = state_fields[first_state] and state_fields[first_state][p.name]
+##       if first_state_field then
+##         table.insert(lines, ("  return vis.%s"):format(first_state_field.name))
+##       else
+##         table.insert(lines, ("  return vis.%s"):format(p.name))
+##       end
+##     else
+##       table.insert(lines, ("  return vis.%s"):format(p.name))
+##     end
+## 
+##     if false then
+##       -- 不应到达此分支；写一个零值返回让编译通过
+##       if p.type == "Color" then
+##         table.insert(lines, "  return Color{}")
+##       elseif p.type == "Vec2" then
+##         table.insert(lines, "  return Vec2{}")
+##       else
+##         table.insert(lines, "  return 0.0")
+##       end
+##     end
+##     table.insert(lines, "end")
+##   end
+## 
+##   -- Phase 2.3.4 清理：to_uniforms 完全由 nebula_gen_to_uniforms_typed 生成，
+##   -- 返回强类型 <T>Uniforms。原先的 NebulaRectUniforms 硬编码分支已删除。
+##   -- Phase 2.4: update() 方法已移出，由 gen_update_for() 单独生成，
+##   -- 确保在 hit_test / process_input 声明之后再注入。
+##   return table.concat(lines, "\n")
+## end
+## 
+## -- ---- 单独生成 <T>Context:update()，必须在 hit_test / process_input 之后注入 ----
+## -- Phase 2.4: update() 调用 self:process_input()，Nelua 要求被调方法已声明。
+## local function gen_update_for(base, reg, all_props)
+##   local ctx = base .. "Context"
+##   local lines = {}
+## 
+##   table.insert(lines, ("-- [update] %s:update (Phase 2.4: delegates to process_input)"):format(ctx))
+##   table.insert(lines, ("function %s:update(input: *NebulaInputState, dt: float32): void"):format(ctx))
+##   table.insert(lines, "  self:process_input(input)")
+##   table.insert(lines, "  self.sm:update(dt)")
+##   table.insert(lines, "  local t = self.sm:get_t()")
+## 
+##   for _, p in ipairs(all_props) do
+##     local lerp = LERP_FN_MAP[p.type]
+##     if lerp then
+##       local fn = ("%s_get_%s"):format(ctx, p.name)
+##       table.insert(lines, ("  self.current_%s = %s(%s(&self.visual, self.sm.current), %s(&self.visual, self.sm.target), t)"):format(
+##         p.name, lerp, fn, fn))
+##     end
+##   end
+## 
+##   table.insert(lines, "end")
+##   return table.concat(lines, "\n")
+## end
+## 
+## -- 获取派生名称的基名：
+## --   "ButtonVisual" -> "Button"（派生 ButtonState / ButtonStateMachine / ButtonContext）
+## --   "Foo"          -> "Foo"（派生 FooState / FooStateMachine / FooContext）
+## local function derive_base_name(type_name)
+##   if type_name:sub(-#"Visual") == "Visual" then
+##     return type_name:sub(1, #type_name - #"Visual")
+##   end
+##   return type_name
+## end
+## 
+## local function gen_text_context_for(type_name, base, reg, state_fields)
+##   local ctx = base .. "Context"
+##   local pipe = base .. "Pipeline"
+##   local color_field = nil
+##   for _, state in ipairs(reg.states) do
+##     local info = state_fields[state] and state_fields[state].text_color or nil
+##     if info then
+##       color_field = info.name
+##       break
+##     end
+##   end
+##   assert(color_field, "text derive requires <state>_text_color field")
+##
+##   local max_chars = reg.max_chars or 256
+##   -- ★ P0-6 fix: 限制 max_chars 上限，防止栈分配过大
+##   -- NebulaPosUvVertex = 16B, 每字符 6 顶点 → max_chars * 96B 栈占用
+##   -- WASM 上限 512 → 48KB（WASM 默认栈 64KB）; Native 上限 2048 → 192KB（Native 栈通常 8MB）
+##   local text_max = NEBULA_TARGET == 'wasm' and 512 or 2048
+##   assert(max_chars <= text_max,
+##     ("text derive: max_chars=%d exceeds %d (stack overflow risk). Use DenseText for large text."):format(max_chars, text_max))
+##   local max_vertices = max_chars * 6
+##   local lines = {}
+##   table.insert(lines, ("global %s = @record{"):format(ctx))
+##   table.insert(lines, ("  visual: %s,"):format(type_name))
+##   table.insert(lines, ("  sm:     %sStateMachine,"):format(base))
+##   table.insert(lines,  "  mesh:   NebulaTextMesh,")
+##   table.insert(lines,  "  current_text_color: Color,")
+##   table.insert(lines,  "}")
+## 
+##   table.insert(lines, ("function %s:init(vis: %s): void"):format(ctx, type_name))
+##   table.insert(lines,  "  self.visual = vis")
+##   table.insert(lines,  "  self.sm:init()")
+##   table.insert(lines,  "  self.mesh:init()")
+##   table.insert(lines, ("  self.current_text_color = vis.%s"):format(color_field))
+##   table.insert(lines,  "end")
+## 
+##   table.insert(lines, ("function %s:update(_input: *NebulaInputState, _dt: float32): void"):format(ctx))
+##   table.insert(lines, ("  self.current_text_color = self.visual.%s"):format(color_field))
+##   table.insert(lines,  "end")
+## 
+##   table.insert(lines, ("function %s:set_text(renderer: *NebulaRenderer, text: cstring): boolean"):format(ctx))
+##   table.insert(lines, ("  local verts: [%d]NebulaPosUvVertex"):format(max_vertices))
+##   table.insert(lines,  "  local mesh_w: float32 = 0.0")
+##   table.insert(lines,  "  local mesh_h: float32 = 0.0")
+##   table.insert(lines,  "  local vertex_count = nebula_ascii_text_build_vertices(")
+##   table.insert(lines,  "    text,")
+##   table.insert(lines,  "    self.visual.pos.x,")
+##   table.insert(lines,  "    self.visual.pos.y,")
+##   table.insert(lines,  "    self.visual.pixel_height,")
+##   table.insert(lines,  "    &verts[0],")
+##   table.insert(lines, ("    (@uint32)(%d),"):format(max_vertices))
+##   table.insert(lines,  "    &mesh_w,")
+##   table.insert(lines,  "    &mesh_h")
+##   table.insert(lines,  "  )")
+##   table.insert(lines,  "  self.visual.size = Vec2{ x = mesh_w, y = mesh_h }")
+##   table.insert(lines,  "  self.mesh.width = mesh_w")
+##   table.insert(lines,  "  self.mesh.height = mesh_h")
+##   table.insert(lines,  "  local data_ptr: pointer = nilptr")
+##   table.insert(lines,  "  local data_size: csize = 0")
+##   table.insert(lines,  "  if vertex_count > 0 then")
+##   table.insert(lines,  "    data_ptr = &verts[0]")
+##   table.insert(lines,  "    data_size = (@csize)((@uint64)(vertex_count) * (@uint64)(#NebulaPosUvVertex))")
+##   table.insert(lines,  "  end")
+##   table.insert(lines, ("  if not nebula_text_mesh_upload(renderer, &self.mesh, data_ptr, data_size, vertex_count, \"%s\") then return false end"):format("nebula-" .. base:lower() .. "-mesh"))
+##   table.insert(lines,  "  return true")
+##   table.insert(lines,  "end")
+## 
+##   return table.concat(lines, "\n")
+## end
+## 
+## function nebula_derive_text_visual(type_name)
+##   local reg = nebula_registry[type_name]
+##   assert(reg, "nebula_derive_text_visual: type '" .. type_name .. "' must be annotated first via nebula_annotate")
+## 
+##   local base_fields, state_fields = nebula_parse_shape(type_name)
+##   local all_props = collect_all_props(reg, state_fields)
+##   local base = derive_base_name(type_name)
+##   local uniforms_record = base .. "Uniforms"
+##   local layout = nebula_gen_uniform_layout(type_name, {
+##     record_name      = uniforms_record,
+##     wgsl_struct_name = "Uniforms",
+##   })
+## 
+##   local shader_result = nebula_compose_text_shader({
+##     wgsl_struct  = layout.wgsl_struct,
+##     struct_name  = layout.wgsl_struct_name,
+##   })
+## 
+##   -- ★ 修复：先生成 State 枚举和 StateMachine，TextContext 依赖 <Base>StateMachine 类型
+##   local source_parts = gen_state_enum(base, reg) .. "\n\n"
+##   source_parts = source_parts .. gen_state_machine(base, reg) .. "\n\n"
+##   source_parts = source_parts .. gen_text_context_for(type_name, base, reg, state_fields) .. "\n\n"
+## 
+##   local pipeline_spec = {
+##     base            = base,
+##     visual_type     = type_name,
+##     uniforms_record = uniforms_record,
+##     wgsl_source     = shader_result.source,
+##     uniform_size    = layout.total_size,
+##     layout_fields   = layout.fields,
+##     base_fields     = base_fields,
+##     all_props       = all_props,
+##     textured        = shader_result.textured,
+##     vertex_layout   = shader_result.vertex_layout,
+##   }
+##   source_parts = source_parts .. nebula_gen_to_uniforms_typed(pipeline_spec) .. "\n\n"
+##   source_parts = source_parts .. nebula_gen_pipeline_source(pipeline_spec) .. "\n\n"
+## 
+##   local source = source_parts or ""
+##   print(("[derive-text] %s: emit TextContext + Uniforms + TextPipeline (%dB uniforms, max_chars=%d)"):format(
+##     type_name, layout.total_size, reg.max_chars or 256))
+## 
+##   local rec_ast = aster.parse(layout.nelua_record_source,
+##                               "<nebula_derive_text:" .. uniforms_record .. ">")
+##   for _, stat in ipairs(rec_ast) do
+##     inject_statement(stat)
+##   end
+## 
+##   local block_ast = aster.parse(source, "<nebula_derive_text:" .. type_name .. ">")
+##   for _, stat in ipairs(block_ast) do
+##     inject_statement(stat)
+##   end
+## end
+## 
+## -- ---- ★ Phase 4.1: Slug 文本派生器 ----
+## --
+## -- 为标注了 text_mode="slug" 的 Visual 类型生成：
+## --   (1) <T>Uniforms         —— 标准布局 record
+## --   (2) SlugTextPipeline    —— Slug 专属管线（共享，由 app_factory 注入）
+## --   (3) <T>Context          —— 包含 set_text 方法，调用 nebula_slug_text_build_vertices
+## -- =============================================================================
+## function nebula_derive_slug_text_visual(type_name)
+##   local reg = nebula_registry[type_name]
+##   assert(reg, "nebula_derive_slug_text_visual: type '" .. type_name .. "' must be annotated first via nebula_annotate")
+## 
+##   local base_fields, state_fields = nebula_parse_shape(type_name)
+##   local all_props = collect_all_props(reg, state_fields)
+##   local base = derive_base_name(type_name)
+##   local uniforms_record = base .. "Uniforms"
+##   local layout = nebula_gen_uniform_layout(type_name, {
+##     record_name      = uniforms_record,
+##     wgsl_struct_name = "Uniforms",
+##   })
+## 
+##   -- ★ Phase 4.1: 使用 Slug 着色器生成器
+##   local shader_result = nebula_compose_slug_shader({
+##     wgsl_struct  = layout.wgsl_struct,
+##     struct_name  = layout.wgsl_struct_name,
+##   })
+## 
+##   -- 查找颜色字段
+##   local color_field = nil
+##   for _, state in ipairs(reg.states) do
+##     local info = state_fields[state] and state_fields[state].text_color or nil
+##     if info then color_field = info.name break end
+##   end
+##   assert(color_field, "slug text derive requires <state>_text_color field")
+##
+##   local max_chars   = reg.max_chars or 256
+##   -- ★ P0-6 fix: 限制 max_chars 上限，防止栈分配过大
+##   -- NebulaSlugVertex = 80B, 每字符 6 顶点 → max_chars * 480B 栈占用
+##   -- WASM 上限 128 → 60KB（WASM 默认栈 64KB）; Native 上限 1024 → 480KB（Native 栈通常 8MB）
+##   local slug_max = NEBULA_TARGET == 'wasm' and 128 or 1024
+##   assert(max_chars <= slug_max,
+##     ("slug text derive: max_chars=%d exceeds %d (stack overflow risk). Use DenseText for large text."):format(max_chars, slug_max))
+##   local max_vertices = max_chars * 6
+##   local ctx  = base .. "Context"
+##   local lines = {}
+## 
+##   -- 生成 State 枚举和状态机
+##   local source_parts = gen_state_enum(base, reg) .. "\n\n"
+##   source_parts = source_parts .. gen_state_machine(base, reg) .. "\n\n"
+## 
+##   -- 生成 SlugTextContext record
+##   table.insert(lines, ("global %s = @record{"):format(ctx))
+##   table.insert(lines, ("  visual: %s,"):format(type_name))
+##   table.insert(lines, ("  sm:     %sStateMachine,"):format(base))
+##   table.insert(lines,  "  mesh:   NebulaTextMesh,")
+##   table.insert(lines,  "  current_text_color: Color,")
+##   table.insert(lines,  "}")
+## 
+##   table.insert(lines, ("function %s:init(vis: %s): void"):format(ctx, type_name))
+##   table.insert(lines,  "  self.visual = vis")
+##   table.insert(lines,  "  self.sm:init()")
+##   table.insert(lines,  "  self.mesh:init()")
+##   table.insert(lines, ("  self.current_text_color = vis.%s"):format(color_field))
+##   table.insert(lines,  "end")
+## 
+##   table.insert(lines, ("function %s:update(_input: *NebulaInputState, _dt: float32): void"):format(ctx))
+##   table.insert(lines, ("  self.current_text_color = self.visual.%s"):format(color_field))
+##   table.insert(lines,  "end")
+## 
+##   -- ★ Phase 4.1: set_text 调用 nebula_slug_text_build_vertices
+##   table.insert(lines, ("function %s:set_text(renderer: *NebulaRenderer, text: cstring): boolean"):format(ctx))
+##   table.insert(lines, ("  local verts: [%d]NebulaSlugVertex"):format(max_vertices))
+##   table.insert(lines,  "  local mesh_w: float32 = 0.0")
+##   table.insert(lines,  "  local mesh_h: float32 = 0.0")
+##   table.insert(lines,  "  local vertex_count = nebula_slug_text_build_vertices(")
+##   table.insert(lines,  "    text,")
+##   table.insert(lines,  "    self.visual.pos.x,")
+##   table.insert(lines,  "    self.visual.pos.y,")
+##   table.insert(lines,  "    self.visual.pixel_height,")
+##   table.insert(lines,  "    self.current_text_color,")
+##   table.insert(lines,  "    &NEBULA_SLUG_GLYPHS[0],")
+##   table.insert(lines,  "    &verts[0],")
+##   table.insert(lines, ("    (@uint32)(%d),"):format(max_vertices))
+##   table.insert(lines,  "    &mesh_w,")
+##   table.insert(lines,  "    &mesh_h")
+##   table.insert(lines,  "  )")
+##   table.insert(lines,  "  self.visual.size = Vec2{ x = mesh_w, y = mesh_h }")
+##   table.insert(lines,  "  self.mesh.width = mesh_w")
+##   table.insert(lines,  "  self.mesh.height = mesh_h")
+##   table.insert(lines,  "  local data_ptr: pointer = nilptr")
+##   table.insert(lines,  "  local data_size: csize = 0")
+##   table.insert(lines,  "  if vertex_count > 0 then")
+##   table.insert(lines,  "    data_ptr = &verts[0]")
+##   table.insert(lines,  "    data_size = (@csize)((@uint64)(vertex_count) * (@uint64)(#NebulaSlugVertex))")
+##   table.insert(lines,  "  end")
+##   table.insert(lines, ("  if not nebula_text_mesh_upload(renderer, &self.mesh, data_ptr, data_size, vertex_count, \"%s\") then return false end"):format("nebula-" .. base:lower() .. "-slug-mesh"))
+##   table.insert(lines,  "  return true")
+##   table.insert(lines,  "end")
+## 
+##   source_parts = source_parts .. table.concat(lines, "\n") .. "\n\n"
+## 
+##   -- 生成 Uniforms record 和 SlugTextPipeline
+##   local pipeline_spec = {
+##     base            = "SlugText",
+##     visual_type     = type_name,
+##     uniforms_record = "SlugTextUniforms",
+##     wgsl_source     = shader_result.source,
+##     slug_text       = true,
+##   }
+## 
+##   -- 生成 SlugTextUniforms record（视口大小等基础参数）
+##   local slug_uniforms_src = [[global SlugTextUniforms = @record{
+##   viewport: Vec2,
+##   _pad0: float32,
+##   _pad1: float32,
+## }]]
+## 
+##   print(("[derive-slug] %s: emit SlugTextContext + SlugTextPipeline (max_chars=%d)"):format(
+##     type_name, max_chars))
+## 
+##   local rec_ast = aster.parse(layout.nelua_record_source,
+##                               "<nebula_derive_slug:" .. uniforms_record .. ">")
+##   for _, stat in ipairs(rec_ast) do
+##     inject_statement(stat)
+##   end
+## 
+##   -- 注入 SlugTextUniforms
+##   local slug_uni_ast = aster.parse(slug_uniforms_src, "<nebula_derive_slug:SlugTextUniforms>")
+##   for _, stat in ipairs(slug_uni_ast) do
+##     inject_statement(stat)
+##   end
+## 
+##   -- 注入 SlugTextPipeline
+##   local slug_pipe_src = nebula_gen_pipeline_source(pipeline_spec)
+##   local slug_pipe_ast = aster.parse(slug_pipe_src, "<nebula_derive_slug:SlugTextPipeline>")
+##   for _, stat in ipairs(slug_pipe_ast) do
+##     inject_statement(stat)
+##   end
+## 
+##   local block_ast = aster.parse(source_parts, "<nebula_derive_slug:" .. type_name .. ">")
+##   for _, stat in ipairs(block_ast) do
+##     inject_statement(stat)
+##   end
+## end
+## 
+## -- =============================================================================
+## -- ---- ★ Phase 4.X: 高密度文本派生器 ----
+## --
+## -- 为 dense text grid 场景生成：
+## --   (1) DenseTextUniforms     —— 视口 + 单元格尺寸 (16B)
+## --   (2) <Base>DenseTextPipeline —— atlas_dense 管线（Storage Buffer + SDF atlas）
+## --
+## -- 与 SlugText 不同，DenseText 是一个独立的管线工具，不需要 per-Visual 的
+## -- State/StateMachine/Context。应用层直接操作 DenseCharInstance 数组并调用
+## -- pipeline:upload() + pipeline:draw()。
+## -- =============================================================================
+## function nebula_derive_dense_text_visual(base_name, opts)
+##   opts = opts or {}
+##   local max_chars = opts.max_chars or 8192
+##   local base = base_name or "DenseText"
+##
+##   -- (1) 生成 WGSL 着色器
+##   local shader_result = nebula_compose_dense_text_shader({
+##     max_chars = max_chars,
+##   })
+##
+##   -- (2) 生成 DenseTextUniforms record
+##   local uniforms_src = ([[global %sUniforms = @record{
+##   viewport_w: float32,
+##   viewport_h: float32,
+##   cell_w:     float32,
+##   cell_h:     float32,
+## }]]):format(base)
+##
+##   -- (3) 生成管线
+##   local pipeline_spec = {
+##     base            = base,
+##     visual_type     = base,
+##     uniforms_record = base .. "Uniforms",
+##     wgsl_source     = shader_result.source,
+##     atlas_dense     = true,
+##     max_chars       = max_chars,
+##   }
+##
+##   print(("[derive-dense] %s: emit %sUniforms + %sDenseTextPipeline (max_chars=%d)"):format(
+##     base, base, base, max_chars))
+##
+##   -- 注入 Uniforms record
+##   local uni_ast = aster.parse(uniforms_src,
+##     "<nebula_derive_dense:" .. base .. "Uniforms>")
+##   for _, stat in ipairs(uni_ast) do
+##     inject_statement(stat)
+##   end
+##
+##   -- 注入 DenseTextPipeline
+##   local pipe_src = nebula_gen_pipeline_source(pipeline_spec)
+##   local pipe_ast = aster.parse(pipe_src,
+##     "<nebula_derive_dense:" .. base .. "DenseTextPipeline>")
+##   for _, stat in ipairs(pipe_ast) do
+##     inject_statement(stat)
+##   end
+## end
+##
+## -- ---- 主入口：派生并 inject 到调用点 ----
+## --
+## -- Phase 2.3.3: 扩展 nebula_derive 在调用点额外发出：
+## --   (1) <T>Uniforms          —— 紧凑 std140 record（无 force_viewport_align）
+## --   (2) <T>Pipeline           —— 专属渲染管线，委托 nebula_pipeline_base_init
+## --   (3) <T>Context:to_uniforms—— 强类型版本，返回 <T>Uniforms
+## --
+## -- 相关 WGSL 着色器在编译期由 nebula_compose_shader_instanced（标准路径）或
+## -- nebula_compose_shadow_shaders（阴影路径）按字段组合。
+## -- Phase 3.7: standard_instanced 为默认路径，无需在 nebula_annotate 中声明 instanced=true。
+## function nebula_derive(type_name)
+##   local reg = nebula_registry[type_name]
+##   assert(reg, "nebula_derive: type '" .. type_name .. "' must be annotated first via nebula_annotate")
+## 
+##   if reg.text_mode == "ascii_sdf" then
+##     return nebula_derive_text_visual(type_name)
+##   end
+## 
+##   -- ★ Phase 4.1: Slug 文本渲染路径
+##   if reg.text_mode == "slug" then
+##     return nebula_derive_slug_text_visual(type_name)
+##   end
+##
+##   -- ★ Phase 4.X: 高密度文本渲染路径
+##   if reg.text_mode == "dense" then
+##     local base = derive_base_name(type_name)
+##     return nebula_derive_dense_text_visual(base, {
+##       max_chars = reg.max_chars or 8192,
+##     })
+##   end
+## 
+##   -- ★ Phase 3.10: 通过 NEBULA_PRIMITIVES 注册表的 pre_derive_hook 执行原语前置钉子
+##   -- （替代旧的 toggleable/editable 硬编码分支）
+##   nebula_run_pre_derive_hooks(reg, type_name, reg.primitives or {}, inject_statement, aster)
+## 
+##   local base_fields, state_fields = nebula_parse_shape(type_name)
+##   local all_props = collect_all_props(reg, state_fields)
+##   local base = derive_base_name(type_name)
+##   local uniforms_record = base .. "Uniforms"
+## 
+##   -- Phase 2.3.3: 先生成紧凑 Uniform 布局作为着色器组合输入
+##   local layout = nebula_gen_uniform_layout(type_name, {
+##     record_name      = uniforms_record,
+##     wgsl_struct_name = "Uniforms",
+##     -- 不传 force_viewport_align，使用 std140 原生紧凑布局
+##   })
+## 
+##   -- 根据字段检测着色器特性
+##   local feats = detect_shader_features(base_fields, all_props)
+##   -- Phase 3.7: 阴影路径使用 nebula_compose_shadow_shaders 生成阴影子着色器
+##   -- （原 nebula_compose_shader 已删除，其主着色器是红色占位符，违反公理 C）
+##   local shadow_shaders = nil
+##   if feats.has_shadow then
+##     shadow_shaders = nebula_compose_shadow_shaders({
+##       wgsl_struct  = layout.wgsl_struct,
+##       struct_name  = layout.wgsl_struct_name,
+##       has_radius   = feats.has_radius,
+##       has_border   = feats.has_border,
+##     })
+##     print(("[derive-shadow] %s: shadow_multipass path"):format(type_name))
+##   end
+## 
+##   -- ★ Phase 4.0: Visual 级公理校验（任务 A：生命周期类型白名单）
+##   nebula_validate_visual(type_name, base_fields, state_fields)
+## 
+##   -- Phase 2.4: 先生成 hit_test 和 process_input，必须在 Context:update() 之前注入
+##   -- （Nelua 要求方法在调用前已声明）
+##   local interaction_spec = {
+##     base         = base,
+##     state_type   = base .. "State",
+##     primitives   = reg.primitives or {},
+##     states       = reg.states,
+##     component_id = reg.component_id or 0,
+##   }
+##   local hit_test_src      = nebula_gen_hit_test(interaction_spec)
+##   local process_input_src = nebula_gen_process_input(interaction_spec)
+## 
+##   -- 生成 <T>State / StateMachine / Context record+helpers / hit_test / process_input / update
+##   -- 顺序关键：
+##   --   1. gen_state_enum       — 状态枚举
+##   --   2. gen_state_machine    — 状态机
+##   --   3. gen_context_for      — Context record + init + state helpers（不含 update）
+##   --   4. hit_test_src         — 必须在 Context 定义后
+##   --   5. process_input_src    — 必须在 hit_test 后
+##   --   6. gen_update_for       — 必须在 process_input 后，因为内部调用 process_input
+##   local source_parts = ""
+##   source_parts = source_parts .. gen_state_enum(base, reg) .. "\n\n"
+##   source_parts = source_parts .. gen_state_machine(base, reg) .. "\n\n"
+##   source_parts = source_parts .. gen_context_for(type_name, base, reg, state_fields, all_props, base_fields) .. "\n\n"
+##   source_parts = source_parts .. hit_test_src .. "\n\n"
+##   -- ★ Phase 3.10: 通过 NEBULA_PRIMITIVES 注册表的 extra_source_hook 收集额外源码
+##   -- （替代旧的 toggleable/editable 硬编码分支）
+##   local extra_spec = {
+##     base         = base,
+##     state_type   = base .. "State",
+##     primitives   = reg.primitives or {},
+##     states       = reg.states,
+##     max_text_len = reg.max_text_len or 255,
+##   }
+##   local extra_src = nebula_get_extra_sources(extra_spec, reg.primitives or {})
+##   if extra_src and #extra_src > 0 then
+##     source_parts = source_parts .. extra_src .. "\n\n"
+##   end
+##   source_parts = source_parts .. process_input_src .. "\n\n"
+##   source_parts = source_parts .. gen_update_for(base, reg, all_props) .. "\n\n"
+##   local use_instanced = not feats.has_shadow
+##   local max_instances = reg.max_instances or 128
+##   local instanced_shader_result = nil
+##   if use_instanced then
+##     instanced_shader_result = nebula_compose_shader_instanced({
+##       wgsl_struct  = layout.wgsl_struct,
+##       struct_name  = layout.wgsl_struct_name,
+##       has_radius   = feats.has_radius,
+##       has_border   = feats.has_border,
+##     })
+##     print(("[derive-instanced] %s: standard_instanced path (max=%d)"):format(type_name, max_instances))
+##   end
+## 
+##   -- Phase 2.3.3: 生成强类型 to_uniforms 和 <T>Pipeline
+##   local pipeline_spec = {
+##     base            = base,
+##     visual_type     = type_name,
+##     uniforms_record = uniforms_record,
+##     -- Phase 3.7: 标准路径使用 instanced_shader_result.source，阴影路径暂时使用 nil（由 gen_pipeline_shadow 内部处理）
+##     wgsl_source     = use_instanced and instanced_shader_result.source or nil,
+##     uniform_size    = layout.total_size,
+##     layout_fields   = layout.fields,
+##     base_fields     = base_fields,
+##     all_props       = all_props,
+##     -- Phase 3.5.1 / Phase 3.7: standard_instanced 路径
+##     standard_instanced = use_instanced,
+##     max_instances      = max_instances,
+##     -- Phase 2.5 / Phase 3.7: 阴影多 Pass 着色器（仅在 has_shadow=true 时生效，此时 use_instanced=false）
+##     has_shadow          = feats.has_shadow,
+##     shadow_mask_source  = shadow_shaders and shadow_shaders.shadow_mask_source or nil,
+##     blur_h_source       = shadow_shaders and shadow_shaders.blur_h_source or nil,
+##     blur_v_source       = shadow_shaders and shadow_shaders.blur_v_source or nil,
+##     composite_source    = shadow_shaders and shadow_shaders.composite_source or nil,
+##     textured            = false,
+##     vertex_layout       = nil,  -- Phase 3.7: 标准路径不使用 vertex_layout（文本路径独立处理）
+##   }
+##   source_parts = source_parts .. nebula_gen_to_uniforms_typed(pipeline_spec) .. "\n\n"
+##   source_parts = source_parts .. nebula_gen_pipeline_source(pipeline_spec) .. "\n\n"
+## 
+##   local source = source_parts or ""
+## 
+##   -- 编译期日志：验收标准要求的格式
+##   print(("[derive] %s: emit State + StateMachine + Context + Uniforms + Shader + Pipeline + Interaction (%d props, %d transitions, %dB uniforms, features=[%s], primitives=[%s], passes=[%s])"):format(
+##     type_name, #all_props, #reg.transitions, layout.total_size,
+##     table.concat(instanced_shader_result and instanced_shader_result.features or (shadow_shaders and shadow_shaders.features or {}), ", "),
+##     table.concat(reg.primitives or {}, ", "),
+##     table.concat(instanced_shader_result and instanced_shader_result.required_passes or (shadow_shaders and shadow_shaders.required_passes or {}), ", ")))
+## 
+##   -- 先单独注入 <T>Uniforms（由 nebula_emit_uniform_record 使用与刚才相同的 layout 生成）
+##   local rec_ast = aster.parse(layout.nelua_record_source,
+##                               "<nebula_derive:" .. uniforms_record .. ">")
+##   for _, stat in ipairs(rec_ast) do
+##     inject_statement(stat)
+##   end
+## 
+##   -- 然后注入其余部分
+##   local block_ast = aster.parse(source, "<nebula_derive:" .. type_name .. ">")
+##   for _, stat in ipairs(block_ast) do
+##     inject_statement(stat)
+##   end
+## end
+## 
+## -- =============================================================================
+## -- ★ Phase 3.5.2: nebula_derive_app(app_name)
+## --
+## -- 从已注册的 App 组件树中生成：
+## --   · <App> record（包含所有 Context + 共享 Pipeline）
+## --   · <App>:init(renderer, vw, vh)
+## --   · <App>:update(input, dt)
+## --   · <App>:draw(pass)
+## --
+## -- 使用方式：
+## --   ##[[
+## --     nebula_app_begin("LoginApp")
+## --       nebula_app_register_component("card", "CardVisual")
+## --       nebula_app_register_component("email", "InputVisual", {component_id=1, has_text_buf=true})
+## --       nebula_app_register_component("password", "InputVisual", {component_id=2, has_text_buf=true})
+## --       nebula_app_register_component("login_btn", "ButtonVisual")
+## --     nebula_app_end()
+## --   ]]
+## --   nebula_derive_app("LoginApp")
+## -- =============================================================================
+## function nebula_derive_app(app_name)
+##   -- 调用 app_factory.lua 中由 require 加载的 nebula_app_generate 函数生成源码
+##   local source = nebula_app_generate(app_name)
+##   local block_ast = aster.parse(source, "<nebula_derive_app:" .. app_name .. ">")
+##   for _, stat in ipairs(block_ast) do
+##     inject_statement(stat)
+##   end
+## end
