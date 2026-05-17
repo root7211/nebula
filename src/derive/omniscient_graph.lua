@@ -216,8 +216,9 @@ end
 --- 全知图构建统一入口。
 --- 从注册表中收集 states/bindings/events，构建依赖图并分析。
 --- S1b: 增加 trace_propagation 和 event_chains 计算。
+--- S4: 增加 repeaters 和 conditionals 支持。
 ---
---- @param reg table App 注册表（需包含 _states, _bindings, _events）
+--- @param reg table App 注册表（需包含 _states, _bindings, _events, _repeaters, _conditionals）
 --- @param opts table|nil 可选配置 { MutationAST, EffectModel }
 --- @return table graph 全知图对象
 function OmniscientGraph.build(reg, opts)
@@ -226,6 +227,47 @@ function OmniscientGraph.build(reg, opts)
   local states   = reg._states   or {}
   local bindings = reg._bindings or {}
   local events   = reg._events   or {}
+  local repeaters    = reg._repeaters    or {}
+  local conditionals = reg._conditionals or {}
+
+  -- ★ S4: 将 repeater 的 per-item bindings 展开为全知图 bindings
+  -- repeater 绑定使用 "_repeater_<name>_<field>" 作为 binding target
+  local repeater_bindings = {}
+  for _, rep in ipairs(repeaters) do
+    for _, b in ipairs(rep.bind or {}) do
+      local target_name = ("_repeater_%s_%s"):format(rep.name, b.field)
+      local depends = b.depends or {}
+      -- 如果 depends 为空，尝试从 source 中推导依赖
+      -- source 中的 self.X 引用即为依赖
+      if #depends == 0 and b.source then
+        for dep in b.source:gmatch("self%.([%w_]+)") do
+          -- 排除 _i 和 repeater 自身的数组
+          if dep ~= "_i" then
+            local found = false
+            for _, d in ipairs(depends) do
+              if d == dep then found = true; break end
+            end
+            if not found then
+              depends[#depends + 1] = dep
+            end
+          end
+        end
+      end
+      repeater_bindings[#repeater_bindings + 1] = {
+        target  = target_name,
+        depends = depends,
+        compute = b.source,
+        type    = b.type or "auto",
+        _repeater_name = rep.name,
+        _repeater_field = b.field,
+      }
+    end
+  end
+
+  -- 合并 bindings（原始 + repeater 展开）
+  local all_bindings = {}
+  for _, b in ipairs(bindings) do all_bindings[#all_bindings + 1] = b end
+  for _, b in ipairs(repeater_bindings) do all_bindings[#all_bindings + 1] = b end
 
   -- 收集所有节点名称（states + binding targets）
   local node_set = {}
@@ -237,7 +279,7 @@ function OmniscientGraph.build(reg, opts)
       table.insert(nodes, name)
     end
   end
-  for _, binding in ipairs(bindings) do
+  for _, binding in ipairs(all_bindings) do
     if not node_set[binding.target] then
       node_set[binding.target] = true
       table.insert(nodes, binding.target)
@@ -247,7 +289,7 @@ function OmniscientGraph.build(reg, opts)
   table.sort(nodes)
 
   -- 构建邻接表
-  local dep_adj = OmniscientGraph.build_dependency_adjacency(bindings)
+  local dep_adj = OmniscientGraph.build_dependency_adjacency(all_bindings)
 
   -- 拓扑排序
   local topo_order = OmniscientGraph.topological_sort(dep_adj, nodes)
@@ -259,12 +301,17 @@ function OmniscientGraph.build(reg, opts)
   local graph = {
     app_name      = reg.name,
     states        = states,
-    bindings      = bindings,
+    bindings      = all_bindings,
     events        = events,
+    repeaters     = repeaters,
+    conditionals  = conditionals,
     dep_adj       = dep_adj,
     topo_order    = topo_order,    -- nil 表示存在循环依赖
     diamond_nodes = diamond_nodes,
     nodes         = nodes,
+    -- 保留原始 bindings 引用（区分 repeater 展开的）
+    _original_bindings  = bindings,
+    _repeater_bindings  = repeater_bindings,
   }
 
   -- ★ S1b: 如果提供了 MutationAST 和 EffectModel，计算 effects 和 event_chains
@@ -275,7 +322,7 @@ function OmniscientGraph.build(reg, opts)
   if EffectModel and topo_order then
     -- 推导 effects
     local derive_graph = {
-      bindings       = bindings,
+      bindings       = all_bindings,
       states         = states,
       texts          = reg.texts or {},
       visual_bindings = reg.visual_bindings,
@@ -312,12 +359,17 @@ function OmniscientGraph.build(reg, opts)
   end
 
   -- 编译期日志输出
+  local rep_count = #repeaters
+  local cond_count = #conditionals
   if topo_order then
-    print(("[omniscient_graph] %s: %d states, %d bindings, %d events, topo_order=[%s], diamonds={%s}"):format(
+    print(("[omniscient_graph] %s: %d states, %d bindings (%d repeater), %d events, %d repeaters, %d conditionals, topo_order=[%s], diamonds={%s}"):format(
       reg.name or "?",
       #nodes,
-      #bindings,
+      #all_bindings,
+      #repeater_bindings,
       #events,
+      rep_count,
+      cond_count,
       table.concat(topo_order, ", "),
       (function()
         local d = {}

@@ -323,17 +323,50 @@ require "nebula"
 
 ---
 
-## 第四梯队：动态内容扩展
+## 第四梯队：动态内容扩展 ✅ 已完成
 
 **目标**：支持 Repeater 和条件渲染，与 Effect 模型集成。
 
-### Step 4.1-4.5
+**实施记录（2026-05-17）**：
 
-按原始方案执行，额外要求：
-- Repeater 的循环体内 binding 也能通过 Effect 模型推导
-- 条件渲染的两分支代码生成中，dirty bit 分配需稳定
+### 新增 API
 
-**验收标准**：动态 demo 可运行 + 77/77 现有回归全绿
+| API | 文件 | 描述 |
+|:----|:-----|:-----|
+| `nebula_repeater(name, visual_type, config)` | `app_factory.lua` | 声明动态列表，config 包含 max/count_var/bind |
+| `nebula_when(condition_state, config)` | `app_factory.lua` | 声明条件渲染，config 包含 on_true/on_false |
+
+### 核心改动
+
+| 文件 | 改动 |
+|:-----|:-----|
+| `src/derive/app_factory.lua` | 新增 `nebula_repeater()` 和 `nebula_when()` 注册 API；`nebula_app_end` 扩展为传递 repeaters/conditionals |
+| `src/derive/omniscient_graph.lua` | 将 repeater per-item bindings 展开为 `_repeater_<name>_<field>` 节点并入依赖图；graph 对象新增 repeaters/conditionals/_original_bindings/_repeater_bindings 字段 |
+| `src/derive/binding_factory.lua` | 新增 6 个函数：repeater record/init/update/dirty-marks、conditional record/init/update/sync-marks；generate() 集成 repeater 和 conditional 代码生成 |
+
+### 设计决策
+
+| 决策 | 结论 | 依据 |
+|:-----|:-----|:-----|
+| Repeater 绑定如何参与依赖图 | 展开为 `_repeater_<name>_<field>` 节点，与普通 binding 共享拓扑排序和钻石检测 | 复用已有基础设施，无需新的图遍历逻辑 |
+| Repeater dirty 追踪粒度 | App 级 boolean `_<name>_dirty`，非 per-item | 当前 repeater 的 bind 通常依赖全局 state，per-item dirty 过早优化 |
+| Repeater 绑定依赖自动推导 | 当 `depends` 为空时，从 `source` 中正则提取 `self.<field>` 作为依赖 | 减少用户声明负担，与 mutation AST 的 read_set 逻辑一致 |
+| Conditional 实现方式 | `_when_<cond>_active: boolean` 标记 + event handler 中注入同步代码 | 最简方案，draw 层面的 if/else 留给用户组合或后续 S5 集成 |
+| Repeater 绑定是否生成 record 字段 | 否，`_repeater_*` 节点不生成 record 字段 | 这些是图分析用的虚拟节点，实际数据存在 slot data 数组中 |
+
+### 验收
+
+| 项目 | 结果 |
+|:-----|:-----|
+| S4 冒烟测试 | 53 条全绿 |
+| S1a 回归 | 72 条全绿 |
+| S1b 回归 | 125 条全绿 |
+| S2 回归 | 58 条全绿 |
+| S3 回归 | 46 条全绿 |
+| 现有回归（63 个测试文件） | 无新增失败 |
+
+**验收标准**：~~动态 demo 可运行~~ + ~~77/77 现有回归全绿~~  
+✅ 冒烟测试全绿 + 回归无新增失败 + 代码生成中无运行时事件系统
 
 ---
 

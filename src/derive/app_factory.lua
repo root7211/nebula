@@ -490,6 +490,66 @@ function nebula_on(target, event_type, config)
   })
 end
 
+--- ★ Phase 5.0 S4: 声明一个 Repeater（动态列表）。
+--- 编译期生成模板，运行时控制数量。每个实例的绑定也能通过 Effect 模型推导。
+---
+--- @param name string Repeater 名称（如 "items"）
+--- @param visual_type string 实例的 Visual 类型名称
+--- @param config table 配置：{max, count_var, bind}
+---   max       — 最大实例数（编译期常量）
+---   count_var — 控制实例数量的 state 变量名
+---   bind      — per-item 绑定声明列表 [{field, source, depends}]
+---              source 中用 _i 表示实例索引
+function nebula_repeater(name, visual_type, config)
+  assert(_current_app, "nebula_repeater: must be called between nebula_app_begin and nebula_app_end")
+  assert(name, "nebula_repeater: name required")
+  assert(visual_type, "nebula_repeater: visual_type required")
+  config = config or {}
+  assert(config.max, "nebula_repeater: max required")
+  assert(config.count_var, "nebula_repeater: count_var required")
+  local reg = nebula_app_registry[_current_app]
+  if not reg._repeaters then reg._repeaters = {} end
+  -- 检查重复
+  for _, r in ipairs(reg._repeaters) do
+    assert(r.name ~= name,
+      ("nebula_repeater: repeater '%s' already declared in app '%s'"):format(name, _current_app))
+  end
+  table.insert(reg._repeaters, {
+    name        = name,
+    visual_type = visual_type,
+    max         = config.max,
+    count_var   = config.count_var,
+    bind        = config.bind or {},
+    producer    = config.producer,
+  })
+end
+
+--- ★ Phase 5.0 S4: 声明条件渲染。
+--- 根据一个 boolean state 控制两组组件的可见性。
+--- 编译期生成两套代码，运行时根据条件选择。
+---
+--- @param condition_state string 条件状态名（boolean 类型）
+--- @param config table 配置：{on_true, on_false}
+---   on_true   — 条件为 true 时活跃的组件名列表
+---   on_false  — 条件为 false 时活跃的组件名列表
+function nebula_when(condition_state, config)
+  assert(_current_app, "nebula_when: must be called between nebula_app_begin and nebula_app_end")
+  assert(condition_state, "nebula_when: condition_state required")
+  config = config or {}
+  local reg = nebula_app_registry[_current_app]
+  if not reg._conditionals then reg._conditionals = {} end
+  -- 检查重复
+  for _, c in ipairs(reg._conditionals) do
+    assert(c.condition ~= condition_state,
+      ("nebula_when: condition '%s' already declared in app '%s'"):format(condition_state, _current_app))
+  end
+  table.insert(reg._conditionals, {
+    condition = condition_state,
+    on_true   = config.on_true or {},
+    on_false  = config.on_false or {},
+  })
+end
+
 -- ★ Phase 3.11: 内部辅助函数 — 将组件的 layout 字段转换为 layout_engine 节点
 -- 递归处理 layout.children（允许容器组件声明嵌套布局）
 local function _build_layout_node(name, layout_spec)
@@ -653,8 +713,8 @@ function nebula_app_end()
   local reg = nebula_app_registry[_current_app]
   -- ★ Phase 3.11: 自动解算布局
   _solve_layout(reg)
-  -- ★ Phase 5.0 S2: 如果有 states/bindings/events 声明，构建全知图（带 AST + Effect 分析）
-  if reg._states or reg._bindings or reg._events then
+  -- ★ Phase 5.0 S2/S4: 如果有 states/bindings/events/repeaters/conditionals 声明，构建全知图
+  if reg._states or reg._bindings or reg._events or reg._repeaters or reg._conditionals then
     reg._omniscient_graph = _load_omniscient_graph().build(reg, {
       MutationAST = _load_mutation_ast(),
       EffectModel = _load_effect_model(),

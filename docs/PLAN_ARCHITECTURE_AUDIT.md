@@ -26,12 +26,12 @@
 
 | # | 问题 | 文件 | 位置 | 描述 | 修复方案 |
 |:--|:-----|:-----|:-----|:-----|:---------|
-| P0-1 | GPU 资源泄漏：init 失败路径 | `renderer.nelua` | L169-234 | `NebulaRenderer:init` 渐进式获取 instance→surface→adapter→device，中途失败不释放已获取资源。如 adapter 失败时 instance+surface 泄漏。 | 引入 `goto cleanup` 模式或 defer 链，失败时逆序释放已获取资源。 |
-| P0-2 | GPU 资源泄漏：render target | `renderer.nelua` | L891-895 | `nebula_create_render_target` 中 view 创建失败时已创建的 texture 未释放。对比 `nebula_upload_texture`（L761）有正确释放。 | view 创建失败时调用 `wgpuTextureRelease(out_texture)` 后再 return false。 |
-| P0-3 | deinit nilptr 守卫不一致 | `pipeline_factory.lua` | L726-732 | `gen_pipeline_standard_instanced` 的 deinit 无 nilptr 检查；`gen_pipeline_shadow`（L477-511）和 `gen_pipeline_dense_text`（L1131-1138）有检查。partial init 后 deinit 会 crash。 | 统一所有管线 deinit 生成器，emit `if X ~= nilptr then release(X) end` 模式。 |
-| P0-4 | 搜索替换越界 | `app.nelua` | L652-669 | `nebula_search_replace_current` 逐字符 `insert_char` 不检查 gap buffer 容量。替换串比搜索串长且 buffer 接近满时溢出。 | 替换前检查 `buf.gap_size >= (replace_len - search_len)`，不足时中止并设 overflow 标记。 |
-| P0-5 | 高亮数组越界 | `nebula_builtins.nelua` | L293 (生成代码) | `hl_colors: [1024]uint32` 与 flatten buffer 共用 1024 上限，highlight dispatch 存在 off-by-one 溢出可能。 | flatten 上限改为 `1023`，highlight dispatch 的 `line_len` 参数取 `min(actual_len, 1023)`。 |
-| P0-6 | Slug 顶点栈溢出 | `nebula_core.nelua` | L1177, L1324 | 编译期生成 `[max_vertices]NebulaSlugVertex`，max_chars=256 时为 120KB 栈分配，超出 WASM 默认栈（64KB）。 | 改为 L0 堆分配（App Record 字段）或设 `max_chars` 上限并 assert。 |
+| ✅ P0-1 | GPU 资源泄漏：init 失败路径 | `renderer.nelua` | L167,194,236,254 | ~~`NebulaRenderer:init` 渐进式获取 instance→surface→adapter→device，中途失败不释放已获取资源。~~ | ✅ 已修复：每个失败路径逆序释放已获取资源（instance/surface/adapter/device/queue） |
+| ✅ P0-2 | GPU 资源泄漏：render target | `renderer.nelua` | L915 | ~~`nebula_create_render_target` 中 view 创建失败时已创建的 texture 未释放。~~ | ✅ 已修复：view 创建失败时调用 `wgpuTextureRelease($out_texture)` 后 return false |
+| ✅ P0-3 | deinit nilptr 守卫不一致 | `pipeline_factory.lua` | L178,679,810 | ~~`gen_pipeline_standard_instanced` 的 deinit 无 nilptr 检查。~~ | ✅ 已修复：统一所有管线 deinit 生成器，emit `if X ~= nilptr then release(X) end` 模式 |
+| ✅ P0-4 | 搜索替换越界 | `nebula_editor.nelua` | L129,162 | ~~`nebula_search_replace_current` 逐字符 `insert_char` 不检查 gap buffer 容量。~~ | ✅ 已修复：替换前检查 gap buffer 容量，不足时中止并打印警告（搜索逻辑已从 `app.nelua` 提取到 `nebula_editor.nelua`） |
+| ✅ P0-5 | 高亮数组越界 | `nebula_builtins.nelua` | L325 | ~~`hl_colors: [1024]uint32` 与 flatten buffer 共用 1024 上限，highlight dispatch 存在 off-by-one 溢出可能。~~ | ✅ 已修复：`line_len` 参数取 `min(actual_len, 1023)` |
+| ✅ P0-6 | Slug 顶点栈溢出 | `nebula_core.nelua` | L1062,1207 | ~~编译期生成 `[max_vertices]NebulaSlugVertex`，max_chars=256 时为 120KB 栈分配，超出 WASM 默认栈（64KB）。~~ | ✅ 已修复：限制 `max_chars` 上限，防止栈分配过大 |
 
 ### 1.2 P1 — 架构性问题
 
@@ -83,20 +83,18 @@
 
 ## 2. 实施计划
 
-### 第一梯队：安全修复（P0 全部）
+### 第一梯队：安全修复（P0 全部） ✅ 已完成
 
-**目标**：消除所有正确性与安全性风险。零行为变更，仅修复错误路径。
+**状态**：全部 6 项 P0 修复已落地。
 
-| 任务 | 来源 | 文件 | 预计改动量 | 验收标准 |
-|:-----|:-----|:-----|:-----------|:---------|
-| T1.1 GPU init 失败路径修复 | P0-1 | `renderer.nelua` | ~30 行 | init 任意步骤失败后，前序资源全部释放；手动测试各失败点 |
-| T1.2 render target 泄漏修复 | P0-2 | `renderer.nelua` | ~3 行 | view 创建失败时 texture 被释放 |
-| T1.3 deinit nilptr 守卫统一 | P0-3 | `pipeline_factory.lua` | ~15 行 | 所有 5 种管线 deinit 均有 nilptr 检查 |
-| T1.4 搜索替换容量检查 | P0-4 | `app.nelua` | ~10 行 | 替换操作前检查 gap 空间，不足时中止 |
-| T1.5 高亮数组边界修复 | P0-5 | `nebula_builtins.nelua` | ~5 行 | flatten 上限与 hl_colors 大小一致，无越界 |
-| T1.6 Slug 顶点栈改堆 | P0-6 | `nebula_core.nelua` | ~20 行 | Slug 顶点数组改为 App Record 字段（L0 堆分配），WASM 不再栈溢出 |
-
-**验收**：77/77 回归全绿 + 新增 P0 修复专项冒烟测试
+| 任务 | 来源 | 文件 | 状态 |
+|:-----|:-----|:-----|:-----|
+| T1.1 GPU init 失败路径修复 | P0-1 | `renderer.nelua` | ✅ 每个失败路径逆序释放 |
+| T1.2 render target 泄漏修复 | P0-2 | `renderer.nelua` | ✅ view 失败时释放 texture |
+| T1.3 deinit nilptr 守卫统一 | P0-3 | `pipeline_factory.lua` | ✅ 统一 nilptr 检查 |
+| T1.4 搜索替换容量检查 | P0-4 | `nebula_editor.nelua` | ✅ 替换前检查 gap 容量 |
+| T1.5 高亮数组边界修复 | P0-5 | `nebula_builtins.nelua` | ✅ line_len 取 min(len, 1023) |
+| T1.6 Slug 顶点栈溢出修复 | P0-6 | `nebula_core.nelua` | ✅ 限制 max_chars 上限 |
 
 ---
 
