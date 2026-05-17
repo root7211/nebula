@@ -38,6 +38,8 @@ end
 
 local types_src     = read_file("src/nebula_types.nelua")
 local core_src      = read_file("src/nebula_core.nelua")
+local derive_src    = read_file("src/nebula_derive_engine.nelua")
+local sugar_src     = read_file("src/nebula_sugar.nelua")
 local app_src       = read_file("src/app.nelua")
 local interact_src  = read_file("src/derive/interaction_factory.lua")
 local gbf_src       = read_file("src/derive/gap_buffer_factory.lua")
@@ -187,20 +189,20 @@ check("editable factory stores _undo_stack_type in reg",
 print("")
 print("--- 6. Context Record Dynamic Field Injection ---")
 check("nebula_core injects dynamic context fields",
-  core_src:find("dynamic_context_fields") ~= nil)
+  derive_src:find("dynamic_context_fields") ~= nil)
 check("nebula_core resolves primitives for dynamic fields",
-  core_src:find("resolved_prims") ~= nil)
+  derive_src:find("resolved_prims") ~= nil)
 check("nebula_core calls dynamic_context_fields init",
-  core_src:find("Phase 4.7%-S5: 初始化动态 context 字段") ~= nil)
+  derive_src:find("Phase 4.7%-S5: 初始化动态 context 字段") ~= nil)
 
 -- ---- 7. nebula_inject_buffers: undo stack injection ----
 print("")
 print("--- 7. Sugar: nebula_inject_buffers ---")
 check("nebula_inject_buffers injects undo stack",
-  core_src:find("nebula_gen_undo_stack_type") ~= nil)
+  sugar_src:find("nebula_gen_undo_stack_type") ~= nil)
 check("nebula_inject_buffers prints undo injection message",
-  core_src:find('%[sugar%] injected.*undo') ~= nil or
-  core_src:find('injected %%s.*undo') ~= nil)
+  sugar_src:find('%[sugar%] injected.*undo') ~= nil or
+  sugar_src:find('injected %%s.*undo') ~= nil)
 
 -- ---- 8. Functional: undo stack type generation output ----
 print("")
