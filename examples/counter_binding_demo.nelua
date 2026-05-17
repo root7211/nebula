@@ -2,6 +2,10 @@
 -- counter_binding_demo.nelua
 -- Nebula GUI Compiler — Phase 5.0 S2.5
 --
+-- ⚠ 本 demo 使用 L0 Raw API（手动 record + nebula_annotate + nebula_app_begin/end），
+-- 用于验证 Phase 5.0 代码生成的 Nelua 类型正确性。
+-- 推荐写法请参考 button_v2_demo.nelua（L2 API）。
+--
 -- ★ S2.5 验证 Demo：使用 nebula_state / nebula_bind / nebula_on
 --   验证 Phase 5.0 S2 代码生成的 Nelua 类型正确性
 --

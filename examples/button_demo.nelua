@@ -2,6 +2,9 @@
 -- button_demo.nelua
 -- Nebula GUI Compiler — Phase 3.9
 --
+-- ⚠ 本 demo 使用 L0 Raw API，仅供高级用户参考。
+-- 推荐写法请参考 button_v2_demo.nelua（L2 API，18 行）。
+--
 -- ★ Phase 3.9 重写：从 Phase 2.4 手动渲染循环迁移到 App 编排体系
 --
 -- 与 Phase 2.4 的对比：

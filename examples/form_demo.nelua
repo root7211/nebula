@@ -2,6 +2,9 @@
 -- form_demo.nelua
 -- Nebula GUI Compiler — Phase 3.11
 --
+-- ⚠ 本 demo 使用 L0 Raw API，仅供高级用户参考。
+-- 推荐写法请参考 button_v2_demo.nelua（L2 API）或 text_editor_demo_v3.nelua。
+--
 -- ★ Phase 3.11: Layout-App 统一注册
 --   · nebula_app_set_root_layout 声明根节点布局约束
 --   · nebula_app_register_component 携带 layout 字段，消除手写魔法数字坐标

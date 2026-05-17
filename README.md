@@ -12,6 +12,69 @@ Nebula 的目标是成为一个**工业级 GUI 基础设施**，它结合了：
 
 ---
 
+## 快速开始（推荐写法）
+
+Nebula 推荐使用 **L2 声明式 API**：`require "nebula"` + `nebula_visual` + `nebula_app`。
+
+### 最小按钮（18 行）
+
+```nelua
+require "nebula"
+
+## nebula_visual("ButtonVisual", { primitives = {"clickable"} })
+## nebula_app("ButtonApp", { components = {{ name="btn", type="ButtonVisual" }} })
+
+## local function on_init(app)
+##   return { app .. ".btn:init_themed(Vec2{x=300,y=250}, Vec2{x=200,y=60}, 12.0)" }
+## end
+## local function on_frame(app)
+##   return { "if " .. app .. ".btn.click.just_clicked then printf(\"clicked!\\n\") end" }
+## end
+##
+## nebula_main("ButtonApp", {
+##   title = "Button Demo", width = 800, height = 600,
+##   bg_r = 0.09, bg_g = 0.09, bg_b = 0.10,
+##   on_init = on_init, on_frame = on_frame,
+## })
+```
+
+### 最小文本编辑器（19 行）
+
+```nelua
+require "nebula"
+## cinclude "<stdio.h>"
+## nebula_highlight_builtins({"nelua", "lua", "c", "python", "json", "markdown"})
+## nebula_visual("EditorBgVisual", {
+##   primitives = {"multiline_editable"}, max_text_len = 256, max_lines = 256, component_id = 1,
+## })
+## nebula_app("TextEditorApp", {
+##   components = {
+##     { name = "editor",      type = "EditorBgVisual" },
+##     { name = "search_bar",  builtin = "search_bar", flex_basis = 24 },
+##     { name = "editor_body", row = true, flex_grow = 1,
+##       children = { "line_nums", "edit_area" } },
+##     { name = "line_nums",   builtin = "line_nums", flex_basis = 50 },
+##     { name = "edit_area",   builtin = "edit_area", flex_grow = 1 },
+##     { name = "status_bar",  builtin = "status_bar", flex_basis = 24 },
+##   },
+## })
+## nebula_editor_main("TextEditorApp")
+```
+
+### API 分层
+
+```
+L2 (推荐) : nebula_visual + nebula_app + nebula_main       ← 声明式，零样板
+L1 (进阶) : nebula_component + nebula_app + 手动主循环      ← 自定义初始化/帧逻辑
+L0 (底层) : nebula_annotate + nebula_derive + nebula_app_begin/end ← 完全控制
+```
+
+高层 API 无法满足需求时，可随时降级到低层，无需重写。详见 [`docs/guide/api-escape-hatch.md`](docs/guide/api-escape-hatch.md)。
+
+配置项说明与自定义覆盖方法见 [`docs/guide/configuration.md`](docs/guide/configuration.md)。
+
+---
+
 ## 当前状态
 
 **Era III | Code Browser Demo + CI 全量覆盖 32 demo | 编辑器 19 行极限形态 | wgpu-native v29 + 77/77 回归全绿（2026-05-15）**

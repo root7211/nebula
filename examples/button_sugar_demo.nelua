@@ -2,6 +2,9 @@
 -- button_sugar_demo.nelua
 -- Nebula GUI Compiler — Phase 4.5
 --
+-- ⚠ 本 demo 使用 L1 Sugar API（nebula_component + 手动 record 声明）。
+-- 推荐写法请参考 button_v2_demo.nelua（L2 API，18 行）。
+--
 -- ★ 使用 Phase 4.5 语法糖重写 button_demo：
 --   · nebula_component 替代 nebula_annotate + nebula_derive（省去 states/transitions 声明）
 --   · nebula_app 替代 nebula_app_begin + register + app_end + nebula_derive_app
