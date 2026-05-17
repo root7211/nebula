@@ -1,1 +1,741 @@
-��?��.���z[�
+-- =============================================================================
+-- nebula_sugar.nelua
+-- Nebula GUI Compiler — 语法糖 API + Builtin 注册表
+--
+-- 从 nebula_core.nelua 拆分而来（Phase 5.1 架构拆分）。
+-- 职责：为开发者提供声明式、低样板代码的高层接口。
+--
+-- 包含：
+--   · nebula_auto_states — 从原语列表自动推导状态枚举
+--   · nebula_inject_buffers — 自动注入 buffer 类型
+--   · nebula_component — 合并 annotate + derive（L1 Sugar）
+--   · nebula_editor_visual — 编辑器 Visual 自动生成
+--   · nebula_visual — L2 层 Visual 声明糖
+--   · _nebula_builtins 注册表 — Builtin Producer 工厂
+--   · nebula_app — 一站式 App 声明糖（L2 Sugar）
+--
+-- 依赖：nebula_derive_engine.nelua 的全局函数（通过 Facade 加载顺序保证）
+--   · nebula_annotate, nebula_derive, nebula_derive_app
+--   · nebula_resolve_primitives, NEBULA_PRIMITIVES
+--   · nebula_app_begin, nebula_app_end, nebula_app_generate
+--   · NEBULA_THEME_DEFAULTS
+-- =============================================================================
+## -- =============================================================================
+## -- ★ Phase 4.5: 语法糖 API
+## -- =============================================================================
+##
+## -- ★ Phase 4.5 S1: nebula_auto_states(primitives) -> states[]
+## --
+## -- 从原语列表自动推导所需的状态枚举。
+## -- 算法：
+## --   1. 解析原语依赖（nebula_resolve_primitives）
+## --   2. 收集所有 state_transitions 的 target（小写化）
+## --   3. 始终以 "default" 为首项
+## --   4. 按 priority 降序排列（与状态机 if-elseif 链一致）
+## function nebula_auto_states(primitives)
+##   local resolved = nebula_resolve_primitives(primitives)
+##   -- 收集所有 transition targets 及其最高 priority
+##   local state_set = {}
+##   local state_priority = {}
+##   for _, prim_name in ipairs(resolved) do
+##     local meta = NEBULA_PRIMITIVES[prim_name]
+##     if meta and meta.state_transitions then
+##       for _, tr in ipairs(meta.state_transitions) do
+##         local s = tr.target:lower()
+##         if not state_set[s] then
+##           state_set[s] = true
+##           state_priority[s] = tr.priority or 0
+##         else
+##           -- 取最高 priority
+##           if (tr.priority or 0) > state_priority[s] then
+##             state_priority[s] = tr.priority or 0
+##           end
+##         end
+##       end
+##     end
+##   end
+##   -- 按 priority 降序排列
+##   local sorted = {}
+##   for s, _ in pairs(state_set) do
+##     table.insert(sorted, { name = s, priority = state_priority[s] })
+##   end
+##   table.sort(sorted, function(a, b) return a.priority > b.priority end)
+##   -- 构建最终 states 列表：default 在首位
+##   local states = { "default" }
+##   for _, item in ipairs(sorted) do
+##     table.insert(states, item.name)
+##   end
+##   return states
+## end
+##
+## -- ★ Phase 4.5 S1: nebula_inject_buffers(spec)
+## --
+## -- 在 Visual record 定义之前调用，自动注入所需的 buffer 类型。
+## -- 根据 primitives 列表中的原语和 spec 参数决定注入哪些类型：
+## --   · editable → NebulaBuf{max_text_len}
+## --   · multiline_editable → NebulaMultiBuf{max_text_len}_{max_lines}
+## --
+## -- spec:
+## --   primitives   : string[]  — 原语列表（自动展开依赖）
+## --   max_text_len : number?   — 单行容量（默认 255）
+## --   max_lines    : number?   — 多行行数（默认 32）
+## function nebula_inject_buffers(spec)
+##   spec = spec or {}
+##   local prims = spec.primitives or {}
+##   local resolved = nebula_resolve_primitives(prims)
+##   local has_prim = {}
+##   for _, p in ipairs(resolved) do has_prim[p] = true end
+##
+##   local max_text_len = spec.max_text_len or 255
+##   local max_lines    = spec.max_lines or 32
+##
+##   if has_prim["editable"] then
+##     local buf_type, buf_src = nebula_gen_gap_buffer_type(max_text_len)
+##     if buf_src and #buf_src > 0 then
+##       local ast = aster.parse(buf_src, "<nebula_inject_buffers:gap:" .. max_text_len .. ">")
+##       for _, stat in ipairs(ast) do inject_statement(stat) end
+##     end
+##     print(("[sugar] injected %s (capacity=%d)"):format(buf_type, max_text_len))
+##     -- ★ Phase 4.7-S5: 注入 undo stack 类型
+##     local undo_entries = spec.undo_max_entries or 128
+##     local undo_data    = spec.undo_max_data    or 4096
+##     local undo_type, undo_src = nebula_gen_undo_stack_type(undo_entries, undo_data)
+##     if undo_src and #undo_src > 0 then
+##       local ast = aster.parse(undo_src, "<nebula_inject_buffers:undo:" .. undo_entries .. "_" .. undo_data .. ">")
+##       for _, stat in ipairs(ast) do inject_statement(stat) end
+##     end
+##     print(("[sugar] injected %s (entries=%d, data=%d)"):format(undo_type, undo_entries, undo_data))
+##   end
+##
+##   if has_prim["multiline_editable"] then
+##     local mb_type, mb_src = nebula_gen_multiline_buffer_type(max_text_len, max_lines)
+##     if mb_src and #mb_src > 0 then
+##       local ast = aster.parse(mb_src, "<nebula_inject_buffers:multi:" .. max_text_len .. "_" .. max_lines .. ">")
+##       for _, stat in ipairs(ast) do inject_statement(stat) end
+##     end
+##     print(("[sugar] injected %s (lines=%d, capacity=%d)"):format(mb_type, max_lines, max_text_len))
+##   end
+## end
+##
+## -- ★ Phase 4.5 S1: nebula_component(type_name, spec)
+## --
+## -- 语法糖：合并 nebula_annotate + nebula_derive 为单次调用。
+## -- 同时支持从 primitives 自动推导 states（如果 spec.states 未显式指定）。
+## --
+## -- 使用前（旧 API，12+ 行）：
+## --   global ButtonVisual = @record{ ... }
+## --   ##[[ nebula_annotate("ButtonVisual", {
+## --     states     = {"default", "hovered", "pressed"},
+## --     primitives = {"hoverable", "clickable"},
+## --     transitions = {...},
+## --   }) ]]
+## --   ## nebula_derive("ButtonVisual")
+## --
+## -- 使用后（新 API，1 行）：
+## --   global ButtonVisual = @record{ ... }
+## --   ## nebula_component("ButtonVisual", {
+## --     primitives = {"hoverable", "clickable"},
+## --   })
+## --
+## -- spec 字段与 nebula_annotate 完全兼容。额外行为：
+## --   · states 缺省时，从 primitives 的 state_transitions 自动推导
+## --   · transitions 缺省时，自动生成（基于已推导的 states）
+## function nebula_component(type_name, spec)
+##   spec = spec or {}
+##   -- 自动推导 states（如果用户未显式指定）
+##   if not spec.states and spec.primitives and #spec.primitives > 0 then
+##     spec.states = nebula_auto_states(spec.primitives)
+##     print(("[sugar] %s: auto-derived states = {%s}"):format(
+##       type_name, table.concat(spec.states, ", ")))
+##   end
+##   -- 自动生成 transitions（如果用户未显式指定）
+##   if not spec.transitions and spec.states and #spec.states > 1 then
+##     local transitions = {}
+##     for i = 2, #spec.states do
+##       local st = spec.states[i]
+##       -- 生成 default <-> state 的双向转换
+##       table.insert(transitions, {
+##         from = "default", to = st,
+##         on = st .. "_enter",
+##       })
+##       table.insert(transitions, {
+##         from = st, to = "default",
+##         on = st .. "_leave",
+##       })
+##     end
+##     spec.transitions = transitions
+##   end
+##   nebula_annotate(type_name, spec)
+##   nebula_derive(type_name)
+## end
+##
+## -- ★ Phase 4.5 Sugar Optimization: nebula_editor_visual(type_name, spec)
+## --
+## -- 语法糖：自动生成编辑器 Visual record（含 3 状态 × 3 属性 + 布局字段 + buffer 字段）
+## -- 消除 ~25 行手动 record 声明 + nebula_component 调用。
+## --
+## -- Usage:
+## --   ## nebula_editor_visual("EditorVisual", {
+## --     max_text_len = 256, max_lines = 256,
+## --     component_id = 1,
+## --   })
+## --
+## -- 生成等价于:
+## --   global EditorVisual = @record{ pos, size, radius, 9 color fields, 3 layout fields, multi_buf, gap_buf }
+## --   ## nebula_component("EditorVisual", { primitives={"multiline_editable"}, ... })
+## --
+## function nebula_editor_visual(type_name, spec)
+##   spec = spec or {}
+##   local max_text_len = spec.max_text_len or 256
+##   local max_lines    = spec.max_lines    or 32
+##   local component_id = spec.component_id or 1
+##
+##   -- 推导 buffer 类型名
+##   local mb_type = ("NebulaMultiBuf%d_%d"):format(max_text_len, max_lines)
+##   local gb_type = ("NebulaBuf%d"):format(max_text_len)
+##
+##   -- 生成 record 定义
+##   local record_src = ([[
+## global %s = @record{
+##   pos:    Vec2,
+##   size:   Vec2,
+##   radius: float32,
+##   default_bg_color:     Color,
+##   default_border_color: Color,
+##   default_border_width: float32,
+##   hovered_bg_color:     Color,
+##   hovered_border_color: Color,
+##   hovered_border_width: float32,
+##   pressed_bg_color:     Color,
+##   pressed_border_color: Color,
+##   pressed_border_width: float32,
+##   pixel_height:  float32,
+##   text_origin_x: float32,
+##   content_height: float32,
+##   multi_buf: %s,
+##   gap_buf:   %s,
+## }
+## ]]):format(type_name, mb_type, gb_type)
+##
+##   local ast = aster.parse(record_src, "<nebula_editor_visual:" .. type_name .. ">")
+##   for _, stat in ipairs(ast) do
+##     inject_statement(stat)
+##   end
+##
+##   -- 调用 nebula_component
+##   nebula_component(type_name, {
+##     primitives   = {"multiline_editable"},
+##     max_text_len = max_text_len,
+##     max_lines    = max_lines,
+##     component_id = component_id,
+##   })
+##
+##   print(("[sugar] nebula_editor_visual: %s (%s + %s, id=%d)"):format(
+##     type_name, mb_type, gb_type, component_id))
+## end
+##
+## -- ★ Phase 4.5-S3: nebula_visual(type_name, spec)
+## --
+## -- L2 层 Visual 声明糖：从 primitives 自动推导 states、record 字段、buffer 类型，
+## -- 然后注入 record AST 并调用 nebula_component 完成全套 derive。
+## --
+## -- 输入 spec:
+## --   primitives   : string[]  — 必选：交互原语列表（如 {"clickable"}）
+## --   fields       : string[]  — 可选：用户附加字段（如 {"score: int32"}）
+## --   text_mode    : string?   — 可选："dense" 时生成轻量 record
+## --   max_chars    : number?   — 可选：text_mode="dense" 时的容量
+## --   max_text_len : number?   — 可选：editable 系原语的 buffer 容量
+## --   max_lines    : number?   — 可选：multiline_editable 的行数
+## --   component_id : number?   — 可选：focusable 组件 ID
+## --
+## -- 转换链：
+## --   1. 解析 primitives 依赖链 (nebula_resolve_primitives)
+## --   2. 推导 states (nebula_auto_states)
+## --   3. 生成 record 字段（基础 + 每状态颜色三元组 + 原语附加 + 用户附加）
+## --   4. inject_statement 注入 record AST
+## --   5. 如需 editable/multiline → 前置 nebula_inject_buffers
+## --   6. 调用 nebula_component(type_name, spec)
+## --
+## function nebula_visual(type_name, spec)
+##   spec = spec or {}
+##   local primitives = spec.primitives or {}
+##   local text_mode  = spec.text_mode
+##
+##   -- DenseText 简写路径：text_mode="dense" 时只需 pos+size
+##   if text_mode == "dense" then
+##     local record_src = ("global %s = @record{ pos: Vec2, size: Vec2 }"):format(type_name)
+##     local ast = aster.parse(record_src, "<nebula_visual:" .. type_name .. ">")
+##     for _, stat in ipairs(ast) do
+##       inject_statement(stat)
+##     end
+##     nebula_component(type_name, {
+##       text_mode = "dense",
+##       max_chars = spec.max_chars or 256,
+##     })
+##     print(("[sugar] nebula_visual: %s (dense, max_chars=%d)"):format(
+##       type_name, spec.max_chars or 256))
+##     return
+##   end
+##
+##   -- 交互型 Visual 路径
+##   local resolved = nebula_resolve_primitives(primitives)
+##   local has_prim = {}
+##   for _, p in ipairs(resolved) do has_prim[p] = true end
+##
+##   -- Step 1-2: 推导 states
+##   local states = nebula_auto_states(primitives)
+##
+##   -- Step 3: 生成 record 字段
+##   local fields = {}
+##
+##   -- 基础字段（永远生成）
+##   table.insert(fields, "  pos: Vec2,")
+##   table.insert(fields, "  size: Vec2,")
+##   table.insert(fields, "  radius: float32,")
+##
+##   -- 每个 state 的颜色三元组
+##   for _, s in ipairs(states) do
+##     table.insert(fields, ("  %s_bg_color: Color,"):format(s))
+##     table.insert(fields, ("  %s_border_color: Color,"):format(s))
+##     table.insert(fields, ("  %s_border_width: float32,"):format(s))
+##   end
+##
+##   -- scrollable 附加字段：content_height + 每状态 track/thumb 颜色
+##   if has_prim["scrollable"] or has_prim["multiline_editable"] then
+##     table.insert(fields, "  content_height: float32,")
+##     for _, s in ipairs(states) do
+##       table.insert(fields, ("  %s_track_color: Color,"):format(s))
+##       table.insert(fields, ("  %s_thumb_color: Color,"):format(s))
+##     end
+##   end
+##
+##   -- editable 附加字段
+##   if has_prim["editable"] or has_prim["multiline_editable"] then
+##     table.insert(fields, "  pixel_height: float32,")
+##   end
+##
+##   -- multiline_editable 附加字段
+##   if has_prim["multiline_editable"] then
+##     local max_text_len = spec.max_text_len or 256
+##     local max_lines    = spec.max_lines    or 32
+##     local mb_type = ("NebulaMultiBuf%d_%d"):format(max_text_len, max_lines)
+##     local gb_type = ("NebulaBuf%d"):format(max_text_len)
+##     table.insert(fields, "  text_origin_x: float32,")
+##     table.insert(fields, ("  multi_buf: %s,"):format(mb_type))
+##     table.insert(fields, ("  gap_buf: %s,"):format(gb_type))
+##   elseif has_prim["editable"] then
+##     local max_text_len = spec.max_text_len or 256
+##     local gb_type = ("NebulaBuf%d"):format(max_text_len)
+##     table.insert(fields, ("  gap_buf: %s,"):format(gb_type))
+##   end
+##
+##   -- 用户附加字段
+##   if spec.fields then
+##     for _, f in ipairs(spec.fields) do
+##       table.insert(fields, ("  %s,"):format(f))
+##     end
+##   end
+##
+##   -- Step 4: 组装 record 源码
+##   local record_src = ("global %s = @record{\n%s\n}"):format(
+##     type_name, table.concat(fields, "\n"))
+##
+##   -- Step 5: 如需 buffer 类型，先注入
+##   if has_prim["editable"] or has_prim["multiline_editable"] then
+##     nebula_inject_buffers({
+##       primitives   = primitives,
+##       max_text_len = spec.max_text_len or 256,
+##       max_lines    = spec.max_lines or 32,
+##     })
+##   end
+##
+##   -- 注入 record AST
+##   local ast = aster.parse(record_src, "<nebula_visual:" .. type_name .. ">")
+##   for _, stat in ipairs(ast) do
+##     inject_statement(stat)
+##   end
+##
+##   -- Step 6: 调用 nebula_component
+##   nebula_component(type_name, {
+##     primitives   = primitives,
+##     text_mode    = text_mode,
+##     max_chars    = spec.max_chars,
+##     max_text_len = spec.max_text_len,
+##     max_lines    = spec.max_lines,
+##     component_id = spec.component_id or 0,
+##   })
+##
+##   print(("[sugar] nebula_visual: %s (primitives={%s}, states={%s})"):format(
+##     type_name, table.concat(primitives, ","), table.concat(states, ",")))
+##
+##   -- ★ 自动生成伴生 DenseText 管线（当 primitives 包含 multiline_editable 时）
+##   -- 编辑器需要两层渲染：background (standard-instanced) + text (DenseText)
+##   -- 此处自动生成 DenseText record + 注册到 nebula_registry，
+##   -- nebula_app 的 component 路由会自动追加 DenseText component。
+##   if has_prim["multiline_editable"] then
+##     local dense_name = type_name .. "DenseTextVisual"
+##     local dense_record_src = ("global %s = @record{ pos: Vec2, size: Vec2 }"):format(dense_name)
+##     local dense_ast = aster.parse(dense_record_src, "<nebula_visual_dense:" .. dense_name .. ">")
+##     for _, stat in ipairs(dense_ast) do
+##       inject_statement(stat)
+##     end
+##     nebula_component(dense_name, {
+##       text_mode = "dense",
+##       max_chars = spec.max_chars or 6000,
+##     })
+##     -- ★ Phase 5.2 R2: 存储到 per-visual registry（消除全局 _NEBULA_AUTO_DENSE 污染）
+##     local vis_reg = nebula_registry[type_name]
+##     if vis_reg then
+##       vis_reg._auto_dense = {
+##         dense_name     = dense_name,
+##         max_chars      = spec.max_chars or 6000,
+##       }
+##     end
+##     -- 向后兼容：迁移期保留全局写入（下游可能仍读取）
+##     _NEBULA_AUTO_DENSE = _NEBULA_AUTO_DENSE or {}
+##     _NEBULA_AUTO_DENSE[type_name] = {
+##       dense_name     = dense_name,
+##       max_chars      = spec.max_chars or 6000,
+##     }
+##     print(("[sugar] nebula_visual: auto-generated %s (dense, max_chars=%d)"):format(
+##       dense_name, spec.max_chars or 6000))
+##   end
+## end
+##
+## -- ★ Phase 4.5 Sugar Optimization: nebula_editor_init_visual(opts)
+## --
+## -- 编译期函数：生成 EditorBgVisual 初始化代码字符串，使用主题默认配色。
+## -- 运行时由 demo 调用，减少 ~18 行初始化样板。
+## --
+## function nebula_editor_init_helper(type_name)
+##   -- 此函数仅用于标记，实际初始化通过 nebula_theme 的 nebula_theme_editor_colors() 简化
+##   print(("[sugar] nebula_editor_init_helper registered for %s"):format(type_name))
+## end
+
+-- =============================================================================
+-- ★ Builtin Registry (Producer Factory Functions)
+--
+-- nebula_app's `builtin` field dispatches through this registry.
+-- Pre-built producers in nebula_builtins.nelua register here.
+-- Users can also register custom builtins via:
+--   ## nebula_register_builtin("my_widget", function(name, opts) ... end)
+-- =============================================================================
+## _nebula_builtins = _nebula_builtins or {}
+##
+## -- ★ Phase 4.5 S2: nebula_app(app_name, spec)
+## --
+## -- 语法糖：合并 nebula_app_begin + 注册 + 布局 + nebula_app_end + nebula_derive_app。
+## --
+## -- 使用前（旧 API，10+ 行）：
+## --   ##[[ nebula_app_set_root_layout("ButtonApp", {direction="column", width=800, height=600})
+## --     nebula_app_begin("ButtonApp")
+## --       nebula_app_register_component("btn", "ButtonVisual")
+## --     nebula_app_end()
+## --   ]]
+## --   ## nebula_derive_app("ButtonApp")
+## --
+## -- 使用后（新 API，1 行）：
+## --   ## nebula_app("ButtonApp", {
+## --     layout = {direction="column", width=800, height=600},
+## --     components = {
+## --       {name="btn", type="ButtonVisual"},
+## --     },
+## --   })
+## --
+## -- ★ Phase 4.5 S2 新增：混合管线自动编排
+## --   components 数组中的条目会根据 Visual 的 text_mode 自动路由到对应注册函数：
+## --     · text_mode == "dense" → nebula_app_register_dense_text（需提供 producer）
+## --     · 其他 → nebula_app_register_component
+## --   消除了 dense_texts 分离声明的需要。dense_texts 仍可用于向后兼容。
+## --
+## -- spec 字段：
+## --   layout      : table?   — 根布局约束（传给 nebula_app_set_root_layout）
+## --   arena_size  : number?  — FrameArena 字节数
+## --   components  : table[]? — 组件 [{name, type, component_id?, layout?, producer?, max_chars?, cell_w?, cell_h?}]
+## --                            ★ S2: 如果 Visual 的 text_mode=="dense"，自动路由到 DenseText 注册
+## --   slots       : table[]? — 动态插槽 [{name, type, max_instances?, producer?}]
+## --   texts       : table[]? — 文本组件 [{name, type, bound_to?, placeholder?, mask_password?, mode?, updater?}]
+## --   dense_texts : table[]? — DenseText [{name, type, max_chars?, cell_w?, cell_h?, producer?, layout?}]（向后兼容）
+## --   shadows     : table[]? — 阴影组件 [{name, type, blur_radius?}]
+## function nebula_app(app_name, spec)
+##   local _cfg = require("derive.nebula_config")
+##   spec = spec or {}
+##   -- ★ Phase 5.2 R2: 缓存 spec 到 per-app registry（消除全局 _nebula_last_app_spec 污染）
+##   -- 注意：nebula_app_begin 内部会创建 nebula_app_registry[app_name]，
+##   -- 因此 _spec 在 nebula_app_begin 之后写入。先暂存到局部变量。
+##   _nebula_last_app_spec = spec     -- 向后兼容：迁移期保留全局写入
+##   _nebula_last_app_name = app_name -- 向后兼容
+##   -- ★ Phase 4.9.1: app 级 cell 默认值
+##   local app_cell_w = (spec.cell and spec.cell.w) or _cfg.DEFAULT_CELL_W
+##   local app_cell_h = (spec.cell and spec.cell.h) or _cfg.DEFAULT_CELL_H
+##   -- ★ 默认 layout：省略时自动使用 1280x800，消除布局样板
+##   if not spec.layout then
+##     spec.layout = { direction = "column", width = _cfg.DEFAULT_WIN_WIDTH, height = _cfg.DEFAULT_WIN_HEIGHT }
+##   end
+##   -- 设置根布局
+##   nebula_app_set_root_layout(app_name, spec.layout)
+##   -- 开始 App 注册
+##   nebula_app_begin(app_name, { arena_size = spec.arena_size })
+##   -- ★ Phase 5.2 R2: 存储 spec 到 per-app registry
+##   nebula_app_registry[app_name]._spec = spec
+##   -- ★ Phase 4.5 S2: 注册组件（混合管线自动编排）
+##   -- ★ Phase 4.9.1: 自动推断 editor 组件名（第一个含 multiline_editable primitive 的组件）
+##   local auto_editor_name = nil
+##   for _, c in ipairs(spec.components or {}) do
+##     if c.type then
+##       local reg = nebula_registry[c.type]
+##       if reg and reg.primitives then
+##         for _, p in ipairs(reg.primitives) do
+##           if p == "multiline_editable" then
+##             auto_editor_name = c.name
+##             break
+##           end
+##         end
+##       end
+##     end
+##     if auto_editor_name then break end
+##   end
+##   -- ★ Phase 4.9.1: layout 字段提升 + children/row 简写
+##   -- 在组件注册前，将顶层 layout 字段归入 c.layout，并展开 children/row 语法糖
+##   for _, c in ipairs(spec.components or {}) do
+##     -- children 简写: { "line_nums", "edit_area" } → container = { {ref="line_nums"}, {ref="edit_area"} }
+##     if c.children then
+##       c.layout = c.layout or {}
+##       c.layout.container = {}
+##       for _, child_name in ipairs(c.children) do
+##         table.insert(c.layout.container, { ref = child_name })
+##       end
+##       c.children = nil
+##     end
+##     -- row 简写: row = true → direction = "row"
+##     if c.row then
+##       c.layout = c.layout or {}
+##       c.layout.direction = "row"
+##       c.row = nil
+##     end
+##     -- layout 字段提升: flex_basis, flex_grow, direction, justify, align 等从顶层归入 c.layout
+##     local layout_keys = { "flex_basis", "flex_grow", "direction", "justify", "align" }
+##     for _, key in ipairs(layout_keys) do
+##       if c[key] ~= nil then
+##         c.layout = c.layout or {}
+##         c.layout[key] = c[key]
+##         c[key] = nil
+##       end
+##     end
+##     -- ★ Phase 4.6-S2: builtin 隐含默认 dense 值（用户可显式覆盖）
+##     if c.builtin and not c.dense and not c.type then
+##       local default_dense = ({
+##         edit_area  = 6006,   -- 200行 × 30字符 (含宽字符余量)
+##         line_nums  = 250,    -- 250行行号
+##         status_bar = 200,    -- 单行状态栏
+##         search_bar = 256,    -- 单行搜索栏
+##         term_grid  = -1,     -- 动态计算 (rows * cols)
+##       })[c.builtin]
+##       if default_dense == -1 then
+##         -- term_grid: 从 rows*cols 动态推导
+##         default_dense = (c.rows or 24) * (c.cols or 80)
+##       end
+##       if default_dense then
+##         c.dense = default_dense
+##         print(("[sugar] nebula_app: builtin='%s' implies dense=%d"):format(c.builtin, default_dense))
+##       end
+##     end
+##     -- ★ Phase 4.9.1: dense = N — 自动生成 DenseText Visual record + component 注册
+##     if c.dense and not c.type then
+##       local dense_type = app_name .. "_" .. c.name .. "_DenseVisual"
+##       -- 生成 record 声明（如果尚未存在）
+##       if not nebula_registry[dense_type] then
+##         local rec_src = ("global %s = @record{ pos: Vec2, size: Vec2 }\n"):format(dense_type)
+##         local rec_ast = aster.parse(rec_src, "<dense-auto:" .. dense_type .. ">")
+##         for _, stat in ipairs(rec_ast) do inject_statement(stat) end
+##         nebula_component(dense_type, { text_mode = "dense", max_chars = c.dense })
+##         print(("[sugar] nebula_app: auto-generated DenseText '%s' (max_chars=%d)"):format(dense_type, c.dense))
+##       end
+##       c.type = dense_type
+##       c.max_chars = c.max_chars or c.dense
+##       c.dense = nil
+##     end
+##     -- ★ Phase 4.9.1: builtin = "line_nums" — 自动绑定内置 Producer
+##     if c.builtin then
+##       local opts = {}
+##       opts.cell_w = c.cell_w or app_cell_w
+##       opts.cell_h = c.cell_h or app_cell_h
+##       opts.rows = c.rows
+##       opts.cols = c.cols
+##       -- ★ Phase 5.0 S5: 传递 editor_state 给 builtin（App Record 模式）
+##       opts.editor_state = c.editor_state or spec.editor_state
+##       local edname = c.editor or auto_editor_name or c.name
+##       local factory = _nebula_builtins[c.builtin]
+##       assert(factory, ("nebula_app: unknown builtin '%s'"):format(c.builtin))
+##       c.producer = factory(edname, opts)
+##       c.builtin = nil
+##     end
+##   end
+##   for _, c in ipairs(spec.components or {}) do
+##     if not c.type then
+##       -- ★ Phase 4.8-NL: 纯布局容器——无 type 字段，必须有 layout.container
+##       assert(c.layout and c.layout.container,
+##         ("nebula_app: component '%s' has no type and no layout.container"):format(c.name))
+##       nebula_app_register_layout_node(c.name, c.layout)
+##     else
+##     -- 查询 Visual 的 text_mode 以决定注册路径
+##     local reg = nebula_registry[c.type]
+##     local text_mode = reg and reg.text_mode or nil
+##     if text_mode == "dense" then
+##       -- ★ S2 自动路由：text_mode="dense" → DenseText 管线
+##       assert(c.producer, ("nebula_app: component '%s' (type=%s, text_mode=dense) requires producer"):format(c.name, c.type))
+##       nebula_app_register_dense_text(c.name, c.type, {
+##         max_chars = c.max_chars,
+##         cell_w    = c.cell_w or app_cell_w,
+##         cell_h    = c.cell_h or app_cell_h,
+##         producer  = c.producer,
+##         layout    = c.layout,
+##       })
+##     else
+##       -- 标准组件注册
+##       nebula_app_register_component(c.name, c.type, {
+##         component_id = c.component_id,
+##         layout       = c.layout,
+##       })
+##       -- ★ Phase 5.2 R2: auto-dense 优先从 per-visual registry 读取，全局 fallback
+##       local c_reg = nebula_registry[c.type]
+##       local ad = (c_reg and c_reg._auto_dense) or (_NEBULA_AUTO_DENSE and _NEBULA_AUTO_DENSE[c.type])
+##       if ad then
+##         local dense_name = c.name .. "_text"
+##         local producer_name = "nebula_default_edit_area_" .. c.name
+##         -- ★ Phase 5.2 R2: 存储到 per-app registry（消除全局 _NEBULA_AUTO_DENSE_PRODUCERS 污染）
+##         local app_reg = nebula_app_registry[app_name]
+##         app_reg._auto_dense_producers = app_reg._auto_dense_producers or {}
+##         app_reg._auto_dense_producers[c.name] = {
+##           dense_name    = dense_name,
+##           producer_name = producer_name,
+##           max_chars     = ad.max_chars,
+##           cell_w        = c.cell_w or app_cell_w,
+##           cell_h        = c.cell_h or app_cell_h,
+##         }
+##         -- 向后兼容：迁移期保留全局写入
+##         _NEBULA_AUTO_DENSE_PRODUCERS = _NEBULA_AUTO_DENSE_PRODUCERS or {}
+##         _NEBULA_AUTO_DENSE_PRODUCERS[c.name] = app_reg._auto_dense_producers[c.name]
+##         nebula_app_register_dense_text(dense_name, ad.dense_name, {
+##           max_chars = ad.max_chars,
+##           cell_w    = c.cell_w or app_cell_w,
+##           cell_h    = c.cell_h or app_cell_h,
+##           producer  = producer_name,
+##         })
+##         print(("[sugar] nebula_app: auto-dense \"%s\" for \"%s\" (producer=\"%s\")"):format(
+##           dense_name, c.name, producer_name))
+##       end
+##     end
+##   end  -- ★ Phase 4.8-NL: close if not c.type / else
+##   end
+##   -- 注册动态插槽
+##   for _, s in ipairs(spec.slots or {}) do
+##     nebula_app_register_slot(s.name, s.type, {
+##       max_instances = s.max_instances,
+##       producer      = s.producer,
+##     })
+##   end
+##   -- 注册文本组件
+##   for _, t in ipairs(spec.texts or {}) do
+##     nebula_app_register_text(t.name, t.type, {
+##       bound_to      = t.bound_to,
+##       placeholder   = t.placeholder,
+##       mask_password = t.mask_password,
+##       mode          = t.mode,
+##       updater       = t.updater,
+##     })
+##   end
+##   -- 注册 DenseText 组件（向后兼容：仍支持显式 dense_texts 数组）
+##   for _, d in ipairs(spec.dense_texts or {}) do
+##     nebula_app_register_dense_text(d.name, d.type, {
+##       max_chars = d.max_chars,
+##       cell_w    = d.cell_w or app_cell_w,
+##       cell_h    = d.cell_h or app_cell_h,
+##       producer  = d.producer,
+##       layout    = d.layout,
+##     })
+##   end
+##   -- 注册阴影组件
+##   for _, sh in ipairs(spec.shadows or {}) do
+##     nebula_app_register_shadow(sh.name, sh.type, {
+##       blur_radius = sh.blur_radius,
+##     })
+##   end
+##   -- ★ Phase 5.2 R2: 从 per-app registry 读取 auto-dense producers，全局 fallback
+##   local _r2_adp = (nebula_app_registry[app_name] and nebula_app_registry[app_name]._auto_dense_producers)
+##     or _NEBULA_AUTO_DENSE_PRODUCERS
+##   if _r2_adp then
+##     for comp_name, pd in pairs(_r2_adp) do
+##       local cell_w = pd.cell_w
+##       local cell_h = pd.cell_h
+##       local rows = spec.layout and spec.layout.height and
+##         math.floor(spec.layout.height / (cell_h + 2.0)) or 50
+##       local cols = spec.layout and spec.layout.width and
+##         math.floor(spec.layout.width / cell_w) or 120
+##       local fname = pd.producer_name
+##       local src = ([[global function %s(
+##   app: auto, instances: *[0]DenseCharInstance, count: *uint32, max: uint32
+## ): void
+##   local editor = &app.%s
+##   local mb = &editor.visual.multi_buf
+##   local origin_x: float32 = editor.visual.pos.x
+##   local origin_y: float32 = editor.visual.pos.y + 4.0
+##   local idx: uint32 = 0
+##   local scroll_row: uint32 = (@uint32)(editor.scroll_offset_y / (%.1f + 2.0))
+##   local visible_rows: uint32 = %d
+##   local cell_w: float32 = %.1f
+##   local cell_h: float32 = %.1f
+##   local tmp: [256]uint8
+##   local row: uint32 = 0
+##   while row < visible_rows and idx < max do
+##     local buf_row = row + scroll_row
+##     if buf_row < mb.line_count then
+##       local line = mb:get_line(buf_row)
+##       local n: uint16 = line:flatten(&tmp[0], 255)
+##       local col: uint32 = 0
+##       while col < %d and idx < max do
+##         local ch: uint32 = 32
+##         if col < (@uint32)(n) then
+##           ch = (@uint32)(tmp[col])
+##         end
+##         nebula_dense_grid_fill_instance(&instances[idx], row, col, ch, origin_x, origin_y, cell_w, cell_h, 0xE0E0E0FF, 0x1E1E2EFF)
+##         idx = idx + 1
+##         col = col + 1
+##       end
+##     else
+##       local col: uint32 = 0
+##       while col < %d and idx < max do
+##         nebula_dense_grid_fill_instance(&instances[idx], row, col, 32, origin_x, origin_y, cell_w, cell_h, 0xE0E0E0FF, 0x1E1E2EFF)
+##         idx = idx + 1
+##         col = col + 1
+##       end
+##     end
+##     row = row + 1
+##   end
+##   $count = idx
+## end]]):format(fname, comp_name, cell_h, rows, cell_w, cell_h, cols, cols)
+##       local ast = aster.parse(src, "<nebula_app:auto_producer:" .. comp_name .. ">")
+##       for _, stat in ipairs(ast) do
+##         inject_statement(stat)
+##       end
+##       print(('[sugar] nebula_app: generated producer "%s" for "%s"'):format(fname, comp_name))
+##     end
+##   end
+##   -- ★ Phase 5.0 S5: 处理 states / bindings / events（全知图驱动）
+##   for _, st in ipairs(spec.states or {}) do
+##     nebula_state(st.name, { type = st.type, default = st.default })
+##   end
+##   for _, bd in ipairs(spec.bindings or {}) do
+##     nebula_bind(bd.target, {
+##       depends = bd.depends,
+##       compute = bd.compute,
+##       type    = bd.type,
+##     })
+##   end
+##   for _, ev in ipairs(spec.events or {}) do
+##     nebula_on(ev.target, ev.event_type, { mutation = ev.mutation })
+##   end
+##   -- 结束 + 生成
+##   nebula_app_end()
+##   nebula_derive_app(app_name)
+## end
