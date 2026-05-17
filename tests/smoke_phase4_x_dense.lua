@@ -234,12 +234,16 @@ end
 print("")
 
 -- =============================================================================
--- Section 4: nebula_core.nelua — derivation entry exists
+-- Section 4: nebula_derive_engine.nelua — derivation entry exists
+--
+-- Phase 5.1 架构拆分：dense text 推导逻辑已从 nebula_core.nelua 移入
+-- nebula_derive_engine.nelua。nebula_core.nelua 现在是 Facade，通过
+-- require "nebula_derive_engine" 加载。测试改为搜索实际实现文件。
 -- =============================================================================
 print("--- 4. nebula_core.nelua: dense text derivation entry ---")
 
-local core_src = read_file("src/nebula_core.nelua")
-check("src/nebula_core.nelua exists and is readable", core_src ~= nil)
+local core_src = read_file("src/nebula_derive_engine.nelua")
+check("src/nebula_derive_engine.nelua exists and is readable", core_src ~= nil)
 
 if core_src then
   check("nebula_core.nelua contains nebula_derive_dense_text_visual function",
@@ -253,7 +257,7 @@ if core_src then
 else
   for _ = 1, 4 do
     fail_count = fail_count + 1
-    print("[FAIL] (skipped — src/nebula_core.nelua not readable)")
+    print("[FAIL] (skipped — src/nebula_derive_engine.nelua not readable)")
   end
 end
 
