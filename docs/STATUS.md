@@ -1,6 +1,6 @@
 # 文档状态索引
 
-**更新日期**：2026-05-16
+**更新日期**：2026-05-17
 
 本文档集中标注 `docs/` 下所有规划文档的当前状态。
 
@@ -35,13 +35,15 @@
 | 文件 | 说明 |
 | :--- | :--- |
 | `ARCHITECTURE_GRAND_PLAN.md` | 架构总纲领 — 持续维护的根文档 |
-| `PLAN_ERA2_MASTER.md` | Era II 实施总计划 — Phase 5.0 仍在进行中 |
+| `PLAN_ERA2_MASTER.md` | Era II 实施总计划 — Phase 5.0 已完成，Phase 5.1/5.2 规划中 |
 | `PHASE_IMPORTANCE_SCORECARD.md` | Phase 重要度评分卡 — 新 Phase 加入时需更新 |
 | `TEXT_EDITOR_ROADMAP.md` | 文本编辑器长期愿景 — 历史参考 + 未来方向 |
 | `ROADMAP_INDUSTRY_RESEARCH.md` | 行业对标研究 — 持续相关 |
 | `WASM_TARGET_ANALYSIS.md` | WebAssembly 可行性分析 — WASM 渲染问题修复前持续相关 |
 | `PLAN_ARCHITECTURE_AUDIT.md` | 架构审计与整改方案 — 全代码库审计发现的 P0-P3 问题清单与五梯队实施计划 |
-| `PLAN_PHASE5_OMNISCIENT_GRAPH.md` | Phase 5.0 全知图与端到端特化路径 — 编译期消解状态管理、事件路由、依赖传播 |
+| `PLAN_PHASE5_1_ECOSYSTEM_CICD.md` | Phase 5.1 生态与 CI/CD — 5 梯队：CI/CD 强化 → 文档工程 → WASM 生态 → 包管理 → 社区治理 |
+| `PLAN_PHASE5_2_SUGAR_FIX.md` | Phase 5.2 语法糖体系修复 — 5 梯队：API 统一 → 全局状态消除 → 生成代码预览 → Builtin AST 重构 → sugar 深度完善 |
+| `PLAN_PHASE5_OMNISCIENT_GRAPH.md` | Phase 5.0 全知图与端到端特化路径 — ✅ 已完成（S1a-S5 五个梯队，440+ 断言全绿） |
 
 ## 历史资产
 
