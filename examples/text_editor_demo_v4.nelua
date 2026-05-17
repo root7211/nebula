@@ -1,0 +1,106 @@
+-- =============================================================================
+-- text_editor_demo_v4.nelua
+-- Nebula GUI Compiler — Phase 5.0 S5 全知图驱动
+--
+-- ★ S5 验证 Demo：编辑器状态封装到 App Record，消除文件级全局变量
+--
+-- 与 v3 的区别：
+--   · 编辑器状态使用 NebulaEditorState record（App Record 字段 es）
+--   · 通过 nebula_app states spec 声明状态
+--   · Builtin producers 读取 app.es.xxx 而非全局 _search_active 等
+--   · nebula_editor.nelua 的 _es 后缀函数接受 *NebulaEditorState 参数
+--   · 不再有文件级全局变量
+--
+-- 功能完全不变：
+--   · 多语言语法高亮（nelua/lua/c/python/json/markdown）
+--   · 搜索/替换（Ctrl+F / Ctrl+H）
+--   · 行号 + 状态栏
+--   · 选区 + 剪贴板（Ctrl+C/V/X/A）
+--   · Undo/Redo（Ctrl+Z/Y）
+--   · File I/O（Ctrl+S 保存）
+--   · 自动缩进
+-- =============================================================================
+require "nebula"
+## cinclude "<stdio.h>"  -- snprintf for title update
+
+-- ★ 阻止 nebula_editor.nelua 声明全局变量
+## NEBULA_EDITOR_GLOBALS_DEFINED = true
+
+-- ★ 注册多语言高亮规则（编译期）
+## nebula_highlight_builtins({"nelua", "lua", "c", "python", "json", "markdown"})
+
+-- ★ 声明编辑器 Visual（multiline_editable 原语）
+## nebula_visual("EditorBgVisual", {
+##   primitives   = {"multiline_editable"},
+##   max_text_len = 256,
+##   max_lines    = 256,
+##   component_id = 1,
+## })
+
+-- ★ App 编排：搜索栏 + 行号/编辑区（横向 row）+ 状态栏
+-- ★ S5: 使用 editor_state = "es" 启用 App Record 模式
+-- ★ S5: 使用 states spec 声明 NebulaEditorState 为 App Record 字段
+## nebula_app("TextEditorApp", {
+##   editor_state = "es",
+##   components = {
+##     { name = "editor",      type = "EditorBgVisual" },
+##     { name = "search_bar",  builtin = "search_bar", flex_basis = 24 },
+##     { name = "editor_body", row = true, flex_grow = 1,
+##       children = { "line_nums", "edit_area" } },
+##     { name = "line_nums",   builtin = "line_nums", flex_basis = 50 },
+##     { name = "edit_area",   builtin = "edit_area", flex_grow = 1 },
+##     { name = "status_bar",  builtin = "status_bar", flex_basis = 24 },
+##   },
+##   states = {
+##     { name = "es", type = "NebulaEditorState" },
+##   },
+## })
+
+-- =============================================================================
+-- 主程序
+-- =============================================================================
+
+## if NEBULA_TARGET == 'wasm' then
+global _wasm_editor_renderer: *NebulaRenderer = nilptr
+global _wasm_editor_app: *TextEditorApp = nilptr
+global _wasm_editor_input: NebulaInputState
+global _wasm_editor_prev_time: float64 = 0.0
+
+global function _wasm_editor_frame(): void
+  glfwPollEvents()
+  local now = glfwGetTime()
+  local dt = (@float32)(now - _wasm_editor_prev_time)
+  _wasm_editor_prev_time = now
+  nebula_collect_input(_nebula_window, &_wasm_editor_input, dt)
+  nebula_frame_render(_wasm_editor_renderer, _wasm_editor_app, &_wasm_editor_input, dt, 0.09, 0.09, 0.10)
+end
+## end
+
+local function main(): int32
+  local renderer: NebulaRenderer
+  local app: TextEditorApp
+
+  if not nebula_init(&renderer, &app, "Nebula — Text Editor (S5)", 900, 640) then
+    return 1
+  end
+
+  local input: NebulaInputState
+
+  ## if NEBULA_TARGET == 'wasm' then
+  _wasm_editor_renderer = &renderer
+  _wasm_editor_app = &app
+  _wasm_editor_prev_time = glfwGetTime()
+  emscripten_set_main_loop(_wasm_editor_frame, 0, 1)
+  ## else
+  while not nebula_should_close() do
+    local dt = nebula_frame_begin(&input)
+    nebula_frame_render(&renderer, &app, &input, dt, 0.09, 0.09, 0.10)
+  end
+  ## end
+
+  app:deinit()
+  nebula_shutdown(&renderer)
+  return 0
+end
+
+main()

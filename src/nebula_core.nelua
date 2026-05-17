@@ -2097,6 +2097,8 @@ require "nebula_constants"
 ##       opts.cell_h = c.cell_h or app_cell_h
 ##       opts.rows = c.rows
 ##       opts.cols = c.cols
+##       -- ★ Phase 5.0 S5: 传递 editor_state 给 builtin（App Record 模式）
+##       opts.editor_state = c.editor_state or spec.editor_state
 ##       local edname = c.editor or auto_editor_name or c.name
 ##       local factory = _nebula_builtins[c.builtin]
 ##       assert(factory, ("nebula_app: unknown builtin '%s'"):format(c.builtin))
@@ -2245,6 +2247,20 @@ require "nebula_constants"
 ##       end
 ##       print(('[sugar] nebula_app: generated producer "%s" for "%s"'):format(fname, comp_name))
 ##     end
+##   end
+##   -- ★ Phase 5.0 S5: 处理 states / bindings / events（全知图驱动）
+##   for _, st in ipairs(spec.states or {}) do
+##     nebula_state(st.name, { type = st.type, default = st.default })
+##   end
+##   for _, bd in ipairs(spec.bindings or {}) do
+##     nebula_bind(bd.target, {
+##       depends = bd.depends,
+##       compute = bd.compute,
+##       type    = bd.type,
+##     })
+##   end
+##   for _, ev in ipairs(spec.events or {}) do
+##     nebula_on(ev.target, ev.event_type, { mutation = ev.mutation })
 ##   end
 ##   -- 结束 + 生成
 ##   nebula_app_end()

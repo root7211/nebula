@@ -114,9 +114,15 @@ require "nebula_core"
 ##   local fname  = "nebula_fill_status_bar_" .. editor_name
 ##   local layout_x = "app.dense_layout_status_bar_x"
 ##   local layout_y = "app.dense_layout_status_bar_y"
+##   -- ★ Phase 5.0 S5: App Record 模式
+##   local es = opts.editor_state  -- nil = 全局变量模式, "es" = app.es.xxx
+##   local modified_ref   = es and ("app.%s.modified"):format(es)       or "_editor_modified"
+##   local has_file_ref   = es and ("app.%s.has_file"):format(es)       or "_editor_has_file"
+##   local file_path_ref  = es and ("app.%s.file_path"):format(es)      or "_editor_file_path"
 ##
 ##   -- ★ P1-2: 按需加载编辑器模块（require 是幂等的）
-##   local src = ([[require "nebula_editor"
+##   local req_line = es and 'require "nebula_editor"' or 'require "nebula_editor"'
+##   local src = ([[%s
 ## global function %s(
 ##   app: auto, instances: *[0]DenseCharInstance, count: *uint32, max: uint32
 ## ): void
@@ -131,22 +137,22 @@ require "nebula_core"
 ##   local row_1 = (@int32)(editor.cursor_row + 1)
 ##   local col_1 = (@int32)(editor.cursor_col + 1)
 ##   local lines = (@int32)(editor.visual.multi_buf.line_count)
-##   local mod_str: cstring = _editor_modified and " [+]" or ""
+##   local mod_str: cstring = %s and " [+]" or ""
 ##   local file_str: cstring
-##   if _editor_has_file then
+##   if %s then
 ##     local last_slash: int32 = -1
 ##     local fi: uint32 = 0
-##     while _editor_file_path[fi] ~= 0 and fi < 4095 do
-##       if _editor_file_path[fi] == NEBULA_CHAR_SLASH then last_slash = (@int32)(fi) end
+##     while %s[fi] ~= 0 and fi < 4095 do
+##       if %s[fi] == NEBULA_CHAR_SLASH then last_slash = (@int32)(fi) end
 ##       fi = fi + 1
 ##     end
 ##     local start: uint32 = last_slash >= 0 and (@uint32)(last_slash + 1) or 0
-##     file_str = (@cstring)(&_editor_file_path[start])
+##     file_str = (@cstring)(&%s[start])
 ##   else
 ##     file_str = "[untitled]"
 ##   end
 ##   local slen = snprintf((@cstring)(&buf[0]), 255,
-##     " %%s%%s  |  Ln %%d, Col %%d  |  %%d lines  |  UTF-8  |  LF",
+##     " %%%%s%%%%s  |  Ln %%%%d, Col %%%%d  |  %%%%d lines  |  UTF-8  |  LF",
 ##     file_str, mod_str, row_1, col_1, lines)
 ##   if slen < 0 then slen = 0 end
 ##   if slen > 255 then slen = 255 end
@@ -159,7 +165,9 @@ require "nebula_core"
 ##     idx = idx + 1; col = col + 1
 ##   end
 ##   $count = idx
-## end]]):format(fname, editor_name, layout_x, layout_y, cols,
+## end]]):format(req_line, fname, editor_name, layout_x, layout_y, cols,
+##              modified_ref, has_file_ref,
+##              file_path_ref, file_path_ref, file_path_ref,
 ##              tostring(cell_w), tostring(cell_h))
 ##
 ##   local ast = aster.parse(src, "<nebula_builtin_status_bar:" .. editor_name .. ">")
@@ -186,6 +194,17 @@ require "nebula_core"
 ##   local fname  = "nebula_fill_search_bar_" .. editor_name
 ##   local layout_x = "app.dense_layout_search_bar_x"
 ##   local layout_y = "app.dense_layout_search_bar_y"
+##   -- ★ Phase 5.0 S5: App Record 模式
+##   local es = opts.editor_state
+##   local search_active_ref  = es and ("app.%s.search_active"):format(es)  or "_search_active"
+##   local search_replace_ref = es and ("app.%s.search_replace"):format(es) or "_search_replace"
+##   local search_buf_ref     = es and ("app.%s.search_buf"):format(es)     or "_search_buf"
+##   local search_len_ref     = es and ("app.%s.search_len"):format(es)     or "_search_len"
+##   local search_cursor_ref  = es and ("app.%s.search_cursor"):format(es)  or "_search_cursor"
+##   local replace_buf_ref    = es and ("app.%s.replace_buf"):format(es)    or "_replace_buf"
+##   local replace_len_ref    = es and ("app.%s.replace_len"):format(es)    or "_replace_len"
+##   local search_current_ref = es and ("app.%s.search_current"):format(es) or "_search_current"
+##   local search_match_count_ref = es and ("app.%s.search_match_count"):format(es) or "_search_match_count"
 ##
 ##   -- ★ P1-2: 按需加载编辑器模块（require 是幂等的）
 ##   local src = ([[require "nebula_editor"
@@ -199,7 +218,7 @@ require "nebula_core"
 ##   local fg_label = nebula_theme_fg_search_label()
 ##   local idx: uint32 = 0
 ##   local SB_COLS: uint32 = %d
-##   if not _search_active then
+##   if not %s then
 ##     local hide_bg = nebula_theme_bg_normal()
 ##     local col: uint32 = 0
 ##     while col < SB_COLS and idx < max do
@@ -209,34 +228,34 @@ require "nebula_core"
 ##   else
 ##     local buf: [256]uint8
 ##     local slen: int32 = 0
-##     if _search_replace then
+##     if %s then
 ##       local repl_str: [256]uint8
 ##       local ri: uint32 = 0
-##       while ri < _replace_len and ri < 255 do repl_str[ri] = _replace_buf[ri]; ri = ri + 1 end
+##       while ri < %s and ri < 255 do repl_str[ri] = %s[ri]; ri = ri + 1 end
 ##       repl_str[ri] = 0
 ##       local qstr: [256]uint8
 ##       local qi: uint32 = 0
-##       while qi < _search_len and qi < 255 do qstr[qi] = _search_buf[qi]; qi = qi + 1 end
+##       while qi < %s and qi < 255 do qstr[qi] = %s[qi]; qi = qi + 1 end
 ##       qstr[qi] = 0
 ##       slen = snprintf((@cstring)(&buf[0]), 255,
-##         " Replace: %%s -> %%s  [%%d/%%d]",
+##         " Replace: %%%%s -> %%%%s  [%%%%d/%%%%d]",
 ##         (@cstring)(&qstr[0]), (@cstring)(&repl_str[0]),
-##         (@int32)(_search_current + 1), (@int32)(_search_match_count))
+##         (@int32)(%s + 1), (@int32)(%s))
 ##     else
 ##       local qstr: [256]uint8
 ##       local qi: uint32 = 0
-##       while qi < _search_len and qi < 255 do qstr[qi] = _search_buf[qi]; qi = qi + 1 end
+##       while qi < %s and qi < 255 do qstr[qi] = %s[qi]; qi = qi + 1 end
 ##       qstr[qi] = 0
 ##       slen = snprintf((@cstring)(&buf[0]), 255,
-##         " Find: %%s  [%%d/%%d]",
+##         " Find: %%%%s  [%%%%d/%%%%d]",
 ##         (@cstring)(&qstr[0]),
-##         (@int32)(_search_current + 1), (@int32)(_search_match_count))
+##         (@int32)(%s + 1), (@int32)(%s))
 ##     end
 ##     if slen < 0 then slen = 0 end
 ##     if slen > 255 then slen = 255 end
 ##     local str_len: uint32 = (@uint32)(slen)
 ##     local label_end: uint32 = 0
-##     if _search_replace then label_end = 10
+##     if %s then label_end = 10
 ##     else label_end = 7 end
 ##     local col: uint32 = 0
 ##     while col < SB_COLS and idx < max do
@@ -247,7 +266,7 @@ require "nebula_core"
 ##         if col < label_end then cell_fg = fg_label end
 ##       end
 ##       local cell_bg = bg
-##       local cursor_pos = label_end + _search_cursor
+##       local cursor_pos = label_end + %s
 ##       if col == cursor_pos then
 ##         cell_bg = nebula_theme_bg_cursor()
 ##         cell_fg = nebula_theme_fg_cursor()
@@ -258,7 +277,16 @@ require "nebula_core"
 ##   end
 ##   $count = idx
 ## end]]):format(fname, layout_x, layout_y, cols,
+##              search_active_ref,
 ##              tostring(cell_w), tostring(cell_h),
+##              search_replace_ref,
+##              replace_len_ref, replace_buf_ref,
+##              search_len_ref, search_buf_ref,
+##              search_current_ref, search_match_count_ref,
+##              search_len_ref, search_buf_ref,
+##              search_current_ref, search_match_count_ref,
+##              search_replace_ref,
+##              search_cursor_ref,
 ##              tostring(cell_w), tostring(cell_h))
 ##
 ##   local ast = aster.parse(src, "<nebula_builtin_search_bar:" .. editor_name .. ">")
@@ -283,6 +311,14 @@ require "nebula_core"
 ##   local fname  = "nebula_fill_edit_area_" .. editor_name
 ##   local layout_x = "app.dense_layout_edit_area_x"
 ##   local layout_y = "app.dense_layout_edit_area_y"
+##   -- ★ Phase 5.0 S5: App Record 模式
+##   local es = opts.editor_state
+##   local highlight_id_ref   = es and ("app.%s.highlight_id"):format(es)       or "_editor_highlight_id"
+##   local search_active_ref  = es and ("app.%s.search_active"):format(es)      or "_search_active"
+##   local search_len_ref     = es and ("app.%s.search_len"):format(es)         or "_search_len"
+##   local search_matches_ref = es and ("app.%s.search_matches"):format(es)     or "_search_matches"
+##   local search_match_count_ref = es and ("app.%s.search_match_count"):format(es) or "_search_match_count"
+##   local search_current_ref = es and ("app.%s.search_current"):format(es)     or "_search_current"
 ##
 ##   -- ★ P1-2: 按需加载编辑器模块（require 是幂等的）
 ##   local src = ([[require "nebula_editor"
@@ -324,7 +360,7 @@ require "nebula_core"
 ##       local line_len = line:flatten(&flat[0], 1023)
 ##       -- ★ P0-5 fix: 限制 line_len 上限为 1023，防止 hl_colors 越界
 ##       if line_len > 1023 then line_len = 1023 end
-##       nebula_highlight_dispatch(_editor_highlight_id, &flat[0], (@uint32)(line_len), nebula_theme_fg_normal(), &hl_colors[0])
+##       nebula_highlight_dispatch(%s, &flat[0], (@uint32)(line_len), nebula_theme_fg_normal(), &hl_colors[0])
 ##       local cursor_byte: int32 = -1
 ##       if is_cursor_line then cursor_byte = (@int32)(editor.cursor_col) end
 ##       local byte_i: uint32 = 0
@@ -360,13 +396,13 @@ require "nebula_core"
 ##         if cursor_byte >= 0 and (@uint32)(cursor_byte) == byte_i - 1 then
 ##           this_bg = nebula_theme_bg_cursor(); fg = nebula_theme_fg_cursor()
 ##         end
-##         if _search_active and _search_len > 0 then
+##         if %s and %s > 0 then
 ##           local prev_b: uint32 = byte_i > 0 and (byte_i - 1) or 0
 ##           local mi: uint32 = 0
-##           while mi < _search_match_count do
-##             local mp = _search_matches[mi]
-##             if mp.row == buf_row and prev_b >= mp.col and prev_b < mp.col + _search_len then
-##               if mi == _search_current then
+##           while mi < %s do
+##             local mp = %s[mi]
+##             if mp.row == buf_row and prev_b >= mp.col and prev_b < mp.col + %s then
+##               if mi == %s then
 ##                 this_bg = nebula_theme_bg_search_current()
 ##               else
 ##                 this_bg = nebula_theme_bg_search_match()
@@ -403,6 +439,9 @@ require "nebula_core"
 ##   $count = idx
 ## end]]):format(fname, editor_name, layout_x, layout_y,
 ##              tostring(cell_h), rows, cols,
+##              highlight_id_ref,
+##              search_active_ref, search_len_ref,
+##              search_match_count_ref, search_matches_ref, search_len_ref, search_current_ref,
 ##              tostring(cell_w), tostring(cell_h),
 ##              tostring(cell_w), tostring(cell_h),
 ##              tostring(cell_w), tostring(cell_h))

@@ -370,18 +370,49 @@ require "nebula"
 
 ---
 
-## 第五梯队：编辑器迁移
+## 第五梯队：编辑器迁移 ✅ 已完成
 
 **目标**：将 `text_editor_demo` 从手动接线迁移到全知图驱动。
 
-### Step 5.1-5.4
+### Step 5.1-5.4 ✅
 
-按原始方案执行，额外验证：
-- 所有 6 项补丁在真实应用中的协同工作
-- 编辑器复杂场景下的 hit-test 语义（补丁 4 动态岛清单逐一审视）
-- 编辑器状态超过 64 个时 dirty bit 的多 chunk 行为（补丁 5）
+完成日期：2026-05-17
 
-**验收标准**：text_editor_demo 功能不变 + 不再有文件级全局变量 + 77/77 现有回归全绿
+#### 核心改动
+
+| 文件 | 改动说明 |
+|:-----|:---------|
+| `src/nebula_core.nelua` | `nebula_app()` sugar 扩展：支持 `states/bindings/events` spec，自动调用 `nebula_state/bind/on`；`editor_state` 选项传递给 builtin producer |
+| `src/nebula_editor.nelua` | 新增 `NebulaEditorState` record 封装全部搜索/文件状态；新增 `_es` 后缀参数化函数（5 个），不依赖全局变量；旧版全局变量模式保留向后兼容 |
+| `src/nebula_builtins.nelua` | `status_bar/search_bar/edit_area` 三个 builtin producer 支持 `opts.editor_state` 模式，从 `app.<field>.xxx` 读取状态而非全局变量 |
+| `examples/text_editor_demo_v4.nelua` | 全知图驱动编辑器 demo：`NEBULA_EDITOR_GLOBALS_DEFINED = true` + `editor_state = "es"` + `states = { { name = "es", type = "NebulaEditorState" } }` |
+| `tests/smoke_phase5_0_s5.lua` | 12 组 75 项断言：状态声明、图构建、代码生成、混合声明、大状态集合、S1-S4 回归 |
+
+#### 设计决策
+
+| 决策 | 结论 | 依据 |
+|:-----|:-----|:-----|
+| 编辑器状态封装方式 | 单一 `NebulaEditorState` record | 编辑器状态高度耦合（搜索/文件），拆分为独立 state 无依赖追踪价值 |
+| 向后兼容策略 | `NEBULA_EDITOR_GLOBALS_DEFINED` 守卫 + 旧函数保留 | v1/v2/v3 demo 无需修改 |
+| Builtin producer 参数化 | `opts.editor_state` 控制全局 vs App Record 模式 | 零侵入：不设置时行为完全不变 |
+| `nebula_app()` sugar 扩展 | spec 中 `states/bindings/events` 数组 → 自动调用 API | 用户无需切换到 begin/end 手动模式 |
+
+#### 验证结果
+
+- S5 冒烟测试：75/75 通过
+- S1a 回归：72/72 通过
+- S1b 回归：125/125 通过
+- S2 回归：通过
+- S3 回归：通过
+- S4 回归：通过（53/53）
+
+#### 验收标准对照
+
+| 标准 | 结果 |
+|:-----|:-----|
+| text_editor_demo 功能不变 | ✅ v4 demo 使用相同 builtin producer，功能完全保留 |
+| 不再有文件级全局变量 | ✅ `NEBULA_EDITOR_GLOBALS_DEFINED = true` + `NebulaEditorState` App Record 字段 |
+| 回归全绿 | ✅ S1a-S5 共 6 套测试全部通过 |
 
 ---
 
