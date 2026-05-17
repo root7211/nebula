@@ -1,7 +1,8 @@
-# Nebula 架构总纲领 v3.5
+# Nebula 架构总纲领 v3.6
 
-**修订日期**：2026-05-01（v3.5 修订）  
+**修订日期**：2026-05-17（v3.6 修订）  
 **修订历史**：  
+- **v3.6 (2026-05-17)**：Phase 5.0 完成同步。全知图编译期端到端路径五个梯队（S1a→S1b→S2/S2.5→S3→S4→S5）全部完成。Phase 4.5-4.9 编号与实际实施对齐（语法糖→Builtin Producer→编辑器原型→嵌套布局→Terminal/WASM）。原 5.0"生态与 CI/CD"重编号为 5.1。
 - **v3.5 (2026-05-01)**：全面同步。Phase 4.2.2 标记完成（D-4.1-A/B/C 全通过）。Phase 4.2.3 描述更新为 v3 分级查表方案（废弃 HarfBuzz/DFA）。记录代码质量改进：renderer 管线重构（-196 行）、pipeline_factory 互斥校验、axiom_validator 笛卡尔上限、interaction_factory 函数拆分。Era II 路线图与 `PLAN_ERA2_MASTER.md` 四梯队对齐。
 - **v3.4 (2026-04-30)**：深度审计。Phase 4.3/4.4 标记为"S1-S3 核心已完成，存在结构性缺口"。
 - **v3.3 (2026-04-30)**：同步 Era II 路线图至实际完成状态。Phase 4.3（可编程原语注册表 S1-S3）和 Phase 4.4（高级组件库 S1-S3）已全部合入主线。清理过时规划文档。  
@@ -96,10 +97,13 @@ Nebula 的目标不是做一个小众的研究项目，而是成为一个能与�
 | **4.4** | **高级组件库** | 实现 scrollable、dropdown、multiline_editable 标准组件。 | **已完成**（三个原语已内置注册表，契约校验已接入编译流程） | **81/100** |
 | **4.2.3** | **分级文本 Shaping + CJK** | 分级查表架构（Tier 1 cmap+metrics 已完成）；零运行时 HarfBuzz 依赖。Tier 2 连字→Phase 5+，UAX#14 换行→Phase 4.X。详见 `PLAN_PHASE4_2_3_CJK.md` v3。 | **✅ 已完成**（S0+S1+S2，47/47 回归全绿） | 82/100 |
 | **4.X** | **高密度文本渲染通道** | 8192 字符 per-char 颜色等宽文本网格（Instanced + SDF Atlas + Storage Buffer）。着色器 + 管线 + Record + 派生入口 + 辅助函数 + dense_text_demo（120×50）+ 65 条冒烟测试。UAX#14 换行待后续 Phase。 | **✅ 已完成**（Step 1-5，49/49 回归全绿） | 85/100 |
-| 4.5 | 注册原语语法糖 | 基于 4.4 真实用例提炼重复模式，简化 DX | 规划中 | 待评分 |
-| 4.6 | Indirect Drawing | GPU 端实例剔除与间接绘制（当前不做，instanced draw 性能足够） | 规划中 | 78/100 |
-| 4.7 | 文本编辑器原型 | 验证 Era II 工业级能力（50 行愿景中间里程碑） | 规划中 | 待评分 |
-| 5.0 | 生态与 CI/CD | 完善文档、包管理支持与多端自动化测试。 | 规划中 | 待评分 |
+| 4.5 | 注册原语语法糖 | 基于 4.4 真实用例提炼重复模式，简化 DX | **✅ 已完成**（nebula_app/nebula_visual sugar） | 85/100 |
+| 4.6 | DenseText Builtin Producer | 内置行号/编辑区/搜索栏/状态栏 Producer 生成器 | **✅ 已完成**（4 个 builtin + term_grid） | 80/100 |
+| 4.7 | 文本编辑器原型 | 验证 Era II 工业级能力（完整编辑器 v1-v3） | **✅ 已完成**（搜索替换/语法高亮/选区/Undo） | 88/100 |
+| 4.8 | 嵌套布局 + Flexbox | 容器嵌套、flex_basis/flex_grow、row/column 方向 | **✅ 已完成** | 82/100 |
+| 4.9 | Terminal + WASM 支持 | 终端模拟器 builtin、emscripten 主循环 | **✅ 已完成** | 78/100 |
+| **5.0** | **全知图：编译期端到端路径** | 全知图构建 + AST 分析 + 代码生成 + 动态内容 + 编辑器迁移。消除运行时事件系统，编译期消解范式的理论极限。 | **✅ 已完成**（S1a-S5 五个梯队，6 套测试共 440+ 断言全绿） | **92/100** |
+| 5.1 | 生态与 CI/CD | 完善文档、包管理支持与多端自动化测试。 | 规划中 | 待评分 |
 
 > 重要度评分基于五个维度（架构奠基性、公理合规性、开发者体验、工业化就绪度、下游解锁度）加权综合评分，详见 [`docs/PHASE_IMPORTANCE_SCORECARD.md`](PHASE_IMPORTANCE_SCORECARD.md)。
 
