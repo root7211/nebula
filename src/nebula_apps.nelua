@@ -341,8 +341,11 @@ require "nebula_builtins"
 -- =============================================================================
 ## function nebula_terminal_main(app_type, opts)
 ##   opts = opts or {}
-##   -- ★ Phase 4.6-S3: 从 nebula_app 缓存的 spec 中推导缺失参数
-##   local cached = _nebula_last_app_spec or {}
+##   -- ★ Phase 5.2 R2: 优先从 per-app registry 读取 spec，全局 fallback
+##   local _r2_app_name = opts.app_name or _nebula_last_app_name
+##   local cached = (_r2_app_name and nebula_app_registry[_r2_app_name] and nebula_app_registry[_r2_app_name]._spec)
+##     or _nebula_last_app_spec
+##     or {}
 ##   local grid_cols = (opts.grid and opts.grid.cols)
 ##     or (cached.components and cached.components[1] and cached.components[1].cols)
 ##     or 80

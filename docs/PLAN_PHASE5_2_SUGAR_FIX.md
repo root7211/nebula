@@ -461,8 +461,9 @@ require "nebula"
 
 ### 里程碑 2：全局状态消除完成（R2）
 
-- [ ] `_NEBULA_AUTO_DENSE` 改为 per-visual registry 存储
-- [ ] `_nebula_last_app_spec` 改为 per-app registry 存储
+- [x] `_NEBULA_AUTO_DENSE` 改为 per-visual registry 存储
+- [x] `_nebula_last_app_spec` 改为 per-app registry 存储
+- [x] `_NEBULA_AUTO_DENSE_PRODUCERS` 改为 per-app registry 存储
 - [ ] 多 App/多 Visual 场景测试通过
 - [ ] 回归测试 77/77 全绿
 
