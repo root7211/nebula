@@ -1452,6 +1452,11 @@
 ##     inject_statement(stat)
 ##   end
 ## 
+##   -- ★ Phase 5.2 R3: cache generated source for preview
+##   if _NEBULA_GENERATED_SOURCE then
+##     _NEBULA_GENERATED_SOURCE.visuals[type_name] = source
+##   end
+##
 ##   -- 然后注入其余部分
 ##   local block_ast = aster.parse(source, "<nebula_derive:" .. type_name .. ">")
 ##   for _, stat in ipairs(block_ast) do
@@ -1482,6 +1487,10 @@
 ## function nebula_derive_app(app_name)
 ##   -- 调用 app_factory.lua 中由 require 加载的 nebula_app_generate 函数生成源码
 ##   local source = nebula_app_generate(app_name)
+##   -- ★ Phase 5.2 R3: cache generated app source for preview
+##   if _NEBULA_GENERATED_SOURCE then
+##     _NEBULA_GENERATED_SOURCE.apps[app_name] = source
+##   end
 ##   local block_ast = aster.parse(source, "<nebula_derive_app:" .. app_name .. ">")
 ##   for _, stat in ipairs(block_ast) do
 ##     inject_statement(stat)

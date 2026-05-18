@@ -21,6 +21,17 @@
 --   · NEBULA_THEME_DEFAULTS
 -- =============================================================================
 ## -- =============================================================================
+## -- ★ Phase 5.2 R3: Generated Source Cache
+## -- =============================================================================
+## if not _NEBULA_GENERATED_SOURCE then
+##   _NEBULA_GENERATED_SOURCE = {
+##     visuals  = {},   -- [type_name] = source_string
+##     apps     = {},   -- [app_name] = source_string
+##     builtins = {},   -- [builtin_key] = source_string
+##   }
+## end
+
+## -- =============================================================================
 ## -- ★ Phase 4.5: 语法糖 API
 ## -- =============================================================================
 ##
@@ -714,6 +725,10 @@
 ##   end
 ##   $count = idx
 ## end]]):format(fname, comp_name, cell_h, rows, cell_w, cell_h, cols, cols)
+##       -- ★ Phase 5.2 R3: cache builtin producer source
+##       if _NEBULA_GENERATED_SOURCE then
+##         _NEBULA_GENERATED_SOURCE.builtins[comp_name .. ":" .. fname] = src
+##       end
 ##       local ast = aster.parse(src, "<nebula_app:auto_producer:" .. comp_name .. ">")
 ##       for _, stat in ipairs(ast) do
 ##         inject_statement(stat)
@@ -738,4 +753,65 @@
 ##   -- 结束 + 生成
 ##   nebula_app_end()
 ##   nebula_derive_app(app_name)
+## end
+##
+## -- =============================================================================
+## -- ★ Phase 5.2 R3: print_source(mode, name, sub_name)
+## --
+## -- Directive to print cached generated source for inspection.
+## --   mode: "app", "visual", "builtin", "all"
+## --   name: key within the category (optional when mode="all")
+## --   sub_name: reserved for future use
+## -- =============================================================================
+## function print_source(mode, name, sub_name)
+##   local cache = _NEBULA_GENERATED_SOURCE
+##   if not cache then
+##     print("[nebula] print_source: _NEBULA_GENERATED_SOURCE not initialized")
+##     return
+##   end
+##
+##   local function emit(category, key, src)
+##     print(("[nebula] ===== Generated source for %s \"%s\" ====="):format(category, key))
+##     print(src)
+##     print("[nebula] ============================================")
+##   end
+##
+##   if mode == "all" then
+##     for k, v in pairs(cache.visuals) do emit("visual", k, v) end
+##     for k, v in pairs(cache.apps) do emit("app", k, v) end
+##     for k, v in pairs(cache.builtins) do emit("builtin", k, v) end
+##     return
+##   end
+##
+##   if not name then
+##     -- Print all entries of the given mode
+##     local tbl = nil
+##     if mode == "visual" then tbl = cache.visuals
+##     elseif mode == "app" then tbl = cache.apps
+##     elseif mode == "builtin" then tbl = cache.builtins
+##     end
+##     if tbl then
+##       for k, v in pairs(tbl) do emit(mode, k, v) end
+##     else
+##       print(("[nebula] print_source: unknown mode \"%s\""):format(tostring(mode)))
+##     end
+##     return
+##   end
+##
+##   -- Print a specific entry
+##   local tbl = nil
+##   if mode == "visual" then tbl = cache.visuals
+##   elseif mode == "app" then tbl = cache.apps
+##   elseif mode == "builtin" then tbl = cache.builtins
+##   end
+##   if not tbl then
+##     print(("[nebula] print_source: unknown mode \"%s\""):format(tostring(mode)))
+##     return
+##   end
+##   local src = tbl[name]
+##   if src then
+##     emit(mode, name, src)
+##   else
+##     print(("[nebula] print_source: no cached source for %s \"%s\""):format(mode, name))
+##   end
 ## end

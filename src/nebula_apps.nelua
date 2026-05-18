@@ -95,6 +95,10 @@ require "nebula_builtins"
 ##     bg_r, bg_g, bg_b
 ##   )
 ##
+##   -- ★ Phase 5.2 R3: cache generated main source
+##   if _NEBULA_GENERATED_SOURCE then
+##     _NEBULA_GENERATED_SOURCE.apps["main:" .. app_type] = src
+##   end
 ##   local ast = aster.parse(src, "<nebula_main:" .. app_type .. ">")
 ##   for _, stat in ipairs(ast) do
 ##     inject_statement(stat)
@@ -307,6 +311,10 @@ require "nebula_builtins"
 ##     editor_name, editor_name
 ##   )
 ##
+##   -- ★ Phase 5.2 R3: cache generated editor main source
+##   if _NEBULA_GENERATED_SOURCE then
+##     _NEBULA_GENERATED_SOURCE.apps["editor_main:" .. app_type] = src
+##   end
 ##   local ast = aster.parse(src, "<nebula_editor_main:" .. app_type .. ">")
 ##   for _, stat in ipairs(ast) do
 ##     inject_statement(stat)
@@ -547,6 +555,10 @@ require "nebula_builtins"
 ##     grid_cols, grid_rows, cell_w, cell_h
 ##   )
 ##
+##   -- ★ Phase 5.2 R3: cache generated terminal main source
+##   if _NEBULA_GENERATED_SOURCE then
+##     _NEBULA_GENERATED_SOURCE.apps["terminal_main:" .. app_type] = src
+##   end
 ##   local ast = aster.parse(src, "<nebula_terminal_main:" .. app_type .. ">")
 ##   for _, stat in ipairs(ast) do
 ##     inject_statement(stat)
