@@ -83,6 +83,7 @@ L0 (底层) : nebula_annotate + nebula_derive + nebula_app_begin/end ← 完全�
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
+| **Phase 5.2-R4 Builtin AST** | 5 个 Builtin Producer（line_nums/status_bar/search_bar/edit_area/term_grid）从 `string.format` 模板迁移到 AST 节点树代码生成；新增 `builtin_factory.lua`（AST 构造器 + emitter + 注册表 + 公开 API）；`nebula_builtins.nelua` 重构为 AST 工厂调用；84 条专项冒烟测试 + 71/71 回归全绿 | `pending` |
 | **Code Browser Demo** | Monaco 风格代码浏览器——文件树面板（DenseText + POSIX C FFI + 懒加载扫描）+ 语法高亮编辑器（6 语言）+ 搜索/替换；可移植 `NebulaDirIter` C helper API（绕过 `struct dirent` 布局差异）；路径缓存溢出安全修复；CI 全量覆盖 32 demo + C 单元测试 | `df52377` |
 | **Phase 5.0 Slot Layout** | `nebula_app_register_slot` 新增 `layout` 声明（direction/gap/padding/item_size/scroll_var）；`app_factory.lua` 编译期生成单态化定位循环（常量内联，零运行时分支）；Producer 不再手算坐标——框架自动覆写 pos/size；`dynamic_list_v2_demo.nelua` 验证通过；19/19 冒烟测试全绿 | `6fdf02f` |
 | **wgpu-native v29 绑定修正** | 恢复 `WGPUBindGroupLayoutEntry.bindingArraySize` + `WGPUVertexAttribute/WGPUVertexBufferLayout.nextInChain`；`WGPUShaderStage` uint32→uint64；所有 demo 编译通过 | `6fdf02f` |
@@ -231,6 +232,7 @@ L0 (底层) : nebula_annotate + nebula_derive + nebula_app_begin/end ← 完全�
 | 4.7 | 文本编辑器原型 | **S1-S7 已完成**（S7: text_editor_demo 全集成验收） | 85 |
 | **4.X-CB** | **Code Browser** | **已完成**（文件树 + 语法高亮编辑器 + POSIX FFI + 懒加载目录扫描 + `code_browser_demo`） | 83 |
 | 5.0 | 生态与 CI/CD | **进行中**（CI 全量覆盖 32 demo + C 单元测试 + GitHub Pages 部署；WASM editor 渲染修复待完成） | 80 |
+| **5.2-R4** | **Builtin AST 重构** | **已完成**（`builtin_factory.lua` AST 节点系统 + 5 builtin 迁移 + 84 条冒烟测试） | **83** |
 
 > 重要度评分基于五个维度加权综合评分（满分 100），详见 [`docs/PHASE_IMPORTANCE_SCORECARD.md`](docs/PHASE_IMPORTANCE_SCORECARD.md)。
 

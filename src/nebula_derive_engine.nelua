@@ -453,6 +453,11 @@
 ## local highlight_factory_mod = require "derive.highlight_factory"
 ## assert(highlight_factory_mod == "nebula_highlight_factory_v0.1_phase4.7-s4",
 ##   "nebula: failed to load derive/highlight_factory.lua")
+##
+## -- ★ Phase 5.2 R4: 加载 Builtin AST 工厂模块
+## local builtin_factory_mod = require "derive.builtin_factory"
+## assert(builtin_factory_mod == "nebula_builtin_factory_v1.0_phase5.2-r4",
+##   "nebula: failed to load derive/builtin_factory.lua")
 ## 
 ## -- 从 Visual 字段集合中检测着色器特性
 ## local function detect_shader_features(base_fields, all_props)

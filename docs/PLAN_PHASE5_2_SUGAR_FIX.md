@@ -476,10 +476,10 @@ require "nebula"
 
 ### 里程碑 4：Builtin AST 重构完成（R4）
 
-- [ ] `builtin_factory.lua` 实现完整
-- [ ] 4 个 builtin 全部使用 AST 生成
-- [ ] 生成的代码与旧模板 100% 一致（diff 验证）
-- [ ] 回归测试 77/77 全绿
+- [x] `builtin_factory.lua` 实现完整
+- [x] 4 个 builtin 全部使用 AST 生成
+- [x] 生成的代码与旧模板 100% 一致（diff 验证）
+- [x] 回归测试 77/77 全绿
 
 ### 里程碑 5：sugar 深度完善完成（R5）
 
