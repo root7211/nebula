@@ -457,7 +457,7 @@ require "nebula"
 - [ ] README 顶部明确标注推荐 API
 - [ ] `docs/guide/api-escape-hatch.md` 包含 3 个完整降级示例
 - [ ] `button_demo.nelua`、`form_demo.nelua` 重写为 L2 写法
-- [ ] 新增 `counter_demo.nelua`（Phase 5.0 状态绑定演示）
+- [x] 新增 `counter_demo.nelua`（Phase 5.0 状态绑定演示）
 
 ### 里程碑 2：全局状态消除完成（R2）
 
@@ -483,7 +483,7 @@ require "nebula"
 
 ### 里程碑 5：sugar 深度完善完成（R5）
 
-- [ ] `counter_demo.nelua` 使用 L2 状态绑定写法
+- [x] `counter_demo.nelua` 使用 L2 状态绑定写法
 - [ ] `nebula_editor_main` 业务逻辑移除，替换为回调机制
 - [ ] `nebula_component_template` 可用
 - [ ] 所有 demo 统一为 L2 写法

@@ -1,0 +1,49 @@
+-- =============================================================================
+-- counter_demo.nelua
+-- Nebula GUI Compiler — Phase 5.2 R5
+--
+-- ★ L2 推荐写法：状态绑定 + 事件处理的声明式 demo
+--
+-- 演示能力：
+--   · nebula_visual() 声明式 Visual（自动推导 states/transitions）
+--   · nebula_app() 声明式 App 编排 + states/bindings/events
+--   · nebula_main() 生成 main 函数（消除 GLFW/WGPU 样板）
+--   · 点击按钮 → count 自增 → doubled 自动派生（编译期全知图驱动）
+--
+-- 对比 counter_binding_demo.nelua（L0 Raw API，139 行）：
+--   本文件使用 L2 Sugar API，仅 ~30 行，压缩 ~4.6x。
+-- =============================================================================
+require "nebula"
+
+-- ★ 声明 CounterVisual：从 primitives 自动推导 record 字段 + states + transitions
+## nebula_visual("CounterVisual", { primitives = {"clickable"} })
+
+-- ★ 一站式 App 编排 + Phase 5.0 状态绑定
+## nebula_app("CounterApp", {
+##   components = {{ name = "btn", type = "CounterVisual" }},
+##   states = {
+##     { name = "count",   type = "int32", default = 0 },
+##   },
+##   bindings = {
+##     { target = "doubled", depends = {"count"}, compute = "self.doubled = self.count * 2" },
+##   },
+##   events = {
+##     { target = "btn", event_type = "click", mutation = "self.count = self.count + 1" },
+##   },
+## })
+
+-- ★ 泛用 main 生成器：初始化 + 每帧逻辑 + 渲染 + 清理一行搞定
+## nebula_main("CounterApp", {
+##   title = "Nebula — Counter Demo", width = 800, height = 600,
+##   bg_r = 0.09, bg_g = 0.09, bg_b = 0.10,
+##   on_init = function(app)
+##     return { app .. ".btn:init_themed(Vec2{x=300,y=250}, Vec2{x=200,y=60}, 12.0)" }
+##   end,
+##   on_frame = function(app)
+##     return {
+##       ("if %s.btn.click.just_clicked then"):format(app),
+##       ('  printf("count = %%d, doubled = %%d\\n", %s.count, %s.doubled)'):format(app, app),
+##       "end",
+##     }
+##   end,
+## })
