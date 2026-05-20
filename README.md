@@ -77,12 +77,13 @@ L0 (底层) : nebula_annotate + nebula_derive + nebula_app_begin/end ← 完全�
 
 ## 当前状态
 
-**Era III | Code Browser Demo + CI 全量覆盖 32 demo | 编辑器 19 行极限形态 | wgpu-native v29 + 77/77 回归全绿（2026-05-15）**
+**Era III | Code Browser Demo + CI 全量覆盖 32 demo | 编辑器 19 行极限形态 | wgpu-native v29 + 77/77 回归全绿（2026-05-20）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
+| **Phase 5.2-R1 API 统一** | R1 全部完成——`button_demo.nelua`（151→29 行）、`form_demo.nelua`（363→55 行）重写为 L2 推荐写法；README 推荐 API 标注 + 最小示例；`docs/guide/api-escape-hatch.md` 降级指南（3 个完整示例 + FAQ + 字段映射表）；`docs/guide/configuration.md` 配置项文档 + `nebula_config_override()`；`counter_demo.nelua` L2 状态绑定；冒烟测试同步更新 | `pending` |
 | **Phase 5.2-R4 Builtin AST** | 5 个 Builtin Producer（line_nums/status_bar/search_bar/edit_area/term_grid）从 `string.format` 模板迁移到 AST 节点树代码生成；新增 `builtin_factory.lua`（AST 构造器 + emitter + 注册表 + 公开 API）；`nebula_builtins.nelua` 重构为 AST 工厂调用；84 条专项冒烟测试 + 71/71 回归全绿 | `3834755` |
 | **Phase 5.2-R5-S1 状态绑定 L2** | `counter_demo.nelua` — L2 声明式状态绑定 demo（`states/bindings/events` in `nebula_app()` + `nebula_main()`），L0 版 139 行→L2 版 49 行（2.8x 压缩）；验证 Phase 5.0 全知图在 L2 sugar 下端到端可用；41 条冒烟测试 | `171d328` |
 | **Phase 5.2-R5-S2 编辑器回调** | `nebula_editor_main` 业务逻辑提取——Ctrl+S/F/H 键盘处理、搜索栏交互、文件加载等从模板移至 `_nebula_editor_gen_init_lines` / `_nebula_editor_gen_frame_lines` 可复用帮助函数；新增 `on_init` / `on_frame` 回调覆盖机制；模板 format 参数从 31 个 `editor_name` 降至 0；向后兼容；33 条冒烟测试 | `pending` |

@@ -452,12 +452,14 @@ require "nebula"
 
 ## 9. 里程碑与验收标准
 
-### 里程碑 1：API 统一完成（R1）
+### 里程碑 1：API 统一完成（R1） ✅
 
-- [ ] README 顶部明确标注推荐 API
-- [ ] `docs/guide/api-escape-hatch.md` 包含 3 个完整降级示例
-- [ ] `button_demo.nelua`、`form_demo.nelua` 重写为 L2 写法
+- [x] README 顶部明确标注推荐 API
+- [x] `docs/guide/api-escape-hatch.md` 包含 3 个完整降级示例
+- [x] `button_demo.nelua`、`form_demo.nelua` 重写为 L2 写法
 - [x] 新增 `counter_demo.nelua`（Phase 5.0 状态绑定演示）
+- [x] `docs/guide/configuration.md` 配置项文档化
+- [x] `nebula_config_override()` 函数实现
 
 ### 里程碑 2：全局状态消除完成（R2）
 

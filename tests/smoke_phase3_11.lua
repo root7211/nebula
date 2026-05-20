@@ -247,44 +247,30 @@ assert_not_contains("无 layout 时不含 visual.pos 注入",
   gen_no_layout, "self.btn.visual.pos")
 
 -- =============================================================================
--- 5. form_demo.nelua Phase 3.11 重构验证
+-- 5. form_demo.nelua Phase 5.2 R1 L2 重写验证
 -- =============================================================================
-print("\n--- 5. form_demo.nelua Phase 3.11 重构 ---")
+print("\n--- 5. form_demo.nelua Phase 5.2 R1 L2 重写 ---")
 local form_src = read_file(script_dir .. "/../examples/form_demo.nelua")
 if form_src then
-  -- Phase 3.11 标识
-  assert_contains("form_demo 包含 Phase 3.11 注释",
-    form_src, "Phase 3.11")
-  -- 使用新 API
-  assert_contains("form_demo 使用 nebula_app_set_root_layout",
-    form_src, "nebula_app_set_root_layout")
-  assert_contains("form_demo 使用 layout 字段",
-    form_src, "layout =")
-  assert_contains("form_demo 使用 nebula_init",
-    form_src, "nebula_init(")
-  assert_contains("form_demo 使用 nebula_should_close",
-    form_src, "nebula_should_close()")
-  assert_contains("form_demo 使用 nebula_shutdown",
-    form_src, "nebula_shutdown(")
-  -- 消除旧的手写魔法数字（不应出现 pos = Vec2{ x = 220 这样的手写坐标）
-  assert_not_contains("form_demo 不含手写 card pos 魔法数字",
-    form_src, "pos    = Vec2{ x = 220.0, y = 80.0 }")
-  assert_not_contains("form_demo 不含手写 email_input pos 魔法数字",
-    form_src, "pos    = Vec2{ x = 252.0, y = 176.0 }")
-  -- 消除旧的 GLFW 样板
+  -- L2 统一入口
+  assert_contains("form_demo 包含 require \"nebula\"",
+    form_src, 'require "nebula"')
+  -- L2 核心 API
+  assert_contains("form_demo 包含 nebula_visual(",
+    form_src, "nebula_visual(")
+  assert_contains("form_demo 包含 nebula_app(",
+    form_src, "nebula_app(")
+  assert_contains("form_demo 包含 nebula_main(",
+    form_src, "nebula_main(")
+  -- 消除旧的手动 GLFW 样板
   assert_not_contains("form_demo 不含 glfwInit 直接调用",
-    form_src, "if glfwInit() == 0 then")
-  assert_not_contains("form_demo 不含 glfwCreateWindow 直接调用",
-    form_src, "local window = glfwCreateWindow(")
+    form_src, "glfwInit")
+  -- 消除旧的手动 WGPU 清理
   assert_not_contains("form_demo 不含手动 wgpuSurfaceRelease",
     form_src, "wgpuSurfaceRelease(")
-  -- 保留 Phase 3.9 文本组件
-  assert_contains("form_demo 保留 nebula_app_register_text",
-    form_src, "nebula_app_register_text")
-  assert_contains("form_demo 保留 nebula_frame_render",
-    form_src, "nebula_frame_render(")
-  assert_contains("form_demo 保留 Enter 键业务逻辑",
-    form_src, "NebulaKey.Enter")
+  -- 消除 L0 API
+  assert_not_contains("form_demo 不含 nebula_annotate（L0 API）",
+    form_src, "nebula_annotate")
 else
   failed = failed + 1
   print("[FAIL] 无法读取 examples/form_demo.nelua")
@@ -370,7 +356,7 @@ end
 
 local form_lines = count_lines(script_dir .. "/../examples/form_demo.nelua")
 if form_lines then
-  assert_le("form_demo.nelua <= 350 行（Phase 3.11 精简后）", form_lines, 350)
+  assert_le("form_demo.nelua <= 60 行（Phase 5.2 R1 L2 重写后）", form_lines, 60)
 end
 
 local layout_lines = count_lines(script_dir .. "/../examples/layout_demo.nelua")

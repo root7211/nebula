@@ -181,18 +181,22 @@ else
 end
 
 -- =============================================================================
--- 7. form_demo.nelua 已使用 nebula_frame_render
+-- 7. form_demo.nelua 已改用 L2 推荐写法（nebula_visual + nebula_app + nebula_main）
 -- =============================================================================
-print("\n--- 7. form_demo.nelua 使用 nebula_frame_render ---")
+print("\n--- 7. form_demo.nelua L2 推荐写法验证 ---")
 local demo_path = script_dir .. "/../examples/form_demo.nelua"
 local fd = io.open(demo_path, "r")
 if fd then
   local demo_src = fd:read("*a")
   fd:close()
-  assert_contains("form_demo 调用 nebula_frame_render", demo_src, "nebula_frame_render(")
-  assert_not_contains("form_demo 不含手写 wgpuDeviceCreateCommandEncoder（主 pass）",
-    demo_src, "wgpuDeviceCreateCommandEncoder(renderer.device, nilptr)\n    local clear_color")
-  assert_contains("form_demo 包含 Phase 3.8 注释", demo_src, "Phase 3.8")
+  assert_contains("form_demo 包含 require \"nebula\"（L2 统一入口）",
+    demo_src, 'require "nebula"')
+  assert_contains("form_demo 包含 nebula_visual(（L2 Visual 声明）",
+    demo_src, "nebula_visual(")
+  assert_contains("form_demo 包含 nebula_main(（L2 主生成器）",
+    demo_src, "nebula_main(")
+  assert_not_contains("form_demo 不含手写 wgpuDeviceCreateCommandEncoder",
+    demo_src, "wgpuDeviceCreateCommandEncoder")
 else
   failed = failed + 1
   print("[FAIL] 无法读取 examples/form_demo.nelua")
