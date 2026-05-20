@@ -237,6 +237,10 @@ run_test "smoke_phase4_8_s6 (Phase 4.8-S6 — 集成验收)" \
 run_test "smoke_phase4_9 (Phase 4.9 — 5-Layer Sugar System: 885→~85 lines)" \
   nelua-lua tests/smoke_phase4_9.lua
 
+# ★ Phase 5.2 R2: 多 App / 多 Visual 场景隔离测试
+run_test "smoke_phase5_2_r2_multi (Phase 5.2 R2 — 多 App/Visual registry 隔离)" \
+  nelua-lua tests/smoke_phase5_2_r2_multi.lua
+
 # ---- Part 2: Compilation Regression Tests (Nelua → C → 二进制) ----
 echo ""
 echo "=== Part 2: Compilation Regression Tests ==="
