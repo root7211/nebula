@@ -32,6 +32,7 @@ require "nebula"
 
 -- Application-layer modules
 require "fs_tree"
+require "nebula_editor"
 
 -- ★ Register multi-language highlight rules (compile-time)
 ## nebula_highlight_builtins({"nelua", "lua", "c", "python", "json", "markdown"})
