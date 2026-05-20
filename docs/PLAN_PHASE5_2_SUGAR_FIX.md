@@ -484,7 +484,7 @@ require "nebula"
 ### 里程碑 5：sugar 深度完善完成（R5）
 
 - [x] `counter_demo.nelua` 使用 L2 状态绑定写法
-- [ ] `nebula_editor_main` 业务逻辑移除，替换为回调机制
+- [x] `nebula_editor_main` 业务逻辑移除，替换为回调机制
 - [ ] `nebula_component_template` 可用
 - [ ] 所有 demo 统一为 L2 写法
 

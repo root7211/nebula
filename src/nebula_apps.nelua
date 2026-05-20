@@ -108,17 +108,192 @@ require "nebula_builtins"
 ## end
 
 
-## -- ★ Phase 4.9 L5: nebula_editor_main(app_type, opts)
+## -- ★ Phase 4.9 L5 / Phase 5.2 R5-S2: nebula_editor_main(app_type, opts)
 ## --
 ## -- 生成完整的 main() 函数：init + 文件加载 + 主循环（含交互处理）+ deinit。
 ## --
-## -- Usage:
+## -- ★ Phase 5.2 R5-S2 重构：业务逻辑（Ctrl+S/F/H、搜索栏键盘处理）从
+## -- 模板提取到 on_init / on_frame 回调，框架模板只负责生命周期管理。
+## --
+## -- 用户可通过 on_init / on_frame 覆盖默认行为：
+## --   ## nebula_editor_main("TextEditorApp", {
+## --     editor = "editor",
+## --     on_init  = function(app, ed) return { "custom init code..." } end,
+## --     on_frame = function(app, ed) return { "custom frame code..." } end,
+## --   })
+## --
+## -- 不传回调 = 使用默认编辑器业务逻辑（向后兼容）。
+## --
+## -- Usage (backward compatible):
 ## --   ## nebula_editor_main("TextEditorApp", {
 ## --     editor = "editor",
 ## --     title = "Nebula Editor",
 ## --     cell_h = 16.0,
 ## --   })
 ## --
+
+## -- ★ Phase 5.2 R5-S2: 编辑器默认初始化代码生成
+## -- 提取自原 nebula_editor_main 模板的初始化段（文件加载 + 高亮检测）
+## function _nebula_editor_gen_init_lines(app, editor_name, opts)
+##   local win_w_const = opts._app_type .. "_WIN_WIDTH"
+##   local win_h_const = opts._app_type .. "_WIN_HEIGHT"
+##   return {
+##     app .. "." .. editor_name .. ":init_themed(",
+##     "  Vec2{x = 0.0, y = 0.0},",
+##     "  Vec2{x = (@float32)(" .. win_w_const .. "), y = (@float32)(" .. win_h_const .. ")},",
+##     "  0.0)",
+##     "-- 修正 editor 背景为 editor_body 布局坐标（编译期常量）",
+##     app .. "." .. editor_name .. ".visual.pos  = Vec2{x = 0.0, y = 24.0}",
+##     app .. "." .. editor_name .. ".visual.size = Vec2{x = (@float32)(" .. win_w_const .. "), y = (@float32)(" .. win_h_const .. ") - 24.0 - 24.0}",
+##     "-- 加载文件",
+##     "if _editor_has_file then",
+##     "  local path_len: uint32 = 0",
+##     "  while _editor_file_path[path_len] ~= 0 and path_len < 511 do",
+##     "    path_len = path_len + 1",
+##     "  end",
+##     "  _editor_highlight_id = nebula_highlight_detect_ext(&_editor_file_path[0], path_len)",
+##     "  if " .. app .. "." .. editor_name .. ".visual.multi_buf:load_file((@cstring)(&_editor_file_path[0])) then",
+##     "    " .. app .. "." .. editor_name .. ".line_count = " .. app .. "." .. editor_name .. ".visual.multi_buf.line_count",
+##     "    " .. app .. "." .. editor_name .. ".cursor_row = 0",
+##     "    " .. app .. "." .. editor_name .. ".cursor_col = 0",
+##     '    printf("nebula: loaded file (highlight=%d)\\n", (@int32)(_editor_highlight_id))',
+##     "  else",
+##     '    printf("nebula: cannot open file, starting empty buffer\\n")',
+##     "    _editor_has_file = false",
+##     "  end",
+##     "else",
+##     "  _editor_highlight_id = 1",
+##     "end",
+##     "_editor_modified = false",
+##     "nebula_editor_update_title(0, 0)",
+##     'printf("=== Nebula Text Editor ===\\n")',
+##     'printf("  Ctrl+S save | Ctrl+Z undo | Ctrl+Y redo | Ctrl+F find | Ctrl+H replace\\n")',
+##   }
+## end
+
+## -- ★ Phase 5.2 R5-S2: 编辑器默认帧逻辑代码生成
+## -- 提取自原 nebula_editor_main 模板的帧循环段
+## -- （Ctrl+S 保存 / Ctrl+F/H 搜索切换 / 搜索栏键盘 / 修改检测 / 标题更新）
+## function _nebula_editor_gen_frame_lines(app, editor_name, opts)
+##   local cell_h = tostring(opts.cell_h or 16.0)
+##   local ed = app .. "." .. editor_name
+##   return {
+##     "-- ★ P1-7: loop over all keys queued this frame",
+##     "local _eki: uint8 = 0",
+##     "while _eki < input.key_count do",
+##     "input.key_pressed = input.key_input[_eki]",
+##     "-- Ctrl+S 保存",
+##     "if input.key_pressed == NebulaKey.Save then",
+##     "  if _editor_has_file then",
+##     "    if " .. ed .. ".visual.multi_buf:save_file((@cstring)(&_editor_file_path[0])) then",
+##     "      _editor_modified = false",
+##     "      prev_undo_cursor = " .. ed .. ".undo_stack.cursor",
+##     '      printf("nebula: saved\\n")',
+##     "      nebula_editor_update_title(" .. ed .. ".cursor_row, " .. ed .. ".cursor_col)",
+##     "    end",
+##     "  else",
+##     '    printf("nebula: no file path\\n")',
+##     "  end",
+##     "end",
+##     "-- Ctrl+F / Ctrl+H 搜索栏切换",
+##     "if input.key_pressed == NebulaKey.Find then",
+##     "  _search_active = not _search_active",
+##     "  _search_replace = false",
+##     "  if _search_active then",
+##     "    _search_len = 0; _search_cursor = 0",
+##     "    _search_match_count = 0; _search_current = 0",
+##     "  end",
+##     "end",
+##     "if input.key_pressed == NebulaKey.Replace then",
+##     "  _search_active = not _search_active",
+##     "  _search_replace = true",
+##     "  if _search_active then",
+##     "    _search_len = 0; _search_cursor = 0",
+##     "    _replace_len = 0; _replace_cursor = 0",
+##     "    _search_match_count = 0; _search_current = 0",
+##     "  end",
+##     "end",
+##     "-- 搜索栏键盘处理",
+##     "if _search_active then",
+##     "  if input.key_pressed == NebulaKey.Escape then",
+##     "    _search_active = false; _search_replace = false",
+##     "  elseif input.key_pressed == NebulaKey.FindNext or input.key_pressed == NebulaKey.Enter then",
+##     "    if _search_match_count > 0 then",
+##     "      _search_current = (_search_current + 1) % _search_match_count",
+##     "      nebula_search_goto_current(&" .. ed .. ")",
+##     "    end",
+##     "  elseif input.key_pressed == NebulaKey.Backspace then",
+##     "    if _search_cursor > 0 then",
+##     "      _search_cursor = _search_cursor - 1",
+##     "      _search_len = _search_len - 1",
+##     "      local si: uint32 = _search_cursor",
+##     "      while si < _search_len do",
+##     "        _search_buf[si] = _search_buf[si + 1]",
+##     "        si = si + 1",
+##     "      end",
+##     "      nebula_search_scan(&" .. ed .. ".visual.multi_buf)",
+##     "    end",
+##     "  else",
+##     "    local ci: uint8 = 0",
+##     "    while ci < input.char_count do",
+##     "      local ch: uint32 = input.char_input[ci]",
+##     "      if ch >= 32 and ch < 127 then",
+##     "        if _search_replace and _replace_cursor < 255 then",
+##     "          if _replace_cursor < _replace_len then",
+##     "            local ri2: uint32 = _replace_len",
+##     "            while ri2 > _replace_cursor do",
+##     "              _replace_buf[ri2] = _replace_buf[ri2 - 1]",
+##     "              ri2 = ri2 - 1",
+##     "            end",
+##     "          end",
+##     "          _replace_buf[_replace_cursor] = (@uint8)(ch)",
+##     "          _replace_cursor = _replace_cursor + 1",
+##     "          _replace_len = _replace_len + 1",
+##     "        elseif _search_cursor < 255 then",
+##     "          if _search_cursor < _search_len then",
+##     "            local si2: uint32 = _search_len",
+##     "            while si2 > _search_cursor do",
+##     "              _search_buf[si2] = _search_buf[si2 - 1]",
+##     "              si2 = si2 - 1",
+##     "            end",
+##     "          end",
+##     "          _search_buf[_search_cursor] = (@uint8)(ch)",
+##     "          _search_cursor = _search_cursor + 1",
+##     "          _search_len = _search_len + 1",
+##     "          nebula_search_scan(&" .. ed .. ".visual.multi_buf)",
+##     "          if _search_match_count > 0 then",
+##     "            _search_current = 0",
+##     "            nebula_search_goto_current(&" .. ed .. ")",
+##     "          end",
+##     "        end",
+##     "      end",
+##     "      ci = ci + 1",
+##     "    end",
+##     "  end",
+##     "  if _search_active and _search_replace then",
+##     "    if input.key_pressed == NebulaKey.Replace then",
+##     "      nebula_search_replace_current(&" .. ed .. ", &" .. ed .. ".visual.multi_buf)",
+##     "    end",
+##     "  end",
+##     "  input.key_pressed = NebulaKey.None",
+##     "  input.key_count = 0  -- ★ P1-7: 清空键队列，防止下游组件重复处理",
+##     "  input.char_count = 0",
+##     "end",
+##     "_eki = _eki + 1",
+##     "end  -- ★ P1-7: end key loop",
+##     "-- 修改检测",
+##     "if " .. ed .. ".undo_stack.cursor ~= prev_undo_cursor then",
+##     "  _editor_modified = true",
+##     "end",
+##     ed .. ".visual.content_height = (@float32)(" .. ed .. ".line_count) * (" .. cell_h .. " + 2.0)",
+##     "title_timer = title_timer + dt",
+##     "if title_timer > 0.2 then",
+##     "  title_timer = 0.0",
+##     "  nebula_editor_update_title(" .. ed .. ".cursor_row, " .. ed .. ".cursor_col)",
+##     "end",
+##   }
+## end
+
 ## function nebula_editor_main(app_type, opts)
 ##   opts = opts or {}
 ##   local editor_name = opts.editor or "editor"
@@ -126,6 +301,48 @@ require "nebula_builtins"
 ##   local cell_h      = opts.cell_h or 16.0
 ##   local win_w_const = app_type .. "_WIN_WIDTH"
 ##   local win_h_const = app_type .. "_WIN_HEIGHT"
+##
+##   -- ★ Phase 5.2 R5-S2: 收集 on_init / on_frame 回调或使用默认
+##   opts._app_type = app_type
+##   opts.cell_h = cell_h
+##
+##   local init_lines = {}
+##   local frame_lines = {}
+##
+##   if opts.on_init then
+##     local ok, result = pcall(opts.on_init, "app", editor_name)
+##     if ok and type(result) == "table" then
+##       for _, ln in ipairs(result) do
+##         table.insert(init_lines, "  " .. ln)
+##       end
+##     elseif ok and type(result) == "string" then
+##       table.insert(init_lines, "  " .. result)
+##     end
+##   else
+##     -- 默认初始化逻辑
+##     for _, ln in ipairs(_nebula_editor_gen_init_lines("app", editor_name, opts)) do
+##       table.insert(init_lines, "  " .. ln)
+##     end
+##   end
+##
+##   if opts.on_frame then
+##     local ok, result = pcall(opts.on_frame, "app", editor_name)
+##     if ok and type(result) == "table" then
+##       for _, ln in ipairs(result) do
+##         table.insert(frame_lines, "    " .. ln)
+##       end
+##     elseif ok and type(result) == "string" then
+##       table.insert(frame_lines, "    " .. result)
+##     end
+##   else
+##     -- 默认帧逻辑
+##     for _, ln in ipairs(_nebula_editor_gen_frame_lines("app", editor_name, opts)) do
+##       table.insert(frame_lines, "    " .. ln)
+##     end
+##   end
+##
+##   local init_code = table.concat(init_lines, "\n")
+##   local frame_code = table.concat(frame_lines, "\n")
 ##
 ##   -- ★ P1-2: 按需加载编辑器模块（require 是幂等的）
 ##   local src = ([[require "nebula_editor"
@@ -135,36 +352,7 @@ require "nebula_builtins"
 ##   if not nebula_init(&renderer, &app, "%s", %s, %s) then
 ##     return 1
 ##   end
-##   app.%s:init_themed(
-##     Vec2{x = 0.0, y = 0.0},
-##     Vec2{x = (@float32)(%s), y = (@float32)(%s)},
-##     0.0)
-##   -- 修正 editor 背景为 editor_body 布局坐标（编译期常量）
-##   app.%s.visual.pos  = Vec2{x = 0.0, y = 24.0}
-##   app.%s.visual.size = Vec2{x = (@float32)(%s), y = (@float32)(%s) - 24.0 - 24.0}
-##   -- 加载文件
-##   if _editor_has_file then
-##     local path_len: uint32 = 0
-##     while _editor_file_path[path_len] ~= 0 and path_len < 511 do
-##       path_len = path_len + 1
-##     end
-##     _editor_highlight_id = nebula_highlight_detect_ext(&_editor_file_path[0], path_len)
-##     if app.%s.visual.multi_buf:load_file((@cstring)(&_editor_file_path[0])) then
-##       app.%s.line_count = app.%s.visual.multi_buf.line_count
-##       app.%s.cursor_row = 0
-##       app.%s.cursor_col = 0
-##       printf("nebula: loaded file (highlight=%%d)\n", (@int32)(_editor_highlight_id))
-##     else
-##       printf("nebula: cannot open file, starting empty buffer\n")
-##       _editor_has_file = false
-##     end
-##   else
-##     _editor_highlight_id = 1
-##   end
-##   _editor_modified = false
-##   nebula_editor_update_title(0, 0)
-##   printf("=== Nebula Text Editor ===\n")
-##   printf("  Ctrl+S save | Ctrl+Z undo | Ctrl+Y redo | Ctrl+F find | Ctrl+H replace\n")
+## %s
 ##   local input: NebulaInputState
 ##   local prev_time = glfwGetTime()
 ##   local prev_undo_cursor: uint32 = 0
@@ -175,119 +363,7 @@ require "nebula_builtins"
 ##     local dt  = (@float32)(now - prev_time)
 ##     prev_time = now
 ##     nebula_collect_input(_nebula_window, &input, dt)
-##     -- ★ P1-7: loop over all keys queued this frame
-##     local _eki: uint8 = 0
-##     while _eki < input.key_count do
-##     input.key_pressed = input.key_input[_eki]
-##     -- Ctrl+S 保存
-##     if input.key_pressed == NebulaKey.Save then
-##       if _editor_has_file then
-##         if app.%s.visual.multi_buf:save_file((@cstring)(&_editor_file_path[0])) then
-##           _editor_modified = false
-##           prev_undo_cursor = app.%s.undo_stack.cursor
-##           printf("nebula: saved\n")
-##           nebula_editor_update_title(app.%s.cursor_row, app.%s.cursor_col)
-##         end
-##       else
-##         printf("nebula: no file path\n")
-##       end
-##     end
-##     -- Ctrl+F / Ctrl+H 搜索栏切换
-##     if input.key_pressed == NebulaKey.Find then
-##       _search_active = not _search_active
-##       _search_replace = false
-##       if _search_active then
-##         _search_len = 0; _search_cursor = 0
-##         _search_match_count = 0; _search_current = 0
-##       end
-##     end
-##     if input.key_pressed == NebulaKey.Replace then
-##       _search_active = not _search_active
-##       _search_replace = true
-##       if _search_active then
-##         _search_len = 0; _search_cursor = 0
-##         _replace_len = 0; _replace_cursor = 0
-##         _search_match_count = 0; _search_current = 0
-##       end
-##     end
-##     -- 搜索栏键盘处理
-##     if _search_active then
-##       if input.key_pressed == NebulaKey.Escape then
-##         _search_active = false; _search_replace = false
-##       elseif input.key_pressed == NebulaKey.FindNext or input.key_pressed == NebulaKey.Enter then
-##         if _search_match_count > 0 then
-##           _search_current = (_search_current + 1) %% _search_match_count
-##           nebula_search_goto_current(&app.%s)
-##         end
-##       elseif input.key_pressed == NebulaKey.Backspace then
-##         if _search_cursor > 0 then
-##           _search_cursor = _search_cursor - 1
-##           _search_len = _search_len - 1
-##           local si: uint32 = _search_cursor
-##           while si < _search_len do
-##             _search_buf[si] = _search_buf[si + 1]
-##             si = si + 1
-##           end
-##           nebula_search_scan(&app.%s.visual.multi_buf)
-##         end
-##       else
-##         local ci: uint8 = 0
-##         while ci < input.char_count do
-##           local ch: uint32 = input.char_input[ci]
-##           if ch >= 32 and ch < 127 then
-##             if _search_replace and _replace_cursor < 255 then
-##               if _replace_cursor < _replace_len then
-##                 local ri2: uint32 = _replace_len
-##                 while ri2 > _replace_cursor do
-##                   _replace_buf[ri2] = _replace_buf[ri2 - 1]
-##                   ri2 = ri2 - 1
-##                 end
-##               end
-##               _replace_buf[_replace_cursor] = (@uint8)(ch)
-##               _replace_cursor = _replace_cursor + 1
-##               _replace_len = _replace_len + 1
-##             elseif _search_cursor < 255 then
-##               if _search_cursor < _search_len then
-##                 local si2: uint32 = _search_len
-##                 while si2 > _search_cursor do
-##                   _search_buf[si2] = _search_buf[si2 - 1]
-##                   si2 = si2 - 1
-##                 end
-##               end
-##               _search_buf[_search_cursor] = (@uint8)(ch)
-##               _search_cursor = _search_cursor + 1
-##               _search_len = _search_len + 1
-##               nebula_search_scan(&app.%s.visual.multi_buf)
-##               if _search_match_count > 0 then
-##                 _search_current = 0
-##                 nebula_search_goto_current(&app.%s)
-##               end
-##             end
-##           end
-##           ci = ci + 1
-##         end
-##       end
-##       if _search_active and _search_replace then
-##         if input.key_pressed == NebulaKey.Replace then
-##           nebula_search_replace_current(&app.%s, &app.%s.visual.multi_buf)
-##         end
-##       end
-##       input.key_pressed = NebulaKey.None
-##       input.key_count = 0  -- ★ P1-7: 清空键队列，防止下游组件重复处理
-##       input.char_count = 0
-##     end
-##     _eki = _eki + 1
-##     end  -- ★ P1-7: end key loop
-##     -- 修改检测
-##     if app.%s.undo_stack.cursor ~= prev_undo_cursor then
-##       _editor_modified = true
-##     end
-##     app.%s.visual.content_height = (@float32)(app.%s.line_count) * (%s + 2.0)
-##     title_timer = title_timer + dt
-##     if title_timer > 0.2 then
-##       title_timer = 0.0
-##       nebula_editor_update_title(app.%s.cursor_row, app.%s.cursor_col)
-##     end
+## %s
 ##     nebula_frame_render(&renderer, &app, &input, dt, 0.04, 0.04, 0.06)
 ##   end
 ##   app:deinit()
@@ -297,18 +373,8 @@ require "nebula_builtins"
 ## end
 ## main()]]):format(
 ##     app_type, title, win_w_const, win_h_const,
-##     editor_name,
-##     win_w_const, win_h_const,
-##     editor_name,
-##     editor_name, win_w_const, win_h_const,
-##     editor_name, editor_name, editor_name, editor_name, editor_name,
-##     editor_name, editor_name, editor_name, editor_name,
-##     editor_name,
-##     editor_name,
-##     editor_name, editor_name,
-##     editor_name, editor_name,
-##     editor_name, editor_name, editor_name, tostring(cell_h),
-##     editor_name, editor_name
+##     init_code,
+##     frame_code
 ##   )
 ##
 ##   -- ★ Phase 5.2 R3: cache generated editor main source
