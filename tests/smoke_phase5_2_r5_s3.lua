@@ -107,7 +107,7 @@ check("3.4_use_merges_template_fields",
   sugar_src:find("for k, v in pairs%(tpl%) do merged%[k%] = v end") ~= nil)
 
 check("3.5_use_overrides_component_fields",
-  sugar_src:find('if k ~="use" then merged%[k%] = v end') ~= nil)
+  sugar_src:find('if k%s*~=%s*"use" then merged%[k%] = v end') ~= nil)
 
 check("3.6_use_replaces_component",
   sugar_src:find("for k, _ in pairs%(c%) do c%[k%] = nil end") ~= nil)
