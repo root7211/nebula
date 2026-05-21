@@ -13,6 +13,7 @@
 --   · nebula_visual — L2 层 Visual 声明糖
 --   · _nebula_builtins 注册表 — Builtin Producer 工厂
 --   · nebula_app — 一站式 App 声明糖（L2 Sugar）
+--   · nebula_component_template — 可复用组件模板（Phase 5.2 R5-S3）
 --
 -- 依赖：nebula_derive_engine.nelua 的全局函数（通过 Facade 加载顺序保证）
 --   · nebula_annotate, nebula_derive, nebula_derive_app
@@ -423,6 +424,25 @@
 ##   print(("[sugar] nebula_editor_init_helper registered for %s"):format(type_name))
 ## end
 
+## -- =============================================================================
+## -- ★ Phase 5.2 R5 Step 5.3: Component Template Registry
+## --
+## -- Reusable component templates that can be referenced via `use` in nebula_app().
+## -- Eliminates repetition when the same component config is used across multiple apps.
+## -- =============================================================================
+## _nebula_component_templates = _nebula_component_templates or {}
+##
+## -- Register a reusable component template.
+## -- name: string — template identifier (e.g. "StandardSearchBar")
+## -- spec: table — component spec (same fields as nebula_app components entry):
+## --   type, builtin, flex_basis, cell_w, cell_h, layout, dense, rows, cols, etc.
+## function nebula_component_template(name, spec)
+##   assert(type(name) == "string", "nebula_component_template: name must be a string")
+##   assert(type(spec) == "table", "nebula_component_template: spec must be a table")
+##   _nebula_component_templates[name] = spec
+##   print(("[sugar] nebula_component_template: '%s' registered"):format(name))
+## end
+
 -- =============================================================================
 -- ★ Builtin Registry (Producer Factory Functions)
 --
@@ -490,6 +510,24 @@
 ##   -- ★ Phase 5.2 R2: 存储 spec 到 per-app registry
 ##   nebula_app_registry[app_name]._spec = spec
 ##   -- ★ Phase 4.5 S2: 注册组件（混合管线自动编排）
+##   -- ★ Phase 5.2 R5-S3: resolve `use` template references FIRST, before any component inspection
+##   -- Components with `use = "TemplateName"` inherit the template spec and override with local fields
+##   for _, c in ipairs(spec.components or {}) do
+##     if c.use then
+##       local tpl = _nebula_component_templates[c.use]
+##       assert(tpl, ("nebula_app: unknown component template '%s'"):format(c.use))
+##       -- Merge: template fields as base, component fields as overrides
+##       local merged = {}
+##       for k, v in pairs(tpl) do merged[k] = v end
+##       for k, v in pairs(c) do
+##         if k ~= "use" then merged[k] = v end
+##       end
+##       -- Replace component with merged spec
+##       for k, _ in pairs(c) do c[k] = nil end
+##       for k, v in pairs(merged) do c[k] = v end
+##       print(("[sugar] nebula_app: resolved template '%s' for component '%s'"):format(c.use or "???", c.name))
+##     end
+##   end
 ##   -- ★ Phase 4.9.1: 自动推断 editor 组件名（第一个含 multiline_editable primitive 的组件）
 ##   local auto_editor_name = nil
 ##   for _, c in ipairs(spec.components or {}) do
@@ -815,3 +853,34 @@
 ##     print(("[nebula] print_source: no cached source for %s \"%s\""):format(mode, name))
 ##   end
 ## end
+
+-- =============================================================================
+-- ★ Phase 5.2 R5 Step 5.3: Built-in Component Templates
+--
+-- Pre-defined reusable component templates for common UI patterns.
+-- Users can reference these via `use = "StandardSearchBar"` in nebula_app().
+-- =============================================================================
+
+## nebula_component_template("StandardSearchBar", {
+##   type       = "DenseTextVisual",
+##   builtin    = "search_bar",
+##   flex_basis = 24,
+##   cell_w     = 10.0,
+##   cell_h     = 16.0,
+## })
+
+## nebula_component_template("StandardStatusBar", {
+##   type       = "DenseTextVisual",
+##   builtin    = "status_bar",
+##   flex_basis = 24,
+##   cell_w     = 10.0,
+##   cell_h     = 16.0,
+## })
+
+## nebula_component_template("StandardLineNums", {
+##   type       = "DenseTextVisual",
+##   builtin    = "line_nums",
+##   flex_basis = 40,
+##   cell_w     = 10.0,
+##   cell_h     = 16.0,
+## })

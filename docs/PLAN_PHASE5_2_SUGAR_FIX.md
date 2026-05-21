@@ -394,9 +394,9 @@ require "nebula"
 
 **验收标准**：`text_editor_demo_v3.nelua` 使用新模板后功能不变，回归测试全绿。
 
-### Step 5.3：组合式 sugar 基础
+### Step 5.3：组合式 sugar 基础 ✅ 已完成
 
-**文件**：`src/nebula_core.nelua`（修改）
+**文件**：`src/nebula_sugar.nelua`（修改）
 
 | 子任务 | 内容 | 验收 |
 | :--- | :--- | :--- |
@@ -483,12 +483,13 @@ require "nebula"
 - [x] 生成的代码与旧模板 100% 一致（diff 验证）
 - [x] 回归测试 77/77 全绿
 
-### 里程碑 5：sugar 深度完善完成（R5）
+### 里程碑 5：sugar 深度完善完成（R5） ✅
 
 - [x] `counter_demo.nelua` 使用 L2 状态绑定写法
 - [x] `nebula_editor_main` 业务逻辑移除，替换为回调机制
-- [ ] `nebula_component_template` 可用
-- [ ] 所有 demo 统一为 L2 写法
+- [x] `nebula_component_template` 可用（3 个内置模板：StandardSearchBar / StandardStatusBar / StandardLineNums）
+- [x] `nebula_app()` 支持 `use` 字段引用模板
+- [x] 冒烟测试 smoke_phase5_2_r5_s3.lua
 
 ---
 
