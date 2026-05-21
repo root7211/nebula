@@ -44,6 +44,7 @@
 | `PLAN_PHASE5_1_ECOSYSTEM_CICD.md` | Phase 5.1 生态与 CI/CD — 5 梯队：CI/CD 强化 → 文档工程 → WASM 生态 → 包管理 → 社区治理 |
 | `PLAN_PHASE5_2_SUGAR_FIX.md` | Phase 5.2 语法糖体系修复 — 5 梯队：API 统一 → 全局状态消除 → 生成代码预览 → Builtin AST 重构 → sugar 深度完善 |
 | `PLAN_PHASE5_3_RENDER_REGISTRY.md` | Phase 5.3 渲染侧可编程注册表 — SDF 形状注册表 + 着色器组合器注册表，与交互侧 NEBULA_PRIMITIVES 对称 |
+| `PLAN_PHASE5_4_ANIMATION.md` | Phase 5.4 声明式动画系统深化 — NEBULA_EASINGS 注册表 + per-property override + delay + sugar 动画默认值 |
 | `PLAN_PHASE5_OMNISCIENT_GRAPH.md` | Phase 5.0 全知图与端到端特化路径 — ✅ 已完成（S1a-S5 五个梯队，440+ 断言全绿） |
 
 ## 历史资产
