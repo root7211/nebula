@@ -9,7 +9,7 @@
 --   4. nebula_app resolves `use` field to template spec
 --   5. Template fields merge correctly with component overrides
 --   6. Unknown template name triggers assertion message in code
-================================================================================
+-- ================================================================================
 
 local pass_count = 0
 local fail_count = 0
