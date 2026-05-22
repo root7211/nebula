@@ -1,24 +1,81 @@
--- shader_compose.lua — Phase 3.7 / Phase 4.X
+-- shader_compose.lua — Phase 3.7 / Phase 4.X / Phase 5.3
 -- 五个公开函数：nebula_compose_shader_instanced / nebula_compose_text_shader / nebula_compose_shadow_shaders / nebula_compose_slug_shader / nebula_compose_dense_text_shader
 -- 已删除：nebula_compose_shader（红色占位符）、nebula_compose_instanced_shader（Phase 3.3 遗留）
+--
+-- ★ Phase 5.3: 渲染侧可编程注册表
+--   NEBULA_SDF_SHAPES       — SDF 形状注册表（与 NEBULA_PRIMITIVES 对称）
+--   NEBULA_SHADER_COMPOSERS — 着色器组合器注册表
+--   nebula_register_sdf_shape(name, spec)        — 注册自定义 SDF 形状
+--   nebula_register_shader_composer(name, spec)   — 注册自定义着色器组合器
+--   nebula_resolve_shader_composer(reg, feats)    — 分发：选择匹配的组合器
 
-local WGSL_FRAGMENTS = {
-  -- 基础 SDF 矩形
-  sdf_rect = [[
+-- =============================================================================
+-- ★ Phase 5.3 注册表 A: NEBULA_SDF_SHAPES
+-- =============================================================================
+NEBULA_SDF_SHAPES = NEBULA_SDF_SHAPES or {}
+
+function nebula_register_sdf_shape(name, spec)
+  assert(type(name) == "string", "nebula_register_sdf_shape: name must be a string")
+  assert(type(spec) == "table",  "nebula_register_sdf_shape: spec must be a table")
+  assert(spec.fn_name,     "nebula_register_sdf_shape('" .. name .. "'): missing fn_name")
+  assert(spec.wgsl_source, "nebula_register_sdf_shape('" .. name .. "'): missing wgsl_source")
+  assert(spec.params,      "nebula_register_sdf_shape('" .. name .. "'): missing params")
+  assert(not NEBULA_SDF_SHAPES[name],
+    "nebula_register_sdf_shape: shape '" .. name .. "' already registered")
+  NEBULA_SDF_SHAPES[name] = {
+    name         = name,
+    fn_name      = spec.fn_name,
+    wgsl_source  = spec.wgsl_source,
+    params       = spec.params,
+    returns      = spec.returns or "f32",
+    extra_fields = spec.extra_fields or {},
+    description  = spec.description or "",
+  }
+end
+
+-- ★ 内建 SDF 自注册（吃自己的狗粮）
+nebula_register_sdf_shape("rect", {
+  fn_name     = "sdf_rect",
+  wgsl_source = [[
 fn sdf_rect(p: vec2<f32>, b: vec2<f32>) -> f32 {
   let d = abs(p) - b;
   return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0);
 }
 ]],
+  params      = "p: vec2<f32>, b: vec2<f32>",
+  returns     = "f32",
+  description = "基础 SDF 矩形",
+})
 
-  -- 圆角矩形
-  sdf_rounded_rect = [[
+nebula_register_sdf_shape("rounded_rect", {
+  fn_name     = "sdf_rounded_rect",
+  wgsl_source = [[
 fn sdf_rounded_rect(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
   let q = abs(p) - b + r;
   return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
 }
 ]],
-}
+  params       = "p: vec2<f32>, b: vec2<f32>, r: f32",
+  returns      = "f32",
+  extra_fields = {{ name = "radius", type = "f32" }},
+  description  = "圆角矩形",
+})
+
+-- ★ Phase 5.3: 辅助函数 — 从注册表查 SDF WGSL 源码
+local function resolve_sdf_source(shape_name)
+  local shape = NEBULA_SDF_SHAPES[shape_name]
+  assert(shape, "nebula: unknown SDF shape '" .. tostring(shape_name) .. "'")
+  return shape.wgsl_source
+end
+
+-- ★ 向后兼容别名：WGSL_FRAGMENTS 指向注册表中的 wgsl_source
+local WGSL_FRAGMENTS = setmetatable({}, {
+  __index = function(_, key)
+    local shape = NEBULA_SDF_SHAPES[key:gsub("^sdf_", "")]
+    if shape then return shape.wgsl_source end
+    return nil
+  end
+})
 
 -- =============================================================================
 -- 文本着色器组合 (Phase 3.2.4)
@@ -140,13 +197,9 @@ fn vs_main(
 }
 ]]
 
-  -- SDF 函数
-  local sdf_func = ""
-  if has_radius then
-    sdf_func = WGSL_FRAGMENTS.sdf_rounded_rect
-  else
-    sdf_func = WGSL_FRAGMENTS.sdf_rect
-  end
+  -- ★ Phase 5.3: SDF 函数从注册表查询（支持用户指定 sdf_shape）
+  local sdf_shape_name = opts.sdf_shape or (has_radius and "rounded_rect" or "rect")
+  local sdf_func = resolve_sdf_source(sdf_shape_name)
 
   -- 片段着色器
   local fs_lines = {}
@@ -211,6 +264,11 @@ function nebula_compose_shadow_shaders(opts)
   local struct_name = opts.struct_name or "Uniforms"
   local has_radius  = opts.has_radius  or false
 
+  -- ★ Phase 5.3: SDF 从注册表查询
+  local sdf_shape_name = opts.sdf_shape or (has_radius and "rounded_rect" or "rect")
+  local sdf_source = resolve_sdf_source(sdf_shape_name)
+  local sdf_fn     = NEBULA_SDF_SHAPES[sdf_shape_name].fn_name
+
   -- 阴影遮罩着色器（Pass 1）：生成高斯模糊前的原始阴影形状
   local shadow_mask_source = struct_def .. string.format([[
 
@@ -239,33 +297,20 @@ fn vs_main(@builtin(vertex_index) vi: u32) -> VertexOutput {
 
 ]], struct_name)
 
-  if has_radius then
-    shadow_mask_source = shadow_mask_source .. WGSL_FRAGMENTS.sdf_rounded_rect .. [[
+  -- ★ Phase 5.3: 统一使用注册表查出的 SDF 函数
+  local sdf_call_arg = has_radius and (sdf_fn .. "(p, half_size, u.radius)") or (sdf_fn .. "(p, half_size)")
+  shadow_mask_source = shadow_mask_source .. sdf_source .. string.format([[
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
   let center    = vec2<f32>(0.5, 0.5);
   let p         = (in.p - center) * u.size;
   let half_size = u.size * 0.5;
-  let dist = sdf_rounded_rect(p, half_size, u.radius);
+  let dist = %s;
   let alpha = 1.0 - smoothstep(-1.0, 1.0, dist);
   return vec4<f32>(0.0, 0.0, 0.0, alpha * 0.5);
 }
-]]
-  else
-    shadow_mask_source = shadow_mask_source .. WGSL_FRAGMENTS.sdf_rect .. [[
-
-@fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-  let center    = vec2<f32>(0.5, 0.5);
-  let p         = (in.p - center) * u.size;
-  let half_size = u.size * 0.5;
-  let dist = sdf_rect(p, half_size);
-  let alpha = 1.0 - smoothstep(-1.0, 1.0, dist);
-  return vec4<f32>(0.0, 0.0, 0.0, alpha * 0.5);
-}
-]]
-  end
+]], sdf_call_arg)
 
   -- 水平模糊着色器（Pass 2）
   local blur_h_source = [[
@@ -746,4 +791,99 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
   }
 end
 
-return "nebula_shader_compose_v0.9_phase4.X"
+-- =============================================================================
+-- ★ Phase 5.3 注册表 B: NEBULA_SHADER_COMPOSERS
+-- =============================================================================
+NEBULA_SHADER_COMPOSERS = NEBULA_SHADER_COMPOSERS or {}
+
+function nebula_register_shader_composer(name, spec)
+  assert(type(name) == "string", "nebula_register_shader_composer: name must be a string")
+  assert(type(spec) == "table",  "nebula_register_shader_composer: spec must be a table")
+  assert(spec.compose,       "nebula_register_shader_composer('" .. name .. "'): missing compose function")
+  assert(spec.pipeline_flag, "nebula_register_shader_composer('" .. name .. "'): missing pipeline_flag")
+  assert(not NEBULA_SHADER_COMPOSERS[name],
+    "nebula_register_shader_composer: composer '" .. name .. "' already registered")
+  NEBULA_SHADER_COMPOSERS[name] = {
+    name          = name,
+    compose       = spec.compose,
+    pipeline_flag = spec.pipeline_flag,
+    match         = spec.match or nil,
+    priority      = spec.priority or 0,
+    description   = spec.description or "",
+  }
+end
+
+-- ★ 内建组合器自注册（吃自己的狗粮）
+nebula_register_shader_composer("instanced", {
+  compose       = nebula_compose_shader_instanced,
+  pipeline_flag = "standard_instanced",
+  match         = function(reg, feats)
+    return not reg.text_mode and not feats.has_shadow
+  end,
+  priority      = 0,
+  description   = "标准 Visual 的 Instanced SDF 着色器（默认路径）",
+})
+
+nebula_register_shader_composer("shadow", {
+  compose       = nebula_compose_shadow_shaders,
+  pipeline_flag = "has_shadow",
+  match         = function(reg, feats)
+    return not reg.text_mode and feats.has_shadow
+  end,
+  priority      = 10,
+  description   = "阴影多 Pass 路径",
+})
+
+nebula_register_shader_composer("text_sdf", {
+  compose       = nebula_compose_text_shader,
+  pipeline_flag = "textured",
+  match         = function(reg, feats)
+    return reg.text_mode == "ascii_sdf"
+  end,
+  priority      = 20,
+  description   = "SDF Atlas 文本着色器",
+})
+
+nebula_register_shader_composer("slug", {
+  compose       = nebula_compose_slug_shader,
+  pipeline_flag = "slug_text",
+  match         = function(reg, feats)
+    return reg.text_mode == "slug"
+  end,
+  priority      = 20,
+  description   = "Slug 矢量文本着色器",
+})
+
+nebula_register_shader_composer("dense_text", {
+  compose       = nebula_compose_dense_text_shader,
+  pipeline_flag = "atlas_dense",
+  match         = function(reg, feats)
+    return reg.text_mode == "dense"
+  end,
+  priority      = 20,
+  description   = "高密度 Instanced 文本着色器",
+})
+
+-- ★ Phase 5.3: 分发辅助函数 — 解析匹配的 shader composer
+function nebula_resolve_shader_composer(reg, feats)
+  -- 1. 显式声明优先
+  if reg.shader_composer then
+    local c = NEBULA_SHADER_COMPOSERS[reg.shader_composer]
+    assert(c, ("nebula_resolve_shader_composer: unknown shader_composer '%s'"):format(reg.shader_composer))
+    return c
+  end
+
+  -- 2. 按 match + priority 自动选择
+  local best, best_priority = nil, -1
+  for _, composer in pairs(NEBULA_SHADER_COMPOSERS) do
+    if composer.match and composer.match(reg, feats) then
+      if composer.priority > best_priority then
+        best = composer
+        best_priority = composer.priority
+      end
+    end
+  end
+  return best
+end
+
+return "nebula_shader_compose_v1.0_phase5.3"

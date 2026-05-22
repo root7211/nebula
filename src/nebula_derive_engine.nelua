@@ -55,6 +55,9 @@
 ##     max_instances = spec.max_instances or 128,
 ##     max_text_len  = spec.max_text_len  or 255,
 ##     max_lines     = spec.max_lines     or nil,
+##     -- ★ Phase 5.3: 渲染侧可编程注册表字段
+##     sdf_shape       = spec.sdf_shape       or nil,
+##     shader_composer = spec.shader_composer or nil,
 ##   }
 ## end
 
@@ -416,8 +419,8 @@
 ## 
 ## -- 加载着色器组合器模块
 ## local shader_compose_mod = require "derive.shader_compose"
-## assert(shader_compose_mod == "nebula_shader_compose_v0.9_phase4.X",
-##   "nebula: failed to load derive/shader_compose.lua")  -- ★ Phase 4.X 升级
+## assert(shader_compose_mod == "nebula_shader_compose_v1.0_phase5.3",
+##   "nebula: failed to load derive/shader_compose.lua")  -- ★ Phase 5.3 升级
 ## 
 ## -- ★ Phase 2.3.2: 加载管线工厂模块
 ## local pipeline_factory_mod = require "derive.pipeline_factory"
@@ -441,8 +444,8 @@
 ## 
 ## -- ★ Phase 4.0: 加载公理校验器模块
 ## local axiom_validator_mod = require "derive.axiom_validator"
-## assert(axiom_validator_mod == "nebula_axiom_validator_v2.0_phase4.3",
-##   "nebula: failed to load derive/axiom_validator.lua")  -- ★ Phase 4.3 升级（任务 D）
+## assert(axiom_validator_mod == "nebula_axiom_validator_v3.0_phase5.3",
+##   "nebula: failed to load derive/axiom_validator.lua")  -- ★ Phase 5.3 升级
 ## 
 ## -- ★ Phase 3.6: 加载 Gap Buffer 工厂模块（使 nebula_gen_gap_buffer_type 在所有 require nebula_core 的文件中可用）
 ## local gap_buffer_factory_mod = require "derive.gap_buffer_factory"
@@ -1307,14 +1310,15 @@
 ## -- 相关 WGSL 着色器在编译期由 nebula_compose_shader_instanced（标准路径）或
 ## -- nebula_compose_shadow_shaders（阴影路径）按字段组合。
 ## -- Phase 3.7: standard_instanced 为默认路径，无需在 nebula_annotate 中声明 instanced=true。
+## -- ★ Phase 5.3: 着色器组合通过 NEBULA_SHADER_COMPOSERS 注册表分发
 ## function nebula_derive(type_name)
 ##   local reg = nebula_registry[type_name]
 ##   assert(reg, "nebula_derive: type '" .. type_name .. "' must be annotated first via nebula_annotate")
-## 
+##
 ##   if reg.text_mode == "ascii_sdf" then
 ##     return nebula_derive_text_visual(type_name)
 ##   end
-## 
+##
 ##   -- ★ Phase 4.1: Slug 文本渲染路径
 ##   if reg.text_mode == "slug" then
 ##     return nebula_derive_slug_text_visual(type_name)
@@ -1346,17 +1350,21 @@
 ## 
 ##   -- 根据字段检测着色器特性
 ##   local feats = detect_shader_features(base_fields, all_props)
-##   -- Phase 3.7: 阴影路径使用 nebula_compose_shadow_shaders 生成阴影子着色器
-##   -- （原 nebula_compose_shader 已删除，其主着色器是红色占位符，违反公理 C）
+##
+##   -- ★ Phase 5.3: 通过 NEBULA_SHADER_COMPOSERS 注册表分发着色器组合
+##   local composer = nebula_resolve_shader_composer(reg, feats)
+##   assert(composer, "nebula_derive: no matching shader composer for '" .. type_name .. "'")
+##
 ##   local shadow_shaders = nil
-##   if feats.has_shadow then
-##     shadow_shaders = nebula_compose_shadow_shaders({
+##   if composer.name == "shadow" then
+##     shadow_shaders = composer.compose({
 ##       wgsl_struct  = layout.wgsl_struct,
 ##       struct_name  = layout.wgsl_struct_name,
 ##       has_radius   = feats.has_radius,
 ##       has_border   = feats.has_border,
+##       sdf_shape    = reg.sdf_shape,
 ##     })
-##     print(("[derive-shadow] %s: shadow_multipass path"):format(type_name))
+##     print(("[derive-shadow] %s: shadow_multipass path (composer=%s)"):format(type_name, composer.name))
 ##   end
 ## 
 ##   -- ★ Phase 4.0: Visual 级公理校验（任务 A：生命周期类型白名单）
@@ -1402,17 +1410,18 @@
 ##   end
 ##   source_parts = source_parts .. process_input_src .. "\n\n"
 ##   source_parts = source_parts .. gen_update_for(base, reg, all_props) .. "\n\n"
-##   local use_instanced = not feats.has_shadow
+##   local use_instanced = (composer.name ~= "shadow")
 ##   local max_instances = reg.max_instances or 128
 ##   local instanced_shader_result = nil
 ##   if use_instanced then
-##     instanced_shader_result = nebula_compose_shader_instanced({
+##     instanced_shader_result = composer.compose({
 ##       wgsl_struct  = layout.wgsl_struct,
 ##       struct_name  = layout.wgsl_struct_name,
 ##       has_radius   = feats.has_radius,
 ##       has_border   = feats.has_border,
+##       sdf_shape    = reg.sdf_shape,
 ##     })
-##     print(("[derive-instanced] %s: standard_instanced path (max=%d)"):format(type_name, max_instances))
+##     print(("[derive-instanced] %s: %s path (max=%d)"):format(type_name, composer.name, max_instances))
 ##   end
 ## 
 ##   -- Phase 2.3.3: 生成强类型 to_uniforms 和 <T>Pipeline

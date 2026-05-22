@@ -811,7 +811,36 @@ end
 function nebula_validate_visual(type_name, base_fields, state_fields)
   -- 任务 A：生命周期类型白名单
   nebula_validate_visual_fields(type_name, base_fields, state_fields)
-  -- Visual 级别暂无其他校验（任务 B/C 均为 App 级）
+
+  -- ★ Phase 5.3: 渲染侧注册表字段校验
+  local reg = nebula_registry[type_name]
+  if reg then
+    -- 校验 sdf_shape 是否已注册
+    if reg.sdf_shape then
+      assert(NEBULA_SDF_SHAPES and NEBULA_SDF_SHAPES[reg.sdf_shape],
+        ("nebula_validate_visual(%s): sdf_shape '%s' is not registered in NEBULA_SDF_SHAPES. " ..
+         "Use nebula_register_sdf_shape() to register it before nebula_annotate."):format(
+          type_name, reg.sdf_shape))
+      -- 校验 SDF extra_fields 是否存在于 Visual base_fields 中
+      local shape = NEBULA_SDF_SHAPES[reg.sdf_shape]
+      if shape.extra_fields then
+        local base_field_set = {}
+        for _, f in ipairs(base_fields) do base_field_set[f.name] = true end
+        for _, ef in ipairs(shape.extra_fields) do
+          assert(base_field_set[ef.name],
+            ("nebula_validate_visual(%s): sdf_shape '%s' requires field '%s' in Visual record, but it is missing."):format(
+              type_name, reg.sdf_shape, ef.name))
+        end
+      end
+    end
+    -- 校验 shader_composer 是否已注册
+    if reg.shader_composer then
+      assert(NEBULA_SHADER_COMPOSERS and NEBULA_SHADER_COMPOSERS[reg.shader_composer],
+        ("nebula_validate_visual(%s): shader_composer '%s' is not registered in NEBULA_SHADER_COMPOSERS. " ..
+         "Use nebula_register_shader_composer() to register it before nebula_annotate."):format(
+          type_name, reg.shader_composer))
+    end
+  end
 end
 
 -- App 级校验（在 nebula_derive_app / nebula_app_end 调用）
@@ -828,4 +857,4 @@ end
 -- =============================================================================
 -- 模块版本标识（供 nebula_core.nelua 的 require + assert 校验）
 -- =============================================================================
-return "nebula_axiom_validator_v2.0_phase4.3"
+return "nebula_axiom_validator_v3.0_phase5.3"
