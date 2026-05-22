@@ -586,8 +586,46 @@
 ##   return s:sub(1, 1):upper() .. s:sub(2)
 ## end
 ## 
-## -- tween 名称 -> 数值编码（与运行时 get_t() 中的判断保持一致）
-## local TWEEN_CODE = { none = 0, ease_out = 1, ease_in = 2 }
+## -- ★ Phase 5.4: NEBULA_EASINGS 注册表（替代硬编码 TWEEN_CODE）
+## NEBULA_EASINGS = NEBULA_EASINGS or {}
+##
+## function nebula_register_easing(name, spec)
+##   assert(type(name) == "string", "nebula_register_easing: name must be a string")
+##   assert(type(spec) == "table",  "nebula_register_easing: spec must be a table")
+##   assert(spec.code ~= nil,       "nebula_register_easing('" .. name .. "'): missing code")
+##   assert(spec.nelua_expr,        "nebula_register_easing('" .. name .. "'): missing nelua_expr")
+##   assert(not NEBULA_EASINGS[name],
+##     "nebula_register_easing: easing '" .. name .. "' already registered")
+##   -- 检查 code 唯一性
+##   for k, v in pairs(NEBULA_EASINGS) do
+##     assert(v.code ~= spec.code,
+##       ("nebula_register_easing('%s'): code %d already used by '%s'"):format(name, spec.code, k))
+##   end
+##   NEBULA_EASINGS[name] = {
+##     name       = name,
+##     code       = spec.code,
+##     nelua_expr = spec.nelua_expr,
+##     nelua_fn   = spec.nelua_fn or nil,
+##     description = spec.description or "",
+##   }
+## end
+##
+## -- ★ 内建 easing 自注册
+## nebula_register_easing("none",           { code = 0, nelua_expr = "%t",                  description = "Linear (no easing)" })
+## nebula_register_easing("ease_out",       { code = 1, nelua_expr = "ease_out(%t)",         description = "Quadratic ease out" })
+## nebula_register_easing("ease_in",        { code = 2, nelua_expr = "ease_in(%t)",          description = "Quadratic ease in" })
+## nebula_register_easing("ease_in_out",    { code = 3, nelua_expr = "ease_in_out(%t)",      description = "Quadratic ease in-out" })
+## nebula_register_easing("ease_out_cubic", { code = 4, nelua_expr = "ease_out_cubic(%t)",   description = "Cubic ease out" })
+## nebula_register_easing("ease_out_expo",  { code = 5, nelua_expr = "ease_out_expo(%t)",    description = "Exponential ease out" })
+## nebula_register_easing("spring",         { code = 6, nelua_expr = "ease_spring(%t)",      description = "Critical damping spring" })
+##
+## -- ★ 向后兼容别名：TWEEN_CODE 指向 NEBULA_EASINGS 的 code
+## TWEEN_CODE = setmetatable({}, {
+##   __index = function(_, key)
+##     local e = NEBULA_EASINGS[key]
+##     return e and e.code or nil
+##   end
+## })
 ## 
 ## -- ★ Phase 3.10: has_prim 已移除，原语判断现在通过 NEBULA_PRIMITIVES 注册表驱动
 ## 
@@ -611,15 +649,41 @@
 ##   local sm = type_name .. "StateMachine"
 ##   local st = type_name .. "State"
 ##   local lines = {}
-## 
+##
+##   -- ★ Phase 5.4: 检测是否有任何 transition 使用 delay
+##   local has_any_delay = false
+##   -- ★ Phase 5.4: 检测 per-property overrides
+##   local override_props = {}  -- { prop_name = true }
+##   for _, tr in ipairs(reg.transitions or {}) do
+##     if tr.delay and tr.delay > 0 then has_any_delay = true end
+##     if tr.overrides then
+##       for prop, _ in pairs(tr.overrides) do
+##         override_props[prop] = true
+##       end
+##     end
+##   end
+##
 ##   table.insert(lines, ("global %s = @record{"):format(sm))
 ##   table.insert(lines, ("  current:  %s,"):format(st))
 ##   table.insert(lines, ("  target:   %s,"):format(st))
 ##   table.insert(lines,  "  progress: float32,")
 ##   table.insert(lines,  "  duration: float32,")
 ##   table.insert(lines,  "  tween:    uint8,")
+##   -- ★ Phase 5.4: delay 字段（仅当有 transition 使用 delay 时生成）
+##   if has_any_delay then
+##     table.insert(lines, "  delay:    float32,")
+##   end
+##   -- ★ Phase 5.4: per-property override 字段
+##   for prop, _ in pairs(override_props) do
+##     table.insert(lines, ("  progress_%s: float32,"):format(prop))
+##     table.insert(lines, ("  duration_%s: float32,"):format(prop))
+##     table.insert(lines, ("  tween_%s:    uint8,"):format(prop))
+##     if has_any_delay then
+##       table.insert(lines, ("  delay_%s:    float32,"):format(prop))
+##     end
+##   end
 ##   table.insert(lines,  "}")
-## 
+##
 ##   -- init
 ##   table.insert(lines, ("function %s:init(): void"):format(sm))
 ##   local initial_state = reg.states[1] or "default"
@@ -628,8 +692,19 @@
 ##   table.insert(lines,  "  self.progress = 1.0")
 ##   table.insert(lines,  "  self.duration = 0.0")
 ##   table.insert(lines,  "  self.tween    = 0")
+##   if has_any_delay then
+##     table.insert(lines, "  self.delay    = 0.0")
+##   end
+##   for prop, _ in pairs(override_props) do
+##     table.insert(lines, ("  self.progress_%s = 1.0"):format(prop))
+##     table.insert(lines, ("  self.duration_%s = 0.0"):format(prop))
+##     table.insert(lines, ("  self.tween_%s    = 0"):format(prop))
+##     if has_any_delay then
+##       table.insert(lines, ("  self.delay_%s    = 0.0"):format(prop))
+##     end
+##   end
 ##   table.insert(lines,  "end")
-## 
+##
 ##   -- transition_to —— 展开 transitions 为 if-else 链
 ##   table.insert(lines, ("function %s:transition_to(new_target: %s): void"):format(sm, st))
 ##   table.insert(lines,  "  if new_target == self.target and self.progress >= 1.0 then return end")
@@ -639,19 +714,63 @@
 ##   if #reg.transitions > 0 then
 ##     for i, tr in ipairs(reg.transitions) do
 ##       local kw = (i == 1) and "if" or "elseif"
-##       local code = TWEEN_CODE[tr.tween] or 0
+##       -- ★ Phase 5.4: 从 NEBULA_EASINGS 查找 tween code
+##       local easing = NEBULA_EASINGS[tr.tween or "none"]
+##       local code = easing and easing.code or 0
 ##       table.insert(lines, ("    %s self.current == %s.%s and new_target == %s.%s then"):format(
 ##         kw, st, cap(tr.from), st, cap(tr.to)))
 ##       table.insert(lines, ("      self.duration = %s"):format(tostring(tr.duration or 0.0)))
 ##       table.insert(lines, ("      self.tween    = %d"):format(code))
+##       -- ★ Phase 5.4: delay
+##       if has_any_delay then
+##         table.insert(lines, ("      self.delay    = %s"):format(tostring(tr.delay or 0.0)))
+##       end
+##       -- ★ Phase 5.4: per-property overrides
+##       if tr.overrides then
+##         for prop, ov in pairs(tr.overrides) do
+##           local ov_easing = NEBULA_EASINGS[ov.tween or tr.tween or "none"]
+##           local ov_code = ov_easing and ov_easing.code or code
+##           table.insert(lines, ("      self.progress_%s = 0.0"):format(prop))
+##           table.insert(lines, ("      self.duration_%s = %s"):format(prop, tostring(ov.duration or tr.duration or 0.0)))
+##           table.insert(lines, ("      self.tween_%s    = %d"):format(prop, ov_code))
+##           if has_any_delay then
+##             table.insert(lines, ("      self.delay_%s    = %s"):format(prop, tostring(ov.delay or tr.delay or 0.0)))
+##           end
+##         end
+##       end
+##       -- 对于没有 override 的 props，也要重置 progress
+##       for prop, _ in pairs(override_props) do
+##         if not (tr.overrides and tr.overrides[prop]) then
+##           table.insert(lines, ("      self.progress_%s = 0.0"):format(prop))
+##           table.insert(lines, ("      self.duration_%s = self.duration"):format(prop))
+##           table.insert(lines, ("      self.tween_%s    = self.tween"):format(prop))
+##           if has_any_delay then
+##             table.insert(lines, ("      self.delay_%s    = self.delay"):format(prop))
+##           end
+##         end
+##       end
 ##     end
 ##     table.insert(lines, "    else")
 ##     table.insert(lines, "      self.duration = 0.0")
 ##     table.insert(lines, "      self.tween    = 0")
+##     if has_any_delay then
+##       table.insert(lines, "      self.delay    = 0.0")
+##     end
+##     for prop, _ in pairs(override_props) do
+##       table.insert(lines, ("      self.progress_%s = 0.0"):format(prop))
+##       table.insert(lines, ("      self.duration_%s = 0.0"):format(prop))
+##       table.insert(lines, ("      self.tween_%s    = 0"):format(prop))
+##       if has_any_delay then
+##         table.insert(lines, ("      self.delay_%s    = 0.0"):format(prop))
+##       end
+##     end
 ##     table.insert(lines, "    end")
 ##   else
 ##     table.insert(lines, "    self.duration = 0.0")
 ##     table.insert(lines, "    self.tween    = 0")
+##     if has_any_delay then
+##       table.insert(lines, "    self.delay    = 0.0")
+##     end
 ##   end
 ##   table.insert(lines, "  end")
 ##   table.insert(lines, "end")
@@ -668,21 +787,99 @@
 ##   table.insert(lines,  "    self.current  = self.target")
 ##   table.insert(lines,  "    return")
 ##   table.insert(lines,  "  end")
+##   -- ★ Phase 5.4: delay 支持
+##   if has_any_delay then
+##     table.insert(lines, "  if self.delay > 0.0 then")
+##     table.insert(lines, "    self.delay = self.delay - dt")
+##     table.insert(lines, "    if self.delay > 0.0 then")
+##     -- per-property delays 也需要递减
+##     for prop, _ in pairs(override_props) do
+##       table.insert(lines, ("      if self.delay_%s > 0.0 then self.delay_%s = self.delay_%s - dt end"):format(prop, prop, prop))
+##     end
+##     table.insert(lines, "      return")
+##     table.insert(lines, "    end")
+##     table.insert(lines, "    dt = -self.delay")
+##     table.insert(lines, "    self.delay = 0.0")
+##     table.insert(lines, "  end")
+##   end
 ##   table.insert(lines,  "  self.progress = self.progress + dt / self.duration")
 ##   table.insert(lines,  "  if self.progress >= 1.0 then")
 ##   table.insert(lines,  "    self.progress = 1.0")
 ##   table.insert(lines,  "    self.current  = self.target")
 ##   table.insert(lines,  "  end")
+##   -- ★ Phase 5.4: per-property progress 更新
+##   for prop, _ in pairs(override_props) do
+##     table.insert(lines, ("  if self.duration_%s > 0.0 then"):format(prop))
+##     if has_any_delay then
+##       table.insert(lines, ("    if self.delay_%s > 0.0 then"):format(prop))
+##       table.insert(lines, ("      self.delay_%s = self.delay_%s - dt"):format(prop, prop))
+##     end
+##     if has_any_delay then
+##       table.insert(lines, "    else")
+##       table.insert(lines, ("      self.progress_%s = self.progress_%s + dt / self.duration_%s"):format(prop, prop, prop))
+##       table.insert(lines, ("      if self.progress_%s > 1.0 then self.progress_%s = 1.0 end"):format(prop, prop))
+##       table.insert(lines, "    end")
+##     else
+##       table.insert(lines, ("    self.progress_%s = self.progress_%s + dt / self.duration_%s"):format(prop, prop, prop))
+##       table.insert(lines, ("    if self.progress_%s > 1.0 then self.progress_%s = 1.0 end"):format(prop, prop))
+##     end
+##     table.insert(lines, "  else")
+##     table.insert(lines, ("    self.progress_%s = 1.0"):format(prop))
+##     table.insert(lines, "  end")
+##   end
 ##   table.insert(lines,  "end")
-## 
-##   -- get_t
+##
+##   -- ★ Phase 5.4: get_t — 从 NEBULA_EASINGS 注册表生成分支
+##   -- 只生成当前 Visual 实际使用的 easing 分支
+##   local used_codes = {}
+##   local seen_codes = {}
+##   for _, tr in ipairs(reg.transitions or {}) do
+##     local ename = tr.tween or "none"
+##     local e = NEBULA_EASINGS[ename]
+##     if e and not seen_codes[e.code] then
+##       seen_codes[e.code] = true
+##       table.insert(used_codes, e)
+##     end
+##     -- 也检查 overrides 中的 tween
+##     if tr.overrides then
+##       for _, ov in pairs(tr.overrides) do
+##         local ov_ename = ov.tween or ename
+##         local ov_e = NEBULA_EASINGS[ov_ename]
+##         if ov_e and not seen_codes[ov_e.code] then
+##           seen_codes[ov_e.code] = true
+##           table.insert(used_codes, ov_e)
+##         end
+##       end
+##     end
+##   end
 ##   table.insert(lines, ("function %s:get_t(): float32"):format(sm))
 ##   table.insert(lines,  "  local t = self.progress")
-##   table.insert(lines,  "  if self.tween == 1 then return ease_out(t) end")
-##   table.insert(lines,  "  if self.tween == 2 then return ease_in(t) end")
+##   for _, entry in ipairs(used_codes) do
+##     if entry.code ~= 0 then  -- 0 = linear，fallthrough to return t
+##       table.insert(lines, ("  if self.tween == %d then return %s end"):format(
+##         entry.code, entry.nelua_expr:gsub("%%t", "t")))
+##     end
+##   end
 ##   table.insert(lines,  "  return t")
 ##   table.insert(lines,  "end")
-## 
+##
+##   -- ★ Phase 5.4: per-property get_t_<prop> 方法
+##   for prop, _ in pairs(override_props) do
+##     table.insert(lines, ("function %s:get_t_%s(): float32"):format(sm, prop))
+##     table.insert(lines, ("  local t = self.progress_%s"):format(prop))
+##     for _, entry in ipairs(used_codes) do
+##       if entry.code ~= 0 then
+##         table.insert(lines, ("  if self.tween_%s == %d then return %s end"):format(
+##           prop, entry.code, entry.nelua_expr:gsub("%%t", "t")))
+##       end
+##     end
+##     table.insert(lines, "  return t")
+##     table.insert(lines, "end")
+##   end
+##
+##   -- ★ Phase 5.4: 将 override_props 附加到 reg 供 gen_update_for 使用
+##   reg._override_props = override_props
+##
 ##   return table.concat(lines, "\n")
 ## end
 ##
@@ -944,22 +1141,31 @@
 ## local function gen_update_for(base, reg, all_props)
 ##   local ctx = base .. "Context"
 ##   local lines = {}
-## 
+##   local override_props = reg._override_props or {}
+##
 ##   table.insert(lines, ("-- [update] %s:update (Phase 2.4: delegates to process_input)"):format(ctx))
 ##   table.insert(lines, ("function %s:update(input: *NebulaInputState, dt: float32): void"):format(ctx))
 ##   table.insert(lines, "  self:process_input(input)")
 ##   table.insert(lines, "  self.sm:update(dt)")
 ##   table.insert(lines, "  local t = self.sm:get_t()")
-## 
+##
 ##   for _, p in ipairs(all_props) do
 ##     local lerp = LERP_FN_MAP[p.type]
 ##     if lerp then
 ##       local fn = ("%s_get_%s"):format(ctx, p.name)
-##       table.insert(lines, ("  self.current_%s = %s(%s(&self.visual, self.sm.current), %s(&self.visual, self.sm.target), t)"):format(
-##         p.name, lerp, fn, fn))
+##       -- ★ Phase 5.4: 如果此属性有 per-property override，使用独立的 t
+##       if override_props[p.name] then
+##         table.insert(lines, ("  do local t_%s = self.sm:get_t_%s()"):format(p.name, p.name))
+##         table.insert(lines, ("  self.current_%s = %s(%s(&self.visual, self.sm.current), %s(&self.visual, self.sm.target), t_%s)"):format(
+##           p.name, lerp, fn, fn, p.name))
+##         table.insert(lines, "  end")
+##       else
+##         table.insert(lines, ("  self.current_%s = %s(%s(&self.visual, self.sm.current), %s(&self.visual, self.sm.target), t)"):format(
+##           p.name, lerp, fn, fn))
+##       end
 ##     end
 ##   end
-## 
+##
 ##   table.insert(lines, "end")
 ##   return table.concat(lines, "\n")
 ## end

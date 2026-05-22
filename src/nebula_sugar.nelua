@@ -152,6 +152,21 @@
 ## -- spec 字段与 nebula_annotate 完全兼容。额外行为：
 ## --   · states 缺省时，从 primitives 的 state_transitions 自动推导
 ## --   · transitions 缺省时，自动生成（基于已推导的 states）
+## -- ★ Phase 5.4: 动画默认值表
+## -- sugar 推导 transitions 时自动注入 duration/tween。
+## -- 用户可在 require "nebula" 后覆盖：
+## --   ##[[ NEBULA_ANIM_DEFAULTS.hover_duration = 0.2 ]]
+## --   ##[[ NEBULA_ANIM_DEFAULTS.hover_tween = "ease_out_cubic" ]]
+## --   ##[[ NEBULA_ANIM_DEFAULTS.press_duration = 0.0 ]]
+## NEBULA_ANIM_DEFAULTS = NEBULA_ANIM_DEFAULTS or {
+##   hover_duration = 0.12,
+##   hover_tween    = "ease_out",
+##   press_duration = 0.06,
+##   press_tween    = "ease_out",
+##   leave_duration = 0.15,
+##   leave_tween    = "ease_out",
+## }
+##
 ## function nebula_component(type_name, spec)
 ##   spec = spec or {}
 ##   -- 自动推导 states（如果用户未显式指定）
@@ -165,14 +180,24 @@
 ##     local transitions = {}
 ##     for i = 2, #spec.states do
 ##       local st = spec.states[i]
+##       -- ★ Phase 5.4: 注入动画默认值
+##       local is_press = (st == "pressed")
+##       local enter_dur   = is_press and NEBULA_ANIM_DEFAULTS.press_duration or NEBULA_ANIM_DEFAULTS.hover_duration
+##       local enter_tween = is_press and NEBULA_ANIM_DEFAULTS.press_tween   or NEBULA_ANIM_DEFAULTS.hover_tween
+##       local leave_dur   = NEBULA_ANIM_DEFAULTS.leave_duration
+##       local leave_tween = NEBULA_ANIM_DEFAULTS.leave_tween
 ##       -- 生成 default <-> state 的双向转换
 ##       table.insert(transitions, {
 ##         from = "default", to = st,
 ##         on = st .. "_enter",
+##         duration = enter_dur,
+##         tween    = enter_tween,
 ##       })
 ##       table.insert(transitions, {
 ##         from = st, to = "default",
 ##         on = st .. "_leave",
+##         duration = leave_dur,
+##         tween    = leave_tween,
 ##       })
 ##     end
 ##     spec.transitions = transitions
