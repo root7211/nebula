@@ -71,26 +71,72 @@ require "nebula_builtins"
 ##   local init_code = table.concat(init_lines, "\n")
 ##   local frame_code = table.concat(frame_lines, "\n")
 ##
-##   local src = ([[local function main(): int32
+##   -- ★ WASM support: generate async callback + globals for emscripten_set_main_loop
+##   -- Native: blocking while loop
+##   local wasm_frame_fn = "_wasm_" .. app_type:lower() .. "_frame"
+##   local wasm_renderer_var = "_wasm_" .. app_type:lower() .. "_renderer"
+##   local wasm_app_var = "_wasm_" .. app_type:lower() .. "_app"
+##   local wasm_input_var = "_wasm_" .. app_type:lower() .. "_input"
+##   local wasm_prev_time_var = "_wasm_" .. app_type:lower() .. "_prev_time"
+##
+##   local src = ([[
+## -- ★ WASM async frame callback (browser-compatible)
+## ## if NEBULA_TARGET == 'wasm' then
+## global %s: *NebulaRenderer = nilptr
+## global %s: *%s = nilptr
+## global %s: NebulaInputState
+## global %s: float64 = 0.0
+##
+## global function %s(): void
+##   glfwPollEvents()
+##   local now = glfwGetTime()
+##   local dt = (@float32)(now - %s)
+##   %s = now
+##   nebula_collect_input(_nebula_window, &%s, dt)
+## %s
+##   nebula_frame_render(%s, %s, &%s, dt, %.2f, %.2f, %.2f)
+## end
+## ## end
+##
+## local function main(): int32
 ##   local renderer: NebulaRenderer
 ##   local app: %s
 ##   if not nebula_init(&renderer, &app, "%s", %d, %d) then
 ##     return 1
 ##   end
 ## %s
+## ## if NEBULA_TARGET == 'wasm' then
+##   %s = &renderer
+##   %s = &app
+##   %s = glfwGetTime()
+##   emscripten_set_main_loop(%s, 0, 1)
+## ## else
 ##   local input: NebulaInputState
 ##   while not nebula_should_close() do
 ##     local dt = nebula_frame_begin(&input)
 ## %s
 ##     nebula_frame_render(&renderer, &app, &input, dt, %.2f, %.2f, %.2f)
 ##   end
+## ## end
 ##   app:deinit()
 ##   nebula_shutdown(&renderer)
 ##   return 0
 ## end
 ## main()]]):format(
+##     wasm_renderer_var, wasm_app_var, app_type,
+##     wasm_input_var, wasm_prev_time_var,
+##     wasm_frame_fn,
+##     wasm_prev_time_var,
+##     wasm_prev_time_var,
+##     wasm_input_var,
+##     frame_code,
+##     wasm_renderer_var, wasm_app_var, wasm_input_var,
+##     bg_r, bg_g, bg_b,
 ##     app_type, title, width, height,
 ##     init_code,
+##     wasm_renderer_var, wasm_app_var,
+##     wasm_prev_time_var,
+##     wasm_frame_fn,
 ##     frame_code,
 ##     bg_r, bg_g, bg_b
 ##   )
