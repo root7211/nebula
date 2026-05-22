@@ -2,47 +2,25 @@
 -- login_v2_demo.nelua
 -- Nebula GUI Compiler — Phase 5.4
 --
--- ★ 精美登录界面演示 — L2 声明式 API
+-- 精美登录界面演示 — L2 声明式 API
 --
 -- 设计：深色主题 + 几何 Logo + 卡片式布局
---   · 卡片：360×460，圆角 20，微妙边框
---   · Logo：80×80 圆角矩形（品牌标识区）
---   · 标题栏：蓝色分隔线
---   · 输入框：hover 变亮 + focus 蓝色边框
---   · 复选框："记住我"
---   · 登录按钮：hover 提亮 + press 下沉反馈
---
--- 对比 login_demo（Phase 3.9 L0 手动 API）：
---   · 代码量从 ~180 行降至 ~80 行
---   · 使用 nebula_visual / nebula_app / nebula_main 声明式 API
---   · 布局从手动坐标改为 init_themed 自动填充
+--   卡片 360x460 圆角 20，Logo 80x80 蓝色方块，hover/focus 交互动画
 -- =============================================================================
 require "nebula"
 
 -- =============================================================================
--- Visual 类型声明（L2 Sugar：从 primitives 自动推导 states/transitions/record）
+-- Visual 类型声明（L2 Sugar）
 -- =============================================================================
-
--- 卡片背景（无交互，纯装饰）
-## nebula_visual("CardVisual", { primitives = {} })
-
--- Logo 区域（纯装饰，hover 微亮）
-## nebula_visual("LogoVisual", { primitives = {"hoverable"} })
-
--- 标题栏（纯装饰，无交互）
-## nebula_visual("TitleBarVisual", { primitives = {} })
-
--- 输入框（hover 变亮 + focus 蓝色边框）
-## nebula_visual("InputVisual", { primitives = {"hoverable", "clickable", "focusable", "editable"} })
-
--- 复选框（点击切换）
-## nebula_visual("CheckboxVisual", { primitives = {"hoverable", "clickable", "toggleable"} })
-
--- 登录按钮（hover 提亮 + press 下沉）
+## nebula_visual("CardVisual",    { primitives = {} })
+## nebula_visual("LogoVisual",    { primitives = {"hoverable"} })
+## nebula_visual("TitleBarVisual",{ primitives = {} })
+## nebula_visual("InputVisual",   { primitives = {"hoverable", "clickable", "focusable", "editable"} })
+## nebula_visual("CheckboxVisual",{ primitives = {"hoverable", "clickable", "toggleable"} })
 ## nebula_visual("LoginButtonVisual", { primitives = {"hoverable", "clickable"} })
 
 -- =============================================================================
--- App 编排：声明所有组件
+-- App 编排
 -- =============================================================================
 ## nebula_app("LoginApp", {
 ##   components = {
@@ -60,114 +38,120 @@ require "nebula"
 ## })
 
 -- =============================================================================
--- 主程序入口（nebula_main 自动生成完整 main 函数）
+-- 主程序
 -- =============================================================================
 ## nebula_main("LoginApp", {
-##   title = "Nebula — Login",
+##   title = "Nebula - Login",
 ##   width = 800, height = 600,
 ##   bg_r = 0.05, bg_g = 0.05, bg_b = 0.07,
 ##   on_init = function(app)
 ##     return {
-##       -- 卡片：居中 360x460，圆角 20
-##       app .. ".card:init_themed(Vec2{x=220,y=70}, Vec2{x=360,y=460}, 20.0)",
-##       -- 重写卡片颜色（暗色主题，微妙边框）
-##       app .. ".card.default_bg_color     = Color{r=0.10,g=0.10,b=0.12,a=1.0}",
-##       app .. ".card.default_border_color = Color{r=0.20,g=0.20,b=0.24,a=1.0}",
-##       app .. ".card.default_border_width = 1.0",
+##       -- 卡片：暗色主题
+##       app .. ".card:init(CardVisual{",
+##       "    pos=Vec2{x=220,y=70}, size=Vec2{x=360,y=460}, radius=20.0,",
+##       "    default_bg_color=Color{r=0.10,g=0.10,b=0.12,a=1.0},",
+##       "    default_border_color=Color{r=0.20,g=0.20,b=0.24,a=1.0},",
+##       "    default_border_width=1.0})",
 ##
-##       -- Logo 区域：80x80 圆角矩形
-##       app .. ".logo:init_themed(Vec2{x=360,y=90}, Vec2{x=80,y=80}, 16.0)",
-##       app .. ".logo.default_bg_color = Color{r=0.25,g=0.55,b=1.00,a=1.0}",
-##       app .. ".logo.hovered_bg_color = Color{r=0.35,g=0.65,b=1.00,a=1.0}",
+##       -- Logo：蓝色几何方块
+##       app .. ".logo:init(LogoVisual{",
+##       "    pos=Vec2{x=360,y=90}, size=Vec2{x=80,y=80}, radius=16.0,",
+##       "    default_bg_color=Color{r=0.25,g=0.55,b=1.00,a=1.0},",
+##       "    hovered_bg_color=Color{r=0.35,g=0.65,b=1.00,a=1.0}})",
 ##
-##       -- 标题栏：蓝色短横线（代替文字标题）
-##       app .. ".title_bar:init_themed(Vec2{x=310,y=190}, Vec2{x=180,y=4}, 2.0)",
-##       app .. ".title_bar.default_bg_color = Color{r=0.50,g=0.75,b=1.00,a=0.8}",
+##       -- 标题栏（蓝色短横线）
+##       app .. ".title_bar:init(TitleBarVisual{",
+##       "    pos=Vec2{x=310,y=190}, size=Vec2{x=180,y=4}, radius=2.0,",
+##       "    default_bg_color=Color{r=0.50,g=0.75,b=1.00,a=0.8}})",
 ##
-##       -- 副标题栏：更细的灰色线
-##       app .. ".subtitle_bar:init_themed(Vec2{x=330,y=200}, Vec2{x=140,y=2}, 1.0)",
-##       app .. ".subtitle_bar.default_bg_color = Color{r=0.30,g=0.30,b=0.36,a=0.6}",
+##       -- 副标题栏
+##       app .. ".subtitle_bar:init(TitleBarVisual{",
+##       "    pos=Vec2{x=330,y=200}, size=Vec2{x=140,y=2}, radius=1.0,",
+##       "    default_bg_color=Color{r=0.30,g=0.30,b=0.36,a=0.6}})",
 ##
 ##       -- 邮箱输入框
-##       app .. ".email_input:init_themed(Vec2{x=250,y=228}, Vec2{x=300,y=48}, 10.0)",
-##       app .. ".email_input.default_bg_color     = Color{r=0.14,g=0.14,b=0.16,a=1.0}",
-##       app .. ".email_input.default_border_color = Color{r=0.28,g=0.28,b=0.34,a=1.0}",
-##       app .. ".email_input.default_border_width = 1.0",
-##       app .. ".email_input.hovered_bg_color     = Color{r=0.16,g=0.16,b=0.19,a=1.0}",
-##       app .. ".email_input.hovered_border_color = Color{r=0.45,g=0.45,b=0.55,a=1.0}",
-##       app .. ".email_input.hovered_border_width = 1.5",
-##       app .. ".email_input.focused_bg_color     = Color{r=0.12,g=0.14,b=0.20,a=1.0}",
-##       app .. ".email_input.focused_border_color = Color{r=0.40,g=0.65,b=1.00,a=1.0}",
-##       app .. ".email_input.focused_border_width = 2.0",
+##       app .. ".email_input:init(InputVisual{",
+##       "    pos=Vec2{x=250,y=228}, size=Vec2{x=300,y=48}, radius=10.0,",
+##       "    default_bg_color=Color{r=0.14,g=0.14,b=0.16,a=1.0},",
+##       "    default_border_color=Color{r=0.28,g=0.28,b=0.34,a=1.0},",
+##       "    default_border_width=1.0,",
+##       "    hovered_bg_color=Color{r=0.16,g=0.16,b=0.19,a=1.0},",
+##       "    hovered_border_color=Color{r=0.45,g=0.45,b=0.55,a=1.0},",
+##       "    hovered_border_width=1.5,",
+##       "    focused_bg_color=Color{r=0.12,g=0.14,b=0.20,a=1.0},",
+##       "    focused_border_color=Color{r=0.40,g=0.65,b=1.00,a=1.0},",
+##       "    focused_border_width=2.0})",
 ##       app .. ".email_input.component_id = 1",
 ##
 ##       -- 密码输入框
-##       app .. ".password_input:init_themed(Vec2{x=250,y=288}, Vec2{x=300,y=48}, 10.0)",
-##       app .. ".password_input.default_bg_color     = Color{r=0.14,g=0.14,b=0.16,a=1.0}",
-##       app .. ".password_input.default_border_color = Color{r=0.28,g=0.28,b=0.34,a=1.0}",
-##       app .. ".password_input.default_border_width = 1.0",
-##       app .. ".password_input.hovered_bg_color     = Color{r=0.16,g=0.16,b=0.19,a=1.0}",
-##       app .. ".password_input.hovered_border_color = Color{r=0.45,g=0.45,b=0.55,a=1.0}",
-##       app .. ".password_input.hovered_border_width = 1.5",
-##       app .. ".password_input.focused_bg_color     = Color{r=0.12,g=0.14,b=0.20,a=1.0}",
-##       app .. ".password_input.focused_border_color = Color{r=0.40,g=0.65,b=1.00,a=1.0}",
-##       app .. ".password_input.focused_border_width = 2.0",
+##       app .. ".password_input:init(InputVisual{",
+##       "    pos=Vec2{x=250,y=288}, size=Vec2{x=300,y=48}, radius=10.0,",
+##       "    default_bg_color=Color{r=0.14,g=0.14,b=0.16,a=1.0},",
+##       "    default_border_color=Color{r=0.28,g=0.28,b=0.34,a=1.0},",
+##       "    default_border_width=1.0,",
+##       "    hovered_bg_color=Color{r=0.16,g=0.16,b=0.19,a=1.0},",
+##       "    hovered_border_color=Color{r=0.45,g=0.45,b=0.55,a=1.0},",
+##       "    hovered_border_width=1.5,",
+##       "    focused_bg_color=Color{r=0.12,g=0.14,b=0.20,a=1.0},",
+##       "    focused_border_color=Color{r=0.40,g=0.65,b=1.00,a=1.0},",
+##       "    focused_border_width=2.0})",
 ##       app .. ".password_input.component_id = 2",
 ##
 ##       -- 记住我复选框
-##       app .. ".remember_check:init_themed(Vec2{x=250,y=352}, Vec2{x=20,y=20}, 4.0)",
-##       app .. ".remember_check.default_bg_color     = Color{r=0.14,g=0.14,b=0.16,a=1.0}",
-##       app .. ".remember_check.default_border_color = Color{r=0.30,g=0.30,b=0.38,a=1.0}",
-##       app .. ".remember_check.default_border_width = 1.5",
-##       app .. ".remember_check.hovered_bg_color     = Color{r=0.18,g=0.18,b=0.22,a=1.0}",
-##       app .. ".remember_check.hovered_border_color = Color{r=0.50,g=0.50,b=0.60,a=1.0}",
-##       app .. ".remember_check.hovered_border_width = 1.5",
-##       app .. ".remember_check.pressed_bg_color     = Color{r=0.20,g=0.40,b=0.85,a=1.0}",
-##       app .. ".remember_check.pressed_border_color = Color{r=0.40,g=0.65,b=1.00,a=1.0}",
-##       app .. ".remember_check.pressed_border_width = 2.0",
+##       app .. ".remember_check:init(CheckboxVisual{",
+##       "    pos=Vec2{x=250,y=352}, size=Vec2{x=20,y=20}, radius=4.0,",
+##       "    default_bg_color=Color{r=0.14,g=0.14,b=0.16,a=1.0},",
+##       "    default_border_color=Color{r=0.30,g=0.30,b=0.38,a=1.0},",
+##       "    default_border_width=1.5,",
+##       "    hovered_bg_color=Color{r=0.18,g=0.18,b=0.22,a=1.0},",
+##       "    hovered_border_color=Color{r=0.50,g=0.50,b=0.60,a=1.0},",
+##       "    hovered_border_width=1.5,",
+##       "    pressed_bg_color=Color{r=0.20,g=0.40,b=0.85,a=1.0},",
+##       "    pressed_border_color=Color{r=0.40,g=0.65,b=1.00,a=1.0},",
+##       "    pressed_border_width=2.0})",
 ##
-##       -- 登录按钮：蓝色主色调
-##       app .. ".login_btn:init_themed(Vec2{x=250,y=390}, Vec2{x=300,y=52}, 12.0)",
-##       app .. ".login_btn.default_bg_color     = Color{r=0.20,g=0.50,b=1.00,a=1.0}",
-##       app .. ".login_btn.default_border_color = Color{r=0.35,g=0.65,b=1.00,a=0.5}",
-##       app .. ".login_btn.default_border_width = 0.0",
-##       app .. ".login_btn.hovered_bg_color     = Color{r=0.30,g=0.60,b=1.00,a=1.0}",
-##       app .. ".login_btn.hovered_border_color = Color{r=0.50,g=0.75,b=1.00,a=0.8}",
-##       app .. ".login_btn.hovered_border_width = 0.0",
-##       app .. ".login_btn.pressed_bg_color     = Color{r=0.12,g=0.38,b=0.88,a=1.0}",
-##       app .. ".login_btn.pressed_border_color = Color{r=0.60,g=0.85,b=1.00,a=1.0}",
-##       app .. ".login_btn.pressed_border_width = 2.0",
+##       -- 登录按钮（蓝色主按钮）
+##       app .. ".login_btn:init(LoginButtonVisual{",
+##       "    pos=Vec2{x=250,y=390}, size=Vec2{x=300,y=52}, radius=12.0,",
+##       "    default_bg_color=Color{r=0.20,g=0.50,b=1.00,a=1.0},",
+##       "    default_border_color=Color{r=0.35,g=0.65,b=1.00,a=0.5},",
+##       "    default_border_width=0.0,",
+##       "    hovered_bg_color=Color{r=0.30,g=0.60,b=1.00,a=1.0},",
+##       "    hovered_border_color=Color{r=0.50,g=0.75,b=1.00,a=0.8},",
+##       "    hovered_border_width=0.0,",
+##       "    pressed_bg_color=Color{r=0.12,g=0.38,b=0.88,a=1.0},",
+##       "    pressed_border_color=Color{r=0.60,g=0.85,b=1.00,a=1.0},",
+##       "    pressed_border_width=2.0})",
 ##
 ##       -- 分隔线
-##       app .. ".divider:init_themed(Vec2{x=250,y=456}, Vec2{x=300,y=1}, 0.5)",
-##       app .. ".divider.default_bg_color = Color{r=0.22,g=0.22,b=0.28,a=0.8}",
+##       app .. ".divider:init(TitleBarVisual{",
+##       "    pos=Vec2{x=250,y=456}, size=Vec2{x=300,y=1}, radius=0.5,",
+##       "    default_bg_color=Color{r=0.22,g=0.22,b=0.28,a=0.8}})",
 ##
-##       -- "忘记密码" 按钮（做成次要按钮样式）
-##       app .. ".forgot_btn:init_themed(Vec2{x=250,y=468}, Vec2{x=300,y=40}, 8.0)",
-##       app .. ".forgot_btn.default_bg_color     = Color{r=0.10,g=0.10,b=0.12,a=0.0}",
-##       app .. ".forgot_btn.default_border_color = Color{r=0.30,g=0.30,b=0.36,a=0.0}",
-##       app .. ".forgot_btn.default_border_width = 0.0",
-##       app .. ".forgot_btn.hovered_bg_color     = Color{r=0.20,g=0.20,b=0.26,a=0.4}",
-##       app .. ".forgot_btn.hovered_border_color = Color{r=0.40,g=0.40,b=0.50,a=0.0}",
-##       app .. ".forgot_btn.hovered_border_width = 0.0",
-##       app .. ".forgot_btn.pressed_bg_color     = Color{r=0.15,g=0.15,b=0.20,a=0.6}",
-##       app .. ".forgot_btn.pressed_border_color = Color{r=0.50,g=0.50,b=0.60,a=0.0}",
-##       app .. ".forgot_btn.pressed_border_width = 0.0",
+##       -- 忘记密码（幽灵按钮）
+##       app .. ".forgot_btn:init(LoginButtonVisual{",
+##       "    pos=Vec2{x=250,y=468}, size=Vec2{x=300,y=40}, radius=8.0,",
+##       "    default_bg_color=Color{r=0.10,g=0.10,b=0.12,a=0.0},",
+##       "    default_border_color=Color{r=0.30,g=0.30,b=0.36,a=0.0},",
+##       "    default_border_width=0.0,",
+##       "    hovered_bg_color=Color{r=0.20,g=0.20,b=0.26,a=0.4},",
+##       "    hovered_border_color=Color{r=0.40,g=0.40,b=0.50,a=0.0},",
+##       "    hovered_border_width=0.0,",
+##       "    pressed_bg_color=Color{r=0.15,g=0.15,b=0.20,a=0.6},",
+##       "    pressed_border_color=Color{r=0.50,g=0.50,b=0.60,a=0.0},",
+##       "    pressed_border_width=0.0})",
 ##     }
 ##   end,
 ##   on_frame = function(app)
 ##     return {
-##       -- 点击登录按钮：打印登录信息
 ##       "if " .. app .. ".login_btn.click.just_clicked then",
-##       "  printf(\"[Login] Login button clicked\\n\")",
+##       '  printf("[Login] Login button clicked\\n")',
 ##       "end",
-##       -- 点击忘记密码
 ##       "if " .. app .. ".forgot_btn.click.just_clicked then",
-##       "  printf(\"[Login] Forgot password clicked\\n\")",
+##       '  printf("[Login] Forgot password clicked\\n")',
 ##       "end",
-##       -- Enter 键提交
 ##       "if input.key_pressed == NebulaKey.Enter then",
-##       "  printf(\"[Login] Enter pressed — submit form\\n\")",
+##       '  printf("[Login] Enter pressed -- submit form\\n")',
 ##       "end",
 ##     }
 ##   end,
