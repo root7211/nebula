@@ -1,6 +1,6 @@
 # 文档状态索引
 
-**更新日期**：2026-05-21
+**更新日期**：2026-05-22
 
 本文档集中标注 `docs/` 下所有规划文档的当前状态。
 
@@ -29,6 +29,7 @@
 | `PLAN_TERM_DEMO_V2.md` | Phase 4.X-T2 | 归档 | Terminal v2 sugar 方案，已完成 |
 | `REPORT_PHASE4_2_2_BENCH.md` | Phase 4.2.2 | 归档 | Storage Buffer 基准测试报告，PASSED |
 | `PLAN_SYNTAX_UNIFICATION.md` | Phase 4.6 | 归档 | 语法统一化方案，已完成 |
+| `PLAN_PHASE5_3_RENDER_REGISTRY.md` | Phase 5.3 | 归档 | 渲染侧可编程注册表，Step 1-5 已完成（107 条断言全绿） |
 
 ## 活跃（仍在指导开发）
 
@@ -42,8 +43,7 @@
 | `WASM_TARGET_ANALYSIS.md` | WebAssembly 可行性分析 — WASM 渲染问题修复前持续相关 |
 | `PLAN_ARCHITECTURE_AUDIT.md` | 架构审计与整改方案 — 全代码库审计发现的 P0-P3 问题清单与五梯队实施计划 |
 | `PLAN_PHASE5_1_ECOSYSTEM_CICD.md` | Phase 5.1 生态与 CI/CD — 5 梯队：CI/CD 强化 → 文档工程 → WASM 生态 → 包管理 → 社区治理 |
-| `PLAN_PHASE5_2_SUGAR_FIX.md` | Phase 5.2 语法糖体系修复 — 5 梯队：API 统一 → 全局状态消除 → 生成代码预览 → Builtin AST 重构 → sugar 深度完善 |
-| `PLAN_PHASE5_3_RENDER_REGISTRY.md` | Phase 5.3 渲染侧可编程注册表 — SDF 形状注册表 + 着色器组合器注册表，与交互侧 NEBULA_PRIMITIVES 对称 |
+| `PLAN_PHASE5_2_SUGAR_FIX.md` | Phase 5.2 语法糖体系修复 — R1/R2/R4/R5 已完成，R3（生成代码预览）deferred |
 | `PLAN_PHASE5_4_ANIMATION.md` | Phase 5.4 声明式动画系统深化 — NEBULA_EASINGS 注册表 + per-property override + delay + sugar 动画默认值 |
 | `PLAN_PHASE5_OMNISCIENT_GRAPH.md` | Phase 5.0 全知图与端到端特化路径 — ✅ 已完成（S1a-S5 五个梯队，440+ 断言全绿） |
 
