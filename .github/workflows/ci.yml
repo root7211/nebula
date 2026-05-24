@@ -311,10 +311,38 @@ jobs:
       - name: Build demos for WASM
         run: |
           WASM_DEMOS="button_v2_demo layout_demo form_demo text_editor_demo_v3 minimal_editor_demo login_v2_demo"
+          FAIL_COUNT=0
           for demo in $WASM_DEMOS; do
             echo "--- Building $demo ---"
-            bash build_wasm.sh "$demo" || echo "::warning::$demo build failed, skipping"
+            if bash build_wasm.sh "$demo"; then
+              echo "[PASS] $demo"
+            else
+              echo "::error::$demo WASM build failed"
+              FAIL_COUNT=$((FAIL_COUNT + 1))
+            fi
           done
+          if [ "$FAIL_COUNT" -gt 0 ]; then
+            echo "::error::$FAIL_COUNT demo(s) failed to build. Deploy aborted."
+            exit 1
+          fi
+
+      - name: Verify WASM build outputs
+        run: |
+          MISSING=0
+          for demo in $WASM_DEMOS; do
+            for ext in js wasm data; do
+              if [ ! -f "build/wasm/${demo}.${ext}" ]; then
+                echo "::error::Missing build/wasm/${demo}.${ext}"
+                MISSING=$((MISSING + 1))
+              fi
+            done
+          done
+          if [ "$MISSING" -gt 0 ]; then
+            echo "::error::$MISSING expected file(s) missing. Deploy aborted."
+            exit 1
+          fi
+          echo "[PASS] All WASM build outputs verified"
+          ls -lh build/wasm/
 
       - name: Prepare Pages site
         run: |
