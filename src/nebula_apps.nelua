@@ -98,6 +98,7 @@ require "nebula_builtins"
 ##   %s = now
 ##   nebula_collect_input(_nebula_window, &%s, dt)
 ##   local app: *%s = %s
+##   local input = &%s
 ## %s
 ##   nebula_frame_render(%s, app, &%s, dt, %.2f, %.2f, %.2f)
 ## end]]):format(
@@ -108,6 +109,7 @@ require "nebula_builtins"
 ##       wasm_prev_time_var,
 ##       wasm_input_var,
 ##       app_type, wasm_app_var,
+##       wasm_input_var,
 ##       frame_code,
 ##       wasm_renderer_var, wasm_input_var,
 ##       bg_r, bg_g, bg_b
