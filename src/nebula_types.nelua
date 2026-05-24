@@ -13,7 +13,7 @@
 -- =============================================================================
 
 -- Note: `math` is a Nelua standard library module providing math functions.
-import "math"
+require "math"
 
 -- -----------------------------------------------------------------------------
 -- 语义类型系统（Semantic Type System）
