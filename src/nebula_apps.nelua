@@ -73,15 +73,19 @@ require "nebula_builtins"
 ##
 ##   -- ★ WASM support: generate async callback + globals for emscripten_set_main_loop
 ##   -- Native: blocking while loop
+##   -- Resolve platform at Lua level (not via nested ## if) so aster.parse() sees
+##   -- only plain Nelua code without preprocessor directives.
+##   local is_wasm = (NEBULA_TARGET == 'wasm')
 ##   local wasm_frame_fn = "_wasm_" .. app_type:lower() .. "_frame"
 ##   local wasm_renderer_var = "_wasm_" .. app_type:lower() .. "_renderer"
 ##   local wasm_app_var = "_wasm_" .. app_type:lower() .. "_app"
 ##   local wasm_input_var = "_wasm_" .. app_type:lower() .. "_input"
 ##   local wasm_prev_time_var = "_wasm_" .. app_type:lower() .. "_prev_time"
 ##
-##   local src = ([[
-## -- ★ WASM async frame callback (browser-compatible)
-## ## if NEBULA_TARGET == 'wasm' then
+##   -- Build WASM globals + callback (only emitted when targeting WASM)
+##   local wasm_globals = ""
+##   if is_wasm then
+##     wasm_globals = ([[
 ## global %s: *NebulaRenderer = nilptr
 ## global %s: *%s = nilptr
 ## global %s: NebulaInputState
@@ -95,9 +99,46 @@ require "nebula_builtins"
 ##   nebula_collect_input(_nebula_window, &%s, dt)
 ## %s
 ##   nebula_frame_render(%s, %s, &%s, dt, %.2f, %.2f, %.2f)
-## end
-## ## end
+## end]]):format(
+##       wasm_renderer_var, wasm_app_var, app_type,
+##       wasm_input_var, wasm_prev_time_var,
+##       wasm_frame_fn,
+##       wasm_prev_time_var,
+##       wasm_prev_time_var,
+##       wasm_input_var,
+##       frame_code,
+##       wasm_renderer_var, wasm_app_var, wasm_input_var,
+##       bg_r, bg_g, bg_b
+##     )
+##   end
 ##
+##   -- Build the loop body: WASM uses emscripten_set_main_loop, native uses while loop
+##   local loop_body
+##   if is_wasm then
+##     loop_body = ([[
+##   %s = &renderer
+##   %s = &app
+##   %s = glfwGetTime()
+##   emscripten_set_main_loop(%s, 0, 1)]]):format(
+##       wasm_renderer_var, wasm_app_var,
+##       wasm_prev_time_var,
+##       wasm_frame_fn
+##     )
+##   else
+##     loop_body = ([[
+##   local input: NebulaInputState
+##   while not nebula_should_close() do
+##     local dt = nebula_frame_begin(&input)
+## %s
+##     nebula_frame_render(&renderer, &app, &input, dt, %.2f, %.2f, %.2f)
+##   end]]):format(
+##       frame_code,
+##       bg_r, bg_g, bg_b
+##     )
+##   end
+##
+##   local src = ([[
+## %s
 ## local function main(): int32
 ##   local renderer: NebulaRenderer
 ##   local app: %s
@@ -105,40 +146,16 @@ require "nebula_builtins"
 ##     return 1
 ##   end
 ## %s
-## ## if NEBULA_TARGET == 'wasm' then
-##   %s = &renderer
-##   %s = &app
-##   %s = glfwGetTime()
-##   emscripten_set_main_loop(%s, 0, 1)
-## ## else
-##   local input: NebulaInputState
-##   while not nebula_should_close() do
-##     local dt = nebula_frame_begin(&input)
 ## %s
-##     nebula_frame_render(&renderer, &app, &input, dt, %.2f, %.2f, %.2f)
-##   end
-## ## end
 ##   app:deinit()
 ##   nebula_shutdown(&renderer)
 ##   return 0
 ## end
 ## main()]]):format(
-##     wasm_renderer_var, wasm_app_var, app_type,
-##     wasm_input_var, wasm_prev_time_var,
-##     wasm_frame_fn,
-##     wasm_prev_time_var,
-##     wasm_prev_time_var,
-##     wasm_input_var,
-##     frame_code,
-##     wasm_renderer_var, wasm_app_var, wasm_input_var,
-##     bg_r, bg_g, bg_b,
+##     wasm_globals,
 ##     app_type, title, width, height,
 ##     init_code,
-##     wasm_renderer_var, wasm_app_var,
-##     wasm_prev_time_var,
-##     wasm_frame_fn,
-##     frame_code,
-##     bg_r, bg_g, bg_b
+##     loop_body
 ##   )
 ##
 ##   -- ★ Phase 5.2 R3: cache generated main source
