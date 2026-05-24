@@ -86,8 +86,8 @@ require "nebula_builtins"
 ##   local wasm_globals = ""
 ##   if is_wasm then
 ##     wasm_globals = ([[
-## global %s: *NebulaRenderer = nilptr
-## global %s: *%s = nilptr
+## global %s: NebulaRenderer
+## global %s: %s
 ## global %s: NebulaInputState
 ## global %s: float64 = 0.0
 ##
@@ -97,10 +97,8 @@ require "nebula_builtins"
 ##   local dt = (@float32)(now - %s)
 ##   %s = now
 ##   nebula_collect_input(_nebula_window, &%s, dt)
-##   local app: %s = (@*[0]%s)(%s) [0]
 ## %s
-##   nebula_frame_render(%s, &app, &%s, dt, %.2f, %.2f, %.2f)
-##   (%s) [0] = app
+##   nebula_frame_render(&%s, &%s, &%s, dt, %.2f, %.2f, %.2f)
 ## end]]):format(
 ##       wasm_renderer_var, wasm_app_var, app_type,
 ##       wasm_input_var, wasm_prev_time_var,
@@ -108,11 +106,9 @@ require "nebula_builtins"
 ##       wasm_prev_time_var,
 ##       wasm_prev_time_var,
 ##       wasm_input_var,
-##       wasm_app_var,
 ##       frame_code,
-##       wasm_renderer_var, wasm_input_var,
-##       bg_r, bg_g, bg_b,
-##       wasm_app_var
+##       wasm_renderer_var, wasm_app_var, wasm_input_var,
+##       bg_r, bg_g, bg_b
 ##     )
 ##   end
 ##
@@ -120,8 +116,8 @@ require "nebula_builtins"
 ##   local loop_body
 ##   if is_wasm then
 ##     loop_body = ([[
-##   %s = &renderer
-##   %s = &app
+##   %s = renderer
+##   %s = app
 ##   %s = glfwGetTime()
 ##   emscripten_set_main_loop(%s, 0, 1)]]):format(
 ##       wasm_renderer_var, wasm_app_var,
