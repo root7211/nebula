@@ -12,7 +12,8 @@
 --   · 数学工具：lerp_f32, lerp_color, lerp_vec2, ease_out, ease_in
 -- =============================================================================
 
--- Note: `math` is a Lua standard library module, globally available without require.
+-- Note: `math` is a Nelua standard library module providing math functions.
+import "math"
 
 -- -----------------------------------------------------------------------------
 -- 语义类型系统（Semantic Type System）
