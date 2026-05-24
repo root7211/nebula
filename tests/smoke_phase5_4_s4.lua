@@ -18,11 +18,10 @@ local fail_count = 0
 local function check(name, cond)
   if cond then
     pass_count = pass_count + 1
-  -- Note: in the actual Lua code, per-prop reset lines for transitions
-  -- WITHOUT explicit overrides are generated INSIDE the if tr.overrides
-  -- block, under a "if not (tr.overrides and tr.overrides[prop])" guard.
-  -- If a transition has NO overrides field at all, those lines are NOT
-  -- generated — the per-prop fields just keep whatever value they had.
+  else
+    fail_count = fail_count + 1
+    print("  FAIL: " .. name)
+  end
 end
 
 -- =============================================================================
