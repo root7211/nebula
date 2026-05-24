@@ -12,7 +12,7 @@
 --   · 数学工具：lerp_f32, lerp_color, lerp_vec2, ease_out, ease_in
 -- =============================================================================
 
-local math = require "math"
+-- Note: `math` is a Lua standard library module, globally available without require.
 
 -- -----------------------------------------------------------------------------
 -- 语义类型系统（Semantic Type System）
