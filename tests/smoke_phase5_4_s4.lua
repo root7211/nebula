@@ -69,7 +69,8 @@ end
 -- =============================================================================
 local function gen_transition_body(tr, has_any_delay, override_props, easing_map)
   local lines = {}
-  local code = easing_map[tr.tween or "none"] or 0
+  local code = easing_map[tr.tween or "none"]
+  code = type(code) == "table" and code.code or 0
   table.insert(lines, ("    self.duration = %s"):format(tostring(tr.duration or 0.0)))
   table.insert(lines, ("    self.tween    = %d"):format(code))
   if has_any_delay then
@@ -84,7 +85,8 @@ local function gen_transition_body(tr, has_any_delay, override_props, easing_map
     for _, prop in ipairs(sorted_ov) do
       local ov = tr.overrides[prop]
       local ov_easing = ov.tween or tr.tween or "none"
-      local ov_code = easing_map[ov_easing] or 0
+      local ov_code = easing_map[ov_easing]
+      ov_code = type(ov_code) == "table" and ov_code.code or 0
       table.insert(lines, ("    self.progress_%s = 0.0"):format(prop))
       table.insert(lines, ("    self.duration_%s = %s"):format(prop, tostring(ov.duration or tr.duration or 0.0)))
       table.insert(lines, ("    self.tween_%s    = %d"):format(prop, ov_code))
