@@ -2,7 +2,7 @@
 # =============================================================================
 # Nebula GUI Compiler — Build Script
 #
-# 当前仓库状态：Phase 4.2.2 — D-4.1-C Storage Buffer Scalability Benchmark
+# 当前仓库状态：Phase 5.4 — 声明式动画系统完成 | 149/149 断言全绿
 #
 # Usage:
 #   ./build.sh [demo_name] [options]
@@ -47,7 +47,7 @@ done
 
 # 验证 Demo 目标
 case "$DEMO_TARGET" in
-  button_demo|layout_demo|login_demo|form_demo|dynamic_list_demo|dynamic_list_v2_demo|shadow_demo|text_demo|slider_demo|scrollable_demo|dropdown_demo|multiline_editable_demo|slug_bench|cjk_text_demo|dense_text_demo|term_demo|term_demo_v2|cjk_editor_demo|dense_editor_demo|editor_with_lines_demo|button_sugar_demo|multiline_sugar_demo|json_viewer_demo|json_viewer_demo_v2|highlight_editor_demo|highlight_sugar_demo|text_editor_demo|button_v2_demo|minimal_editor_demo|text_editor_demo_v2|text_editor_demo_v3|code_browser_demo)
+  button_demo|layout_demo|login_demo|login_v2_demo|form_demo|dynamic_list_demo|dynamic_list_v2_demo|shadow_demo|text_demo|slider_demo|scrollable_demo|dropdown_demo|multiline_editable_demo|slug_bench|cjk_text_demo|dense_text_demo|term_demo|term_demo_v2|cjk_editor_demo|dense_editor_demo|editor_with_lines_demo|button_sugar_demo|multiline_sugar_demo|json_viewer_demo|json_viewer_demo_v2|highlight_editor_demo|highlight_sugar_demo|text_editor_demo|button_v2_demo|minimal_editor_demo|text_editor_demo_v2|text_editor_demo_v3|text_editor_demo_v4|counter_demo|counter_binding_demo|code_browser_demo)
     ;;
   *)
     echo "[nebula] Error: unknown demo target '$DEMO_TARGET'"

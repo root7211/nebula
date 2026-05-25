@@ -66,6 +66,9 @@ Nebula 使用 Nelua 预处理器 `## if NEBULA_TARGET == 'wasm'` 在编译期消
 | layout_demo | YES | |
 | form_demo | YES | |
 | text_demo | YES | |
+| login_v2_demo | YES | Phase 5.4 动画系统验证 |
+| text_editor_demo_v3 | YES | 19 行完整编辑器 |
+| minimal_editor_demo | YES | 最小编辑器 |
 | term_demo | NO | 需要 PTY (forkpty) |
 | term_demo_v2 | NO | 需要 PTY |
 | slug_bench | NO | 性能基准，无意义 |

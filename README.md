@@ -77,7 +77,7 @@ L0 (底层) : nebula_annotate + nebula_derive + nebula_app_begin/end ← 完全�
 
 ## 当前状态
 
-**Era III | Phase 5.4 声明式动画系统完成 | Phase 5.2 R1-R5 语法糖体系修复完成 | Code Browser Demo + CI 全量覆盖 32 demo | 编辑器 19 行极限形态 | wgpu-native v29 + 149/149 Phase 5.4 断言全绿（2026-05-25）**
+**Era II | Phase 5.4 声明式动画系统完成 | Phase 5.2 R1-R5 语法糖体系修复完成 | Code Browser Demo + CI 全量覆盖 36 demo | 编辑器 19 行极限形态 | wgpu-native v29 + 149/149 Phase 5.4 断言全绿（2026-05-25）**
 
 ### 最近完成
 
@@ -237,7 +237,11 @@ L0 (底层) : nebula_annotate + nebula_derive + nebula_app_begin/end ← 完全�
 | 4.6-I | Indirect Drawing | 规划中（文档预研，等待组件数>100 触发） | 78 |
 | 4.7 | 文本编辑器原型 | **S1-S7 已完成**（S7: text_editor_demo 全集成验收） | 85 |
 | **4.X-CB** | **Code Browser** | **已完成**（文件树 + 语法高亮编辑器 + POSIX FFI + 懒加载目录扫描 + `code_browser_demo`） | 83 |
-| 5.0 | 生态与 CI/CD | **进行中**（CI 全量覆盖 32 demo + C 单元测试 + GitHub Pages 部署；WASM editor 渲染修复待完成） | 80 |
+| **5.0** | **全知图：编译期端到端路径** | **已完成**（S1a-S5 五个梯队，440+ 断言全绿） | **92** |
+| **5.1** | **生态与 CI/CD** | **进行中**（CI 全量覆盖 36 demo + C 单元测试 + GitHub Pages 部署；WASM editor 渲染修复待完成） | 80 |
+| **5.2** | **语法糖体系修复** | **已完成**（R1-R5：API 统一 + 生成代码预览 + Builtin AST + 状态绑定 L2 + 编辑器回调） | **83** |
+| **5.3** | **渲染注册表** | **已完成**（`NEBULA_SDF_SHAPES` + `NEBULA_SHADER_COMPOSERS` 双注册表 + 107 条断言全绿） | 81 |
+| **5.4** | **声明式动画系统** | **已完成**（`NEBULA_EASINGS` 注册表 + per-property override + delay + login_v2_demo + 149 条断言全绿） | **85** |
 | **5.2-R4** | **Builtin AST 重构** | **已完成**（`builtin_factory.lua` AST 节点系统 + 5 builtin 迁移 + 84 条冒烟测试） | **83** |
 
 > 重要度评分基于五个维度加权综合评分（满分 100），详见 [`docs/PHASE_IMPORTANCE_SCORECARD.md`](docs/PHASE_IMPORTANCE_SCORECARD.md)。
@@ -393,6 +397,11 @@ nebula/
 │   ├── nebula_core.nelua         # 框架核心（derive 引擎 + nebula_visual + init_themed + nebula_app + nebula_main）
 │   ├── nebula_builtins.nelua     # 预置 Producer 工厂（line_nums / status_bar / search_bar / edit_area / term_grid）
 │   ├── nebula_apps.nelua          # 应用模板（nebula_editor_main + nebula_terminal_main）
+│   ├── nebula_constants.nelua    # 框架常量定义
+│   ├── nebula_derive_engine.nelua # 派生引擎核心
+│   ├── nebula_editor.nelua       # 编辑器专用模块
+│   ├── nebula_sugar.nelua        # 语法糖辅助
+│   ├── nebula_types.nelua        # 框架类型定义
 │   ├── app.nelua                 # App 编排 + GLFW 事件循环 + nebula_frame_begin
 │   ├── renderer.nelua            # WebGPU 渲染器
 │   ├── text_runtime.nelua        # 文本渲染运行时
@@ -400,7 +409,11 @@ nebula/
 │   ├── nebula_cursor.nelua       # 光标系统
 │   ├── nebula_arena.nelua        # Frame Arena 分配器
 │   ├── nebula_theme.nelua        # ★ 内置暗色主题颜色包（One Dark 风格）
+│   ├── cstdlib_bindings.nelua    # C 标准库绑定
 │   ├── wgpu_bindings.nelua       # WebGPU C 绑定
+│   ├── wgpu_bindings_native.nelua # wgpu-native 平台绑定
+│   ├── wgpu_bindings_shared.nelua # wgpu 共享绑定
+│   ├── wgpu_bindings_wasm.nelua  # wgpu WASM 平台绑定
 │   ├── glfw_bindings.nelua       # GLFW C 绑定
 │   ├── harfbuzz_bindings.nelua   # HarfBuzz C 绑定（Phase 4.2.3-S0）
 │   ├── stb_truetype_bindings.nelua
@@ -412,7 +425,15 @@ nebula/
 │       ├── layout_engine.lua         # 编译期 Flexbox 布局
 │       ├── app_factory.lua           # App 编排代码生成
 │       ├── axiom_validator.lua       # 公理合规校验
-│       └── highlight_factory.lua     # ★ Phase 4.7-S4 语法高亮规则 + 扫描函数生成
+│       ├── highlight_factory.lua     # ★ Phase 4.7-S4 语法高亮规则 + 扫描函数生成
+│       ├── binding_factory.lua       # ★ Phase 5.0 状态绑定工厂
+│       ├── builtin_factory.lua       # ★ Phase 5.2-R4 Builtin AST 节点系统
+│       ├── dirty_map.lua             # ★ Phase 5.0 脏位追踪
+│       ├── effect_model.lua          # ★ Phase 5.0 Effect 模型
+│       ├── event_router.lua          # ★ Phase 5.0 事件路由
+│       ├── mutation_ast.lua          # ★ Phase 5.0 Mutation AST
+│       ├── nebula_config.lua         # 框架配置
+│       └── omniscient_graph.lua      # ★ Phase 5.0 全知图核心
 ├── examples/                     # 演示程序
 │   ├── button_demo.nelua         # 按钮组件
 │   ├── login_demo.nelua          # 登录表单
@@ -438,8 +459,14 @@ nebula/
 │   ├── text_editor_demo.nelua   # ★ Phase 4.7-S7 文本编辑器原型（S1-S6 全集成验收）
 │   ├── text_editor_demo_v2.nelua # ★ Phase 4.9 终态收敛（85 行，5 层 Sugar，10.4x 压缩）
 │   ├── text_editor_demo_v3.nelua # ★ Phase 4.9.1 终态（19 行，46.6x 压缩，全部 sugar 内联）
+│   ├── text_editor_demo_v4.nelua # ★ Phase 5.4 动画增强版文本编辑器
 │   ├── button_v2_demo.nelua    # ★ Phase 4.6-S1 nebula_main() 验证（18 行，8.2x 压缩）
+│   ├── counter_demo.nelua       # ★ Phase 5.0 L2 状态绑定 demo
+│   ├── counter_binding_demo.nelua # ★ Phase 5.2-R5-S1 L2 声明式状态绑定验证
+│   ├── login_v2_demo.nelua      # ★ Phase 5.4 声明式动画系统验证（暗色主题登录 UI）
+│   ├── dynamic_list_v2_demo.nelua # ★ Phase 5.0 Slot Layout 验证
 │   ├── json_viewer_demo.nelua   # ★ Phase 4.X-J JSON 树形浏览器（折叠/展开 + 语法着色）
+│   ├── json_viewer_demo_v2.nelua # JSON Viewer v2
 │   ├── json_viewer/             # JSON Viewer 子模块
 │   │   ├── json_parser.nelua    # 递归下降 JSON 解析器
 │   │   ├── json_tree.nelua      # 可见行计算 + 折叠 + 格式化 + 着色
@@ -450,7 +477,7 @@ nebula/
 │       ├── pty_bindings.nelua   # POSIX PTY C FFI 绑定
 │       ├── ansi_parser.nelua    # ANSI/VT100 转义序列状态机
 │       └── term_buffer.nelua    # 终端单元格缓冲区
-├── tests/                        # 测试套件 (77 项回归全绿)
+├── tests/                        # 测试套件 (85 项冒烟/验证/单元测试)
 ├── tools/                        # 构建与测试工具（含 font_preprocessor_cjk）
 ├── assets/                       # 字体/纹理预处理产物（含 CJK shaping 表）
 ├── vendor/                       # 第三方依赖 (wgpu-native, GLFW)
@@ -466,7 +493,7 @@ nebula/
 
 | 文档 | 内容 |
 | :--- | :--- |
-| [`ARCHITECTURE_GRAND_PLAN.md`](docs/ARCHITECTURE_GRAND_PLAN.md) | 三大公理 + 两纪元路线图 + 50 行愿景 |
+| [`ARCHITECTURE_GRAND_PLAN.md`](docs/ARCHITECTURE_GRAND_PLAN.md) | 三大公理 + 两纪元路线图 + 19 行终态 |
 | [`PHASE_IMPORTANCE_SCORECARD.md`](docs/PHASE_IMPORTANCE_SCORECARD.md) | 各 Phase 五维量化评分 |
 | [`DESIGN_PHASE1.md`](docs/DESIGN_PHASE1.md) | Phase 1 设计哲学：编译期推导范式 |
 | [`PLAN_PHASE2.md`](docs/PLAN_PHASE2.md) | Phase 2 总体设计：形即渲染 |
