@@ -77,12 +77,14 @@ L0 (底层) : nebula_annotate + nebula_derive + nebula_app_begin/end ← 完全�
 
 ## 当前状态
 
-**Era III | Phase 5.3 渲染侧可编程注册表完成 | Code Browser Demo + CI 全量覆盖 32 demo | 编辑器 19 行极限形态 | wgpu-native v29 + 77/77 回归全绿（2026-05-22）**
+**Era III | Phase 5.4 声明式动画系统完成 | Phase 5.2 R1-R5 语法糖体系修复完成 | Code Browser Demo + CI 全量覆盖 32 demo | 编辑器 19 行极限形态 | wgpu-native v29 + 149/149 Phase 5.4 断言全绿（2026-05-25）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
+| **Phase 5.4 声明式动画系统** | `NEBULA_EASINGS` 可编程注册表（7 个内建 easing：linear/ease_out/ease_in/ease_in_out/ease_out_cubic/ease_out_expo/spring）+ `nebula_register_easing()` 自定义注册 + per-property 动画 override（`progress_<prop>`/`duration_<prop>`/`tween_<prop>` 独立字段，`get_t_<prop>()` 独立插值）+ delay 支持（transition 延迟启动）+ `NEBULA_ANIM_DEFAULTS` sugar 动画默认值 + `login_v2_demo.nelua` L2 声明式验证 + 149 条冒烟测试全绿 | `da39dbd` |
+| **Phase 5.2 R3 生成代码预览** | `_NEBULA_GENERATED_SOURCE` 编译期缓存（visuals/apps/builtins 三分类）+ `print_source(mode, name)` 指令（支持 `"all"`/`"visual"`/`"app"`/`"builtin"` 四种模式）+ 源码缓存注入点覆盖 `nebula_derive`/`nebula_derive_app`/`nebula_main`/`nebula_editor_main`/`nebula_terminal_main`/`nebula_builtin_*` 全部生成路径 + 22 条冒烟测试全绿 | `da39dbd` |
 | **Phase 5.3 渲染注册表** | `NEBULA_SDF_SHAPES` + `NEBULA_SHADER_COMPOSERS` 双注册表——与交互侧 `NEBULA_PRIMITIVES` 完全对称；内建 SDF/组合器自注册（吃自己的狗粮）；`nebula_register_sdf_shape()` / `nebula_register_shader_composer()` 公开 API；`nebula_resolve_shader_composer()` 分发函数（显式声明优先，否则 match+priority 自动选择）；`nebula_derive()` 消除 if-else 硬编码改为注册表分发；`nebula_annotate()` 新增 `sdf_shape` / `shader_composer` 可选字段；axiom_validator 扩展校验；107 条冒烟测试全绿 | `ceb1501` |
 | **Phase 5.2-R1 API 统一** | R1 全部完成——`button_demo.nelua`（151→29 行）、`form_demo.nelua`（363→55 行）重写为 L2 推荐写法；README 推荐 API 标注 + 最小示例；`docs/guide/api-escape-hatch.md` 降级指南（3 个完整示例 + FAQ + 字段映射表）；`docs/guide/configuration.md` 配置项文档 + `nebula_config_override()`；`counter_demo.nelua` L2 状态绑定；冒烟测试同步更新 | `pending` |
 | **Phase 5.2-R4 Builtin AST** | 5 个 Builtin Producer（line_nums/status_bar/search_bar/edit_area/term_grid）从 `string.format` 模板迁移到 AST 节点树代码生成；新增 `builtin_factory.lua`（AST 构造器 + emitter + 注册表 + 公开 API）；`nebula_builtins.nelua` 重构为 AST 工厂调用；84 条专项冒烟测试 + 71/71 回归全绿 | `3834755` |

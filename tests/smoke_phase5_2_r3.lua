@@ -122,23 +122,61 @@ check("3.5_builtins_cache_in_sugar",
   sugar_src:find("_NEBULA_GENERATED_SOURCE%.builtins%[") ~= nil)
 
 -- =============================================================================
--- Test Group 6: Backward compatibility — existing patterns still present
+-- Test Group 6: aster.parse tags — verify tag prefix patterns (with or without caller location)
 -- =============================================================================
 
 check("3.6_compat_aster_parse_derive",
+  derive_src:find('_nebula_parse_tag.-"nebula_derive"') ~= nil or
   derive_src:find('aster%.parse%(source, "<nebula_derive:"') ~= nil)
 
 check("3.6_compat_aster_parse_derive_app",
+  derive_src:find('_nebula_parse_tag.-"nebula_derive_app"') ~= nil or
   derive_src:find('aster%.parse%(source, "<nebula_derive_app:"') ~= nil)
 
 check("3.6_compat_aster_parse_main",
+  apps_src:find('_nebula_parse_tag.-"nebula_main"') ~= nil or
   apps_src:find('aster%.parse%(src, "<nebula_main:"') ~= nil)
 
 check("3.6_compat_aster_parse_editor",
+  apps_src:find('_nebula_parse_tag.-"nebula_editor_main"') ~= nil or
   apps_src:find('aster%.parse%(src, "<nebula_editor_main:"') ~= nil)
 
 check("3.6_compat_aster_parse_terminal",
+  apps_src:find('_nebula_parse_tag.-"nebula_terminal_main"') ~= nil or
   apps_src:find('aster%.parse%(src, "<nebula_terminal_main:"') ~= nil)
+
+-- =============================================================================
+-- Test Group 7: Phase 5.2 R3 Step 3.2 — Caller location helper
+-- =============================================================================
+
+check("3.7_caller_loc_defined",
+  sugar_src:find("function _nebula_caller_loc") ~= nil)
+
+check("3.7_caller_loc_uses_debug_getinfo",
+  sugar_src:find("debug%.getinfo") ~= nil)
+
+check("3.7_caller_loc_skips_internal_files",
+  sugar_src:find("nebula_sugar") ~= nil and
+  sugar_src:find("nebula_derive_engine") ~= nil and
+  sugar_src:find("nebula_apps") ~= nil)
+
+check("3.7_parse_tag_defined",
+  sugar_src:find("function _nebula_parse_tag") ~= nil)
+
+check("3.7_parse_tag_appends_location",
+  sugar_src:find('" at "') ~= nil)
+
+check("3.7_parse_tag_fallback_without_loc",
+  sugar_src:find('return "<" .. prefix .. ":" .. name .. ">"') ~= nil)
+
+check("3.7_visual_uses_parse_tag",
+  sugar_src:find('_nebula_parse_tag%("nebula_visual"') ~= nil)
+
+check("3.7_derive_uses_parse_tag",
+  derive_src:find('_nebula_parse_tag.-"nebula_derive"') ~= nil)
+
+check("3.7_apps_uses_parse_tag",
+  apps_src:find('_nebula_parse_tag.-"nebula_main"') ~= nil)
 
 -- =============================================================================
 -- Summary

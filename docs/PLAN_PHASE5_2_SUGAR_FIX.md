@@ -235,15 +235,15 @@ end
 
 **验收标准**：`## print_source` 输出的代码可通过 `nelua -c` 编译验证（即生成的代码是合法的 Nelua）。
 
-### Step 3.2：错误定位改进
+### Step 3.2：错误定位改进 — ✅ 已完成（3.2.1）
 
-**文件**：`src/nebula_core.nelua`（修改）
+**文件**：`src/nebula_sugar.nelua`（修改）、`src/nebula_derive_engine.nelua`（修改）、`src/nebula_apps.nelua`（修改）
 
-| 子任务 | 内容 | 验收 |
-| :--- | :--- | :--- |
-| 3.2.1 | `aster.parse` 的标签改为源码位置 | `<nebula_visual:EditorBgVisual at examples/text_editor_demo_v3.nelua:12>` |
-| 3.2.2 | 新增错误上下文输出 | 当生成代码出错时，打印出错的代码片段 |
-| 3.2.3 | 新增 `## print_error_context` 自动触发 | 编译失败时自动打印错误上下文 |
+| 子任务 | 内容 | 验收 | 状态 |
+| :--- | :--- | :--- | :--- |
+| 3.2.1 | `aster.parse` 的标签改为源码位置 | `<nebula_visual:EditorBgVisual at examples/text_editor_demo_v3.nelua:12>` | ✅ `_nebula_caller_loc()` + `_nebula_parse_tag()` 已实现 |
+| 3.2.2 | 新增错误上下文输出 | 当生成代码出错时，打印出错的代码片段 | deferred |
+| 3.2.3 | 新增 `## print_error_context` 自动触发 | 编译失败时自动打印错误上下文 | deferred |
 
 **验收标准**：编译错误信息指向用户源码行号，而非 `<nebula_visual:...>` 匿名标签。
 
@@ -469,12 +469,16 @@ require "nebula"
 - [x] 多 App/多 Visual 场景测试通过（45 条断言，6 组测试）
 - [x] 回归测试全绿（R2 基础 18/18 + 多场景 45/45 + Phase 3.8 31/31 + Phase 3.11 58/58）
 
-### 里程碑 3：生成代码预览可用（R3）
+### 里程碑 3：生成代码预览可用（R3）✅（核心功能）
 
-- [ ] `## print_source("app", "MyApp")` 输出合法 Nelua 代码
-- [ ] 编译错误指向用户源码行号
-- [ ] `tools/nebula_codegen.nelua` CLI 工具可用
-- [ ] CI 中新增代码验证步骤
+- [x] `## print_source("app", "MyApp")` 输出合法 Nelua 代码
+- [x] `_NEBULA_GENERATED_SOURCE` 缓存表初始化（visuals/apps/builtins 三分类）
+- [x] 源码缓存注入覆盖全部生成路径（derive/derive_app/main/editor_main/terminal_main/builtins）
+- [x] 22 条冒烟测试全绿（smoke_phase5_2_r3.lua）
+- [x] 编译错误指向用户源码行号（`_nebula_caller_loc` + `_nebula_parse_tag`，Step 3.2.1）
+- [ ] 错误上下文输出（Step 3.2.2，deferred）
+- [ ] `tools/nebula_codegen.nelua` CLI 工具可用（deferred）
+- [ ] CI 中新增代码验证步骤（deferred）
 
 ### 里程碑 4：Builtin AST 重构完成（R4）
 

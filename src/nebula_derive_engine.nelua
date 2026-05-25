@@ -1678,7 +1678,7 @@
 ##   end
 ##
 ##   -- 然后注入其余部分
-##   local block_ast = aster.parse(source, "<nebula_derive:" .. type_name .. ">")
+##   local block_ast = aster.parse(source, _nebula_parse_tag and _nebula_parse_tag("nebula_derive", type_name) or ("<nebula_derive:" .. type_name .. ">"))
 ##   for _, stat in ipairs(block_ast) do
 ##     inject_statement(stat)
 ##   end
@@ -1711,7 +1711,7 @@
 ##   if _NEBULA_GENERATED_SOURCE then
 ##     _NEBULA_GENERATED_SOURCE.apps[app_name] = source
 ##   end
-##   local block_ast = aster.parse(source, "<nebula_derive_app:" .. app_name .. ">")
+##   local block_ast = aster.parse(source, _nebula_parse_tag and _nebula_parse_tag("nebula_derive_app", app_name) or ("<nebula_derive_app:" .. app_name .. ">"))
 ##   for _, stat in ipairs(block_ast) do
 ##     inject_statement(stat)
 ##   end

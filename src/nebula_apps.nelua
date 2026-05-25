@@ -166,7 +166,7 @@ require "nebula_builtins"
 ##   if _NEBULA_GENERATED_SOURCE then
 ##     _NEBULA_GENERATED_SOURCE.apps["main:" .. app_type] = src
 ##   end
-##   local ast = aster.parse(src, "<nebula_main:" .. app_type .. ">")
+##   local ast = aster.parse(src, _nebula_parse_tag and _nebula_parse_tag("nebula_main", app_type) or ("<nebula_main:" .. app_type .. ">"))
 ##   for _, stat in ipairs(ast) do
 ##     inject_statement(stat)
 ##   end
@@ -448,7 +448,7 @@ require "nebula_builtins"
 ##   if _NEBULA_GENERATED_SOURCE then
 ##     _NEBULA_GENERATED_SOURCE.apps["editor_main:" .. app_type] = src
 ##   end
-##   local ast = aster.parse(src, "<nebula_editor_main:" .. app_type .. ">")
+##   local ast = aster.parse(src, _nebula_parse_tag and _nebula_parse_tag("nebula_editor_main", app_type) or ("<nebula_editor_main:" .. app_type .. ">"))
 ##   for _, stat in ipairs(ast) do
 ##     inject_statement(stat)
 ##   end
@@ -692,7 +692,7 @@ require "nebula_builtins"
 ##   if _NEBULA_GENERATED_SOURCE then
 ##     _NEBULA_GENERATED_SOURCE.apps["terminal_main:" .. app_type] = src
 ##   end
-##   local ast = aster.parse(src, "<nebula_terminal_main:" .. app_type .. ">")
+##   local ast = aster.parse(src, _nebula_parse_tag and _nebula_parse_tag("nebula_terminal_main", app_type) or ("<nebula_terminal_main:" .. app_type .. ">"))
 ##   for _, stat in ipairs(ast) do
 ##     inject_statement(stat)
 ##   end

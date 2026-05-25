@@ -33,6 +33,42 @@
 ## end
 
 ## -- =============================================================================
+## -- ★ Phase 5.2 R3 Step 3.2: Caller Location Helper
+## --
+## -- Walks the debug stack to find the user's .nelua source file and line number.
+## -- Used to annotate aster.parse tags so compile errors point back to user code.
+## -- =============================================================================
+## function _nebula_caller_loc(skip)
+##   skip = skip or 2
+##   for level = skip, skip + 10 do
+##     local info = debug.getinfo(level, "Sl")
+##     if not info then break end
+##     local src = info.source or ""
+##     -- Skip internal nebula files and [string] chunks
+##     if src:match("%.nelua$") and
+##        not src:match("nebula_sugar%.nelua") and
+##        not src:match("nebula_derive_engine%.nelua") and
+##        not src:match("nebula_apps%.nelua") and
+##        not src:match("nebula_core%.nelua") and
+##        not src:match("nebula_builtins%.nelua") and
+##        not src:match("nebula_types%.nelua") then
+##       local fname = src:gsub("^@", "")
+##       return fname .. ":" .. (info.currentline or "?")
+##     end
+##   end
+##   return nil
+## end
+##
+## -- Build aster.parse tag with optional caller location
+## function _nebula_parse_tag(prefix, name)
+##   local loc = _nebula_caller_loc(3)
+##   if loc then
+##     return "<" .. prefix .. ":" .. name .. " at " .. loc .. ">"
+##   end
+##   return "<" .. prefix .. ":" .. name .. ">"
+## end
+##
+## -- =============================================================================
 ## -- ★ Phase 4.5: 语法糖 API
 ## -- =============================================================================
 ##
@@ -301,7 +337,7 @@
 ##   -- DenseText 简写路径：text_mode="dense" 时只需 pos+size
 ##   if text_mode == "dense" then
 ##     local record_src = ("global %s = @record{ pos: Vec2, size: Vec2 }"):format(type_name)
-##     local ast = aster.parse(record_src, "<nebula_visual:" .. type_name .. ">")
+##     local ast = aster.parse(record_src, _nebula_parse_tag("nebula_visual", type_name))
 ##     for _, stat in ipairs(ast) do
 ##       inject_statement(stat)
 ##     end
@@ -387,7 +423,7 @@
 ##   end
 ##
 ##   -- 注入 record AST
-##   local ast = aster.parse(record_src, "<nebula_visual:" .. type_name .. ">")
+##   local ast = aster.parse(record_src, _nebula_parse_tag("nebula_visual", type_name))
 ##   for _, stat in ipairs(ast) do
 ##     inject_statement(stat)
 ##   end
@@ -412,7 +448,7 @@
 ##   if has_prim["multiline_editable"] then
 ##     local dense_name = type_name .. "DenseTextVisual"
 ##     local dense_record_src = ("global %s = @record{ pos: Vec2, size: Vec2 }"):format(dense_name)
-##     local dense_ast = aster.parse(dense_record_src, "<nebula_visual_dense:" .. dense_name .. ">")
+##     local dense_ast = aster.parse(dense_record_src, _nebula_parse_tag("nebula_visual_dense", dense_name))
 ##     for _, stat in ipairs(dense_ast) do
 ##       inject_statement(stat)
 ##     end
@@ -792,7 +828,7 @@
 ##       if _NEBULA_GENERATED_SOURCE then
 ##         _NEBULA_GENERATED_SOURCE.builtins[comp_name .. ":" .. fname] = src
 ##       end
-##       local ast = aster.parse(src, "<nebula_app:auto_producer:" .. comp_name .. ">")
+##       local ast = aster.parse(src, _nebula_parse_tag("nebula_app:auto_producer", comp_name))
 ##       for _, stat in ipairs(ast) do
 ##         inject_statement(stat)
 ##       end
