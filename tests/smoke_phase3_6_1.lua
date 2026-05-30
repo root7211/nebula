@@ -20,27 +20,8 @@ package.path = package.path
   .. ";" .. script_dir .. "/../src/?.lua"
   .. ";" .. script_dir .. "/../src/derive/?.lua"
 
--- 加载 gap_buffer 模块（通过 dofile 执行 .nelua 文件中的 ##[[ ]] 块）
--- 由于 gap_buffer.nelua 是 Nelua 文件，我们直接测试其 Lua 生成逻辑
--- 通过 loadstring 模拟 ##[[ ]] 块执行
-local function load_gap_buffer_module()
-  local f = io.open(script_dir .. "/../src/gap_buffer.nelua", "r")
-  assert(f, "cannot open gap_buffer.nelua")
-  local content = f:read("*a")
-  f:close()
-  -- 提取 ##[[ ]] 块中的 Lua 代码
-  local lua_blocks = {}
-  for block in content:gmatch("##%[%[(.-)%]%]") do
-    table.insert(lua_blocks, block)
-  end
-  for _, block in ipairs(lua_blocks) do
-    local fn, err = load(block, "gap_buffer.nelua##")
-    assert(fn, "load error: " .. tostring(err))
-    fn()
-  end
-end
-
-load_gap_buffer_module()
+-- gap_buffer.nelua 已移除（cleanup: dead code），逻辑迁移至 derive/gap_buffer_factory.lua
+require "gap_buffer_factory"
 
 -- 加载 interaction_factory
 local interaction_factory_mod = require "interaction_factory"
@@ -109,8 +90,8 @@ check("gap_buffer: capacity 初始化为 16",
 local type_name2, src2 = nebula_gen_gap_buffer_type(16)
 check("gap_buffer: 重复生成 NebulaBuf16 返回相同 type_name",
   eq(type_name2, "NebulaBuf16"), type_name2, "NebulaBuf16")
-check("gap_buffer: 重复生成 NebulaBuf16 返回 nil src（防重）",
-  src2 == nil, src2, "nil")
+check("gap_buffer: 重复生成 NebulaBuf16 返回空 src（防重）",
+  src2 == "", src2, "empty string")
 
 -- =============================================================================
 -- 测试 6: 生成不同容量的类型
@@ -220,13 +201,6 @@ check("interaction_factory: nebula_gen_text_buffer 生成 get_text_len 方法",
   has_pattern(tb_src, "get_text_len"), nil, "found")
 check("interaction_factory: nebula_gen_text_buffer 生成 flatten 调用",
   has_pattern(tb_src, "gap_buf:flatten"), nil, "found")
-
--- =============================================================================
--- 测试 17: nebula_gen_gap_buffer_version 版本标记
--- =============================================================================
-check("gap_buffer: 版本标记包含 phase3 前缀",
-  type(nebula_gap_buffer_version) == "string" and nebula_gap_buffer_version:find("phase3", 1, true) ~= nil,
-  nebula_gap_buffer_version, "should contain phase3")
 
 -- =============================================================================
 -- 汇总

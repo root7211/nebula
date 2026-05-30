@@ -20,8 +20,10 @@ local function check(name, cond)
 end
 
 -- =============================================================================
--- 1. harfbuzz_bindings.nelua 存在性检查
+-- 1 & 2. harfbuzz_bindings.nelua — 已移除（cleanup: dead code）
+--         相关绑定测试不再适用，跳过。
 -- =============================================================================
+
 local function file_exists(path)
   local f = io.open(path, "r")
   if f then f:close() return true end
@@ -34,76 +36,6 @@ local function read_file(path)
   local content = f:read("*a")
   f:close()
   return content
-end
-
-check("harfbuzz_bindings.nelua exists", file_exists("src/harfbuzz_bindings.nelua"))
-
--- =============================================================================
--- 2. harfbuzz_bindings.nelua API 覆盖验证
--- =============================================================================
-local hb_src = read_file("src/harfbuzz_bindings.nelua")
-if hb_src then
-  -- 核心类型
-  check("hb_bindings: hb_blob_t type",     hb_src:find("hb_blob_t"))
-  check("hb_bindings: hb_face_t type",     hb_src:find("hb_face_t"))
-  check("hb_bindings: hb_font_t type",     hb_src:find("hb_font_t"))
-  check("hb_bindings: hb_buffer_t type",   hb_src:find("hb_buffer_t"))
-  check("hb_bindings: hb_glyph_info_t",    hb_src:find("hb_glyph_info_t"))
-  check("hb_bindings: hb_glyph_position_t", hb_src:find("hb_glyph_position_t"))
-  check("hb_bindings: hb_glyph_extents_t", hb_src:find("hb_glyph_extents_t"))
-  check("hb_bindings: hb_feature_t",       hb_src:find("hb_feature_t"))
-
-  -- Blob API
-  check("hb_bindings: hb_blob_create",     hb_src:find("hb_blob_create"))
-  check("hb_bindings: hb_blob_destroy",    hb_src:find("hb_blob_destroy"))
-
-  -- Face API
-  check("hb_bindings: hb_face_create",     hb_src:find("hb_face_create"))
-  check("hb_bindings: hb_face_destroy",    hb_src:find("hb_face_destroy"))
-  check("hb_bindings: hb_face_get_upem",   hb_src:find("hb_face_get_upem"))
-
-  -- Font API
-  check("hb_bindings: hb_font_create",     hb_src:find("hb_font_create"))
-  check("hb_bindings: hb_font_destroy",    hb_src:find("hb_font_destroy"))
-  check("hb_bindings: hb_font_set_scale",  hb_src:find("hb_font_set_scale"))
-  check("hb_bindings: hb_font_get_glyph_extents", hb_src:find("hb_font_get_glyph_extents"))
-
-  -- Buffer API
-  check("hb_bindings: hb_buffer_create",   hb_src:find("hb_buffer_create"))
-  check("hb_bindings: hb_buffer_destroy",  hb_src:find("hb_buffer_destroy"))
-  check("hb_bindings: hb_buffer_add_utf32", hb_src:find("hb_buffer_add_utf32"))
-  check("hb_bindings: hb_buffer_set_direction", hb_src:find("hb_buffer_set_direction"))
-  check("hb_bindings: hb_buffer_set_script", hb_src:find("hb_buffer_set_script"))
-  check("hb_bindings: hb_buffer_set_language", hb_src:find("hb_buffer_set_language"))
-  check("hb_bindings: hb_buffer_get_glyph_infos", hb_src:find("hb_buffer_get_glyph_infos"))
-  check("hb_bindings: hb_buffer_get_glyph_positions", hb_src:find("hb_buffer_get_glyph_positions"))
-
-  -- Shape API
-  check("hb_bindings: hb_shape",           hb_src:find("hb_shape"))
-
-  -- Language/Tag helpers
-  check("hb_bindings: hb_language_from_string", hb_src:find("hb_language_from_string"))
-  check("hb_bindings: hb_tag_from_string", hb_src:find("hb_tag_from_string"))
-
-  -- Direction constants
-  check("hb_bindings: HB_DIRECTION_LTR",   hb_src:find("HB_DIRECTION_LTR"))
-  check("hb_bindings: HB_DIRECTION_RTL",   hb_src:find("HB_DIRECTION_RTL"))
-
-  -- Script constants
-  check("hb_bindings: HB_SCRIPT_HAN",      hb_src:find("HB_SCRIPT_HAN"))
-  check("hb_bindings: HB_SCRIPT_LATIN",    hb_src:find("HB_SCRIPT_LATIN"))
-
-  -- 公理 A 合规：linklib harfbuzz
-  check("hb_bindings: linklib harfbuzz",    hb_src:find("linklib 'harfbuzz'"))
-  check("hb_bindings: cinclude hb.h",       hb_src:find("hb%.h"))
-
-  -- 不应包含运行时代码
-  check("hb_bindings: no main() (S0 only)", not hb_src:find("function main"))
-else
-  for _ = 1, 35 do
-    fail = fail + 1
-    print("[FAIL] harfbuzz_bindings.nelua not readable")
-  end
 end
 
 -- =============================================================================
