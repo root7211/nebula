@@ -16,23 +16,71 @@ require "nebula_builtins"
 -- 泛用 main 函数生成器。吸收标准样板代码（init/frame_begin/render/shutdown），
 -- 用户只需提供 on_init 和 on_frame 编译期回调。
 --
--- Usage:
+-- Usage (separate nebula_app + nebula_main):
+--   ## nebula_app("ButtonApp", { components = {{ name="btn", type="ButtonVisual" }} })
 --   ## nebula_main("ButtonApp", {
 --     title = "Button V2 Demo",
 --     width = 800, height = 600,
---     on_init = function(app)
---       -- app.btn:init_themed(...) 等初始化
---     end,
---     on_frame = function(app)
---       -- 每帧业务逻辑
---     end,
---     bg_r = 0.04, bg_g = 0.04, bg_b = 0.06,  -- 可选，默认深灰
+--     on_init = function(app) ... end,
+--     on_frame = function(app) ... end,
+--   })
+--
+-- ★ Phase 5.5: 单调用模式（nebula_app 字段内联到 nebula_main）
+-- 如果传入 components，自动先调用 nebula_app() 生成 App 类型，然后再生成 main。
+-- 支持 nebula_app 的所有字段：components/states/bindings/events/layout/slots/texts 等。
+--
+-- Usage (unified single call):
+--   ## nebula_main("CounterApp", {
+--     -- nebula_app 字段（自动委托）
+--     components = {{ name = "btn", type = "CounterVisual" }},
+--     states   = {{ name = "count", type = "int32", default = 0 }},
+--     bindings = {{ target = "doubled", depends = {"count"},
+--                   compute = "self.doubled = self.count * 2" }},
+--     events   = {{ target = "btn", event_type = "click",
+--                   mutation = "self.count = self.count + 1" }},
+--     -- nebula_main 字段
+--     title = "Counter", width = 800, height = 600,
+--     on_init = function(app) ... end,
+--     on_frame = function(app) ... end,
 --   })
 --
 -- =============================================================================
 ## function nebula_main(app_type, opts)
 ##   local _cfg = require("derive.nebula_config")
 ##   opts = opts or {}
+##
+##   -- ★ Phase 5.5: 如果 opts 中包含 nebula_app 的字段（components/states/bindings/events），
+##   -- 自动调用 nebula_app() 生成 App 类型，实现单调用声明。
+##   -- 用户无需再分两步写 nebula_app() + nebula_main()。
+##   if opts.components then
+##     local app_spec = {
+##       components  = opts.components,
+##       states      = opts.states,
+##       bindings    = opts.bindings,
+##       events      = opts.events,
+##       layout      = opts.layout,
+##       slots       = opts.slots,
+##       texts       = opts.texts,
+##       dense_texts = opts.dense_texts,
+##       shadows     = opts.shadows,
+##       cell        = opts.cell,
+##       arena_size  = opts.arena_size,
+##     }
+##     nebula_app(app_type, app_spec)
+##     -- 清除已消费的 app 字段，避免下游混淆
+##     opts.components  = nil
+##     opts.states      = nil
+##     opts.bindings    = nil
+##     opts.events      = nil
+##     opts.layout      = nil
+##     opts.slots       = nil
+##     opts.texts       = nil
+##     opts.dense_texts = nil
+##     opts.shadows     = nil
+##     opts.cell        = nil
+##     opts.arena_size  = nil
+##   end
+##
 ##   local title  = opts.title  or "Nebula App"
 ##   local width  = opts.width  or _cfg.DEFAULT_VIEWPORT_WIDTH
 ##   local height = opts.height or _cfg.DEFAULT_VIEWPORT_HEIGHT

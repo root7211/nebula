@@ -1,0 +1,47 @@
+-- =============================================================================
+-- counter_unified_demo.nelua
+-- Nebula GUI Compiler — Phase 5.5
+--
+-- ★ 单调用模式验证：nebula_visual + nebula_main（统一声明）
+--
+-- 对比 counter_demo.nelua（L2，nebula_app + nebula_main 分离，50 行）：
+--   本文件使用 nebula_main 单调用模式，将 components/states/bindings/events
+--   内联到 nebula_main，消除 nebula_app 的独立调用。
+--
+-- 演示能力：
+--   · nebula_main() 直接接受 components/states/bindings/events
+--   · 自动委托给 nebula_app() 生成 App 类型
+--   · 点击按钮 → count 自增 → doubled 自动派生
+-- =============================================================================
+require "nebula"
+
+-- ★ 声明 Visual：自动推导 states/transitions/record 字段
+## nebula_visual("CounterVisual", { primitives = {"clickable"} })
+
+-- ★ 单调用：nebula_app 字段 + nebula_main 字段统一传入
+## nebula_main("CounterApp", {
+##   -- App 声明（自动委托给 nebula_app）
+##   components = {{ name = "btn", type = "CounterVisual" }},
+##   states = {
+##     { name = "count", type = "int32", default = 0 },
+##   },
+##   bindings = {
+##     { target = "doubled", depends = {"count"}, compute = "self.doubled = self.count * 2" },
+##   },
+##   events = {
+##     { target = "btn", event_type = "click", mutation = "self.count = self.count + 1" },
+##   },
+##   -- Main 生成
+##   title = "Nebula — Counter Unified Demo", width = 800, height = 600,
+##   bg_r = 0.09, bg_g = 0.09, bg_b = 0.10,
+##   on_init = function(app)
+##     return { app .. ".btn:init_themed(Vec2{x=300,y=250}, Vec2{x=200,y=60}, 12.0)" }
+##   end,
+##   on_frame = function(app)
+##     return {
+##       ("if %s.btn.click.just_clicked then"):format(app),
+##       ('  printf("count = %%d, doubled = %%d\\n", %s.count, %s.doubled)'):format(app, app),
+##       "end",
+##     }
+##   end,
+## })
