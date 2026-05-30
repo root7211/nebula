@@ -79,21 +79,9 @@ check("get_text_len uses gap_buf:len (Phase 3.6.1)",
   src:find("gap_buf:len%(%)") ~= nil)
 
 -- ---- 7. 逻辑正确性：模拟 Gap Buffer 操作（Lua 层验证）----
--- 加载 gap_buffer 模块的 Lua 生成逻辑
-local gb_file = io.open("src/gap_buffer.nelua", "r")
-assert(gb_file, "gap_buffer.nelua not found")
-local gb_content = gb_file:read("*a")
-gb_file:close()
-
--- 确保 Lua 搜索路径包含 src/（BUG-6 修复后 gap_buffer.nelua 通过 require 加载 factory）
-package.path = "src/?.lua;src/?/init.lua;" .. package.path
-
--- 提取并执行 ##[[ ]] 块
-for block in gb_content:gmatch("##%[%[(.-)%]%]") do
-  local fn, err = load(block, "gap_buffer.nelua##")
-  assert(fn, "load error: " .. tostring(err))
-  fn()
-end
+-- gap_buffer.nelua 已移除（cleanup: dead code），逻辑迁移至 derive/gap_buffer_factory.lua
+package.path = "src/?.lua;src/derive/?.lua;src/?/init.lua;" .. package.path
+require "gap_buffer_factory"
 
 -- 生成 NebulaBuf16 用于逻辑测试
 local _, gb_src = nebula_gen_gap_buffer_type(16)

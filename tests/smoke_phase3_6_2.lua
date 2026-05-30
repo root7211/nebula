@@ -30,25 +30,9 @@ package.path = package.path
   .. ";" .. script_dir .. "/../src/derive/?.lua"
 
 -- =============================================================================
--- 加载 gap_buffer 模块（提取 ##[[ ]] 块中的 Lua 代码）
+-- 加载 gap_buffer 模块（已迁移至 derive/gap_buffer_factory.lua）
 -- =============================================================================
-local script_dir = arg[0]:match("(.*/)")  or "."
-local function load_gap_buffer_module()
-  local f = io.open(script_dir .. "/../src/gap_buffer.nelua", "r")
-  assert(f, "cannot open gap_buffer.nelua")
-  local content = f:read("*a")
-  f:close()
-  local lua_blocks = {}
-  for block in content:gmatch("##%[%[(.-)%]%]") do
-    table.insert(lua_blocks, block)
-  end
-  for _, block in ipairs(lua_blocks) do
-    local fn, err = load(block, "gap_buffer.nelua##")
-    assert(fn, "load error: " .. tostring(err))
-    fn()
-  end
-end
-load_gap_buffer_module()
+require "gap_buffer_factory"
 
 -- 加载 interaction_factory
 local interaction_factory_version = require "interaction_factory"
