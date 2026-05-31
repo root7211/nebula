@@ -247,18 +247,23 @@ end
 
 **验收标准**：编译错误信息指向用户源码行号，而非 `<nebula_visual:...>` 匿名标签。
 
-### Step 3.3：CLI 工具：`nebula-codegen`
+### Step 3.3：CLI 工具：`nebula-codegen` ✅ 已完成
 
-**文件**：`tools/nebula_codegen.nelua`（新增）
+**文件**：`tools/nebula_codegen.sh`（新增）
 
-| 子任务 | 内容 | 验收 |
+> 实现为 bash 脚本（与 build.sh/setup_wgpu.sh 一致），复用编译期 `print_source`：
+> 把目标 demo 复制到临时文件、追加 `## print_source(mode)`、跑 `nelua --analyze`
+> （仅 S1 语义分析，不链接），从 stdout 提取生成代码块。
+
+| 子任务 | 内容 | 状态 |
 | :--- | :--- | :--- |
-| 3.3.1 | 命令行工具：`nebula-codegen examples/button_demo.nelua` | 输出所有生成代码到 stdout |
-| 3.3.2 | `--target=app|visual|builtin` 过滤 | 只输出指定类型的生成代码 |
-| 3.3.3 | `--output=file` 导出到文件 | 方便 IDE 语法高亮和搜索 |
-| 3.3.4 | `--verify` 验证模式 | 生成的代码通过 `nelua -c` 编译检查 |
+| 3.3.1 | `tools/nebula_codegen.sh button_demo` 输出生成代码到 stdout | ✅ |
+| 3.3.2 | `--target=all\|visual\|app\|builtin` 过滤 + `--name=<entry>` 单条过滤 | ✅ |
+| 3.3.3 | `--output=FILE` 导出到文件 | ✅ |
+| 3.3.4 | `--verify` 验证模式：分析失败或缓存为空则 exit≠0（带 `::error::` 注解） | ✅ |
 
-**验收标准**：CLI 工具可在 CI 中运行，确保生成代码始终合法。
+**验收标准**：✅ CLI 在 CI（`codegen-verify` job）运行，对 8 个代表性 demo 跑 `--verify`，
+确保 sugar 展开后的代码通过语义分析且缓存非空。负向测试（引用不存在的 Visual）正确 exit 1。
 
 ---
 
@@ -477,8 +482,8 @@ require "nebula"
 - [x] 22 条冒烟测试全绿（smoke_phase5_2_r3.lua）
 - [x] 编译错误指向用户源码行号（`_nebula_caller_loc` + `_nebula_parse_tag`，Step 3.2.1）
 - [ ] 错误上下文输出（Step 3.2.2，deferred）
-- [ ] `tools/nebula_codegen.nelua` CLI 工具可用（deferred）
-- [ ] CI 中新增代码验证步骤（deferred）
+- [x] `tools/nebula_codegen.sh` CLI 工具可用（dump + --verify，复用 print_source）
+- [x] CI 中新增代码验证步骤（codegen-verify job，8 个代表性 demo 覆盖各 sugar 路径）
 
 ### 里程碑 4：Builtin AST 重构完成（R4）
 

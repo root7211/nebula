@@ -48,6 +48,53 @@ jobs:
           echo "Golden file verification passed"
 
   # ============================================================
+  # Job: Codegen verify (Phase 5.2 R3.3 — sugar expansion gate)
+  # ============================================================
+  # Confirms each representative demo's sugar layer (nebula_visual / nebula_app /
+  # builtins / *_main) expands to source that passes S1 semantic analysis AND
+  # populates a non-empty generated-source cache. Catches sugar codegen
+  # regressions without a full GPU link. See tools/nebula_codegen.sh.
+  codegen-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nelua
+        run: |
+          git clone https://github.com/edubart/nelua-lang.git /tmp/nelua-lang
+          cd /tmp/nelua-lang && git checkout a58450563e2d && sudo make install
+
+      - name: Download wgpu-native
+        run: bash tools/setup_wgpu.sh
+
+      - name: Verify sugar codegen for representative demos
+        run: |
+          # Each demo exercises a distinct sugar path:
+          #   button_v2_demo        — nebula_main + on_init/on_frame callbacks
+          #   counter_demo          — nebula_app + L2 state bindings/events
+          #   counter_binding_demo  — Phase 5.0 omniscient-graph bindings
+          #   minimal_editor_demo   — nebula_visual auto-dense (multiline_editable)
+          #   text_editor_demo_v3   — nebula_editor_main + 5 builtins
+          #   term_demo_v2          — nebula_terminal_main + term_grid builtin
+          #   highlight_sugar_demo  — highlight pack + dense pipeline orchestration
+          #   dense_editor_demo     — DenseText + app orchestration
+          DEMOS="button_v2_demo counter_demo counter_binding_demo
+                 minimal_editor_demo text_editor_demo_v3 term_demo_v2
+                 highlight_sugar_demo dense_editor_demo"
+          FAIL=0; PASS_COUNT=0; TOTAL=0
+          for demo in $DEMOS; do
+            TOTAL=$((TOTAL + 1))
+            if bash tools/nebula_codegen.sh "$demo" --verify; then
+              PASS_COUNT=$((PASS_COUNT + 1))
+            else
+              FAIL=$((FAIL + 1))
+            fi
+          done
+          echo ""
+          echo "Codegen verify: $PASS_COUNT/$TOTAL passed, $FAIL failed"
+          if [ "$FAIL" -gt 0 ]; then exit 1; fi
+
+  # ============================================================
   # Job 2: Linux 编译回归（nelua -c 生成 C 代码，验证代码生成正确性）
   # ============================================================
   compile-linux:
