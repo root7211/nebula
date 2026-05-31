@@ -829,13 +829,6 @@ global function nebula_init_pos_uv_vertex_layout(
 end
 
 -- =============================================================================
--- Phase 2.3.3 以前此处保留过 NebulaRectUniforms / RECT_SHADER_WGSL /
--- NebulaRectPipeline 的兼容三件套。Phase 2.3.4 后所有 examples 和 headless_test
--- 均已迁移到 nebula_derive 生成的 <T>Uniforms / <T>Pipeline，因此此兼容层
--- 已于清理阶段删除。参见 docs/PLAN_PHASE2_3.md 验收标准第 2 项。
--- =============================================================================
-
--- =============================================================================
 -- ★ Phase 2.5: 离屏渲染基础设施
 --
 -- 为多 Pass 渲染（Shadow / Blur）提供离屏纹理创建、采样器创建
