@@ -312,10 +312,10 @@ local function build_line_nums(opts)
         ),
         while_lt(lit("di"), lit("LINE_NUM_DIGITS"), {
           raw(
-            "        local d: uint32 = (num / divisor) % 10\n" ..
+            "        local d: uint32 = (num // divisor) % 10\n" ..
             "        if d > 0 then leading_zero = false end\n" ..
             "        digits[di] = leading_zero and d == 0 and di < (LINE_NUM_DIGITS - 1) and 32 or (48 + d)\n" ..
-            "        divisor = divisor / 10\n" ..
+            "        divisor = divisor // 10\n" ..
             "        di = di + 1"
           ),
         }),

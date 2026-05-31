@@ -44,8 +44,10 @@ global WGPUSampler          <cimport, nodecl> = @pointer
 global WGPUTextureFormat = @uint32
 global WGPUTextureFormat_Undefined  <comptime> = (@WGPUTextureFormat)(0x00000000)
 global WGPUTextureFormat_R8Unorm    <comptime> = (@WGPUTextureFormat)(0x00000001)
-global WGPUTextureFormat_RGBA8Unorm <comptime> = (@WGPUTextureFormat)(0x00000012)
-global WGPUTextureFormat_BGRA8Unorm <comptime> = (@WGPUTextureFormat)(0x00000017)
+global WGPUTextureFormat_RGBA8Unorm <comptime> = (@WGPUTextureFormat)(0x00000016)
+global WGPUTextureFormat_RGBA8UnormSrgb <comptime> = (@WGPUTextureFormat)(0x00000017)
+global WGPUTextureFormat_BGRA8Unorm <comptime> = (@WGPUTextureFormat)(0x0000001B)
+global WGPUTextureFormat_BGRA8UnormSrgb <comptime> = (@WGPUTextureFormat)(0x0000001C)
 
 global WGPUBufferUsage = @uint32
 global WGPUBufferUsage_None         <comptime> = (@WGPUBufferUsage)(0x00000000)

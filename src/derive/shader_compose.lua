@@ -115,13 +115,17 @@ fn vs_main(in: TextVertexInput) -> VertexOutput {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
   let sdf_sample = textureSample(glyph_atlas, glyph_sampler, in.uv).r;
   
-  // Basic SDF anti-aliasing with fwidth
-  let width = fwidth(sdf_sample);
-  let alpha = smoothstep(0.5 - width, 0.5 + width, sdf_sample);
+  // SDF rendering with adjusted threshold
+  // Analysis shows edge value at 181/255 ≈ 0.7098
+  // Using 0.7 as threshold with wider smoothing for better anti-aliasing
+  let threshold = 0.7;
+  let width = fwidth(sdf_sample) * 2.0;
+  let alpha = smoothstep(threshold - width, threshold + width, sdf_sample);
   
-  if (alpha < 0.001) {
-    discard;
-  }
+  // Debug: show all pixels (comment out discard to see if geometry is correct)
+  // if (alpha < 0.001) {
+  //   discard;
+  // }
   
   return vec4<f32>(u.text_color.rgb, u.text_color.a * alpha);
 }

@@ -559,8 +559,8 @@ global function fs_tree_format_line(tree: *FsTree, line_idx: uint32,
     _emit(out, 32, fs_color_file())
     _emit(out, 40, fs_color_separator())  -- '('
     local count = (@uint32)(node.child_count)
-    if count >= 100 then _emit(out, 48 + (count / 100) % 10, fs_color_separator()) end
-    if count >= 10 then _emit(out, 48 + (count / 10) % 10, fs_color_separator()) end
+    if count >= 100 then _emit(out, 48 + (@uint32)(count // 100) % 10, fs_color_separator()) end
+    if count >= 10 then _emit(out, 48 + (@uint32)(count // 10) % 10, fs_color_separator()) end
     _emit(out, 48 + count % 10, fs_color_separator())
     _emit(out, 41, fs_color_separator())  -- ')'
   end
