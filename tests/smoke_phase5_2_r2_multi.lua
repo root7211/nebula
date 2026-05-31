@@ -227,33 +227,21 @@ check_eq("4.9_appB_producer_unchanged",
 -- =============================================================================
 print("\n--- 5. per-registry 读取优先级 ---")
 
--- 模拟全局变量（旧的向后兼容路径）持有过期数据
-_NEBULA_AUTO_DENSE = {
-  EditorVisualA = { dense_name = "STALE_GLOBAL_A", max_chars = 999 },
-}
-
--- per-registry 应该优先于全局
+-- per-registry 读取（R2 finalized：无全局 fallback）
 local c_reg = nebula_registry["EditorVisualA"]
-local ad = (c_reg and c_reg._auto_dense) or (_NEBULA_AUTO_DENSE and _NEBULA_AUTO_DENSE["EditorVisualA"])
-check_eq("5.1_per_registry_takes_priority",
+local ad = c_reg and c_reg._auto_dense
+check_eq("5.1_per_registry_read",
   ad.dense_name, "EditorVisualADenseTextVisual")
-check_neq("5.2_not_stale_global",
-  ad.dense_name, "STALE_GLOBAL_A")
 
--- 对于未注册到 per-registry 的类型，应 fallback 到全局
-_NEBULA_AUTO_DENSE["EditorVisualC"] = { dense_name = "GLOBAL_C", max_chars = 500 }
+-- 未注册到 per-registry 的类型应得到 nil（不再有全局 fallback 兜底过期数据）
 local c_reg_c = nebula_registry["EditorVisualC"]
-local ad_c = (c_reg_c and c_reg_c._auto_dense) or (_NEBULA_AUTO_DENSE and _NEBULA_AUTO_DENSE["EditorVisualC"])
-check_eq("5.3_global_fallback_for_unregistered",
-  ad_c.dense_name, "GLOBAL_C")
+local ad_c = c_reg_c and c_reg_c._auto_dense
+check("5.3_no_global_fallback_yields_nil",
+  ad_c == nil or ad_c == false)
 
--- per-app producers 优先级
-_NEBULA_AUTO_DENSE_PRODUCERS = {
-  btn1 = { dense_name = "STALE_GLOBAL_btn1", max_chars = 111 },
-}
-local r2_adp = (nebula_app_registry["MultiTestAppA"] and
-  nebula_app_registry["MultiTestAppA"]._auto_dense_producers)
-  or _NEBULA_AUTO_DENSE_PRODUCERS
+-- per-app producers 读取（无全局 fallback）
+local r2_adp = nebula_app_registry["MultiTestAppA"] and
+  nebula_app_registry["MultiTestAppA"]._auto_dense_producers
 check("5.4_per_app_producers_priority",
   r2_adp["btn1"] ~= nil and r2_adp["btn1"].dense_name == "btn1_text")
 

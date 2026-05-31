@@ -48,18 +48,18 @@ assert(apps_src, "nebula_apps.nelua not found at: " .. src_dir)
 check("2.1_write_per_visual_registry",
   sugar_src:find("vis_reg%._auto_dense") ~= nil)
 
--- 1.2 写入端：向后兼容全局写入保留
-check("2.1_compat_global_write",
-  sugar_src:find("_NEBULA_AUTO_DENSE%[type_name%]") ~= nil)
+-- 1.2 写入端：全局写入已消除（R2 finalized — 不再双写）
+check("2.1_no_global_write",
+  sugar_src:find("_NEBULA_AUTO_DENSE%[type_name%]") == nil)
 
 -- 1.3 读取端：per-visual registry 优先读取
 check("2.1_read_per_visual_registry",
   sugar_src:find("c_reg and c_reg%._auto_dense") ~= nil
   or sugar_src:find("c_reg%._auto_dense") ~= nil)
 
--- 1.4 读取端：全局 fallback 保留
-check("2.1_read_global_fallback",
-  sugar_src:find("_NEBULA_AUTO_DENSE and _NEBULA_AUTO_DENSE%[c%.type%]") ~= nil)
+-- 1.4 读取端：全局 fallback 已消除
+check("2.1_no_read_global_fallback",
+  sugar_src:find("_NEBULA_AUTO_DENSE and _NEBULA_AUTO_DENSE%[c%.type%]") == nil)
 
 -- =============================================================================
 -- ★ Test Group 2: Step 2.2 — _nebula_last_app_spec per-app registry
@@ -69,21 +69,21 @@ check("2.1_read_global_fallback",
 check("2.2_write_per_app_spec",
   sugar_src:find("nebula_app_registry%[app_name%]%._spec = spec") ~= nil)
 
--- 2.2 写入端：向后兼容全局写入保留
-check("2.2_compat_global_write",
-  sugar_src:find("_nebula_last_app_spec = spec") ~= nil)
+-- 2.2 写入端：全局写入已消除（R2 finalized）
+check("2.2_no_global_write",
+  sugar_src:find("_nebula_last_app_spec = spec") == nil)
 
 -- 2.3 读取端（nebula_apps.nelua）：per-app registry 优先读取
 check("2.2_read_per_app_registry",
   apps_src:find("nebula_app_registry%[_r2_app_name%]") ~= nil)
 
--- 2.4 读取端（nebula_apps.nelua）：全局 fallback 保留
-check("2.2_read_global_fallback",
-  apps_src:find("_nebula_last_app_spec") ~= nil)
+-- 2.4 读取端（nebula_apps.nelua）：全局 fallback 已消除
+check("2.2_no_read_global_fallback",
+  apps_src:find("_nebula_last_app_spec") == nil)
 
--- 2.5 读取端（nebula_apps.nelua）：支持 opts.app_name 参数
-check("2.2_opts_app_name_param",
-  apps_src:find("opts%.app_name") ~= nil)
+-- 2.5 读取端（nebula_apps.nelua）：app_type 作为注册键
+check("2.2_app_type_as_key",
+  apps_src:find("opts%.app_name or app_type") ~= nil)
 
 -- =============================================================================
 -- ★ Test Group 3: Step 2.3 — _NEBULA_AUTO_DENSE_PRODUCERS per-app registry
@@ -93,17 +93,17 @@ check("2.2_opts_app_name_param",
 check("2.3_write_per_app_producers",
   sugar_src:find("app_reg%._auto_dense_producers") ~= nil)
 
--- 3.2 写入端：向后兼容全局写入保留
-check("2.3_compat_global_write",
-  sugar_src:find("_NEBULA_AUTO_DENSE_PRODUCERS%[c%.name%]") ~= nil)
+-- 3.2 写入端：全局写入已消除（R2 finalized）
+check("2.3_no_global_write",
+  sugar_src:find("_NEBULA_AUTO_DENSE_PRODUCERS%[c%.name%]") == nil)
 
 -- 3.3 读取端：per-app registry 优先读取
 check("2.3_read_per_app_producers",
   sugar_src:find("nebula_app_registry%[app_name%].*_auto_dense_producers") ~= nil)
 
--- 3.4 读取端：全局 fallback 保留
-check("2.3_read_global_fallback",
-  sugar_src:find("_NEBULA_AUTO_DENSE_PRODUCERS") ~= nil)
+-- 3.4 读取端：全局 fallback 已消除
+check("2.3_no_read_global_fallback",
+  sugar_src:find("_NEBULA_AUTO_DENSE_PRODUCERS") == nil)
 
 -- =============================================================================
 -- ★ Test Group 4: 结构完整性（无误删关键函数）

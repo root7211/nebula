@@ -456,7 +456,7 @@
 ##       text_mode = "dense",
 ##       max_chars = spec.max_chars or 6000,
 ##     })
-##     -- ★ Phase 5.2 R2: 存储到 per-visual registry（消除全局 _NEBULA_AUTO_DENSE 污染）
+##     -- ★ Phase 5.2 R2 (finalized): 仅存储到 per-visual registry
 ##     local vis_reg = nebula_registry[type_name]
 ##     if vis_reg then
 ##       vis_reg._auto_dense = {
@@ -464,12 +464,6 @@
 ##         max_chars      = spec.max_chars or 6000,
 ##       }
 ##     end
-##     -- 向后兼容：迁移期保留全局写入（下游可能仍读取）
-##     _NEBULA_AUTO_DENSE = _NEBULA_AUTO_DENSE or {}
-##     _NEBULA_AUTO_DENSE[type_name] = {
-##       dense_name     = dense_name,
-##       max_chars      = spec.max_chars or 6000,
-##     }
 ##     print(("[sugar] nebula_visual: auto-generated %s (dense, max_chars=%d)"):format(
 ##       dense_name, spec.max_chars or 6000))
 ##   end
@@ -552,11 +546,7 @@
 ## function nebula_app(app_name, spec)
 ##   local _cfg = require("derive.nebula_config")
 ##   spec = spec or {}
-##   -- ★ Phase 5.2 R2: 缓存 spec 到 per-app registry（消除全局 _nebula_last_app_spec 污染）
-##   -- 注意：nebula_app_begin 内部会创建 nebula_app_registry[app_name]，
-##   -- 因此 _spec 在 nebula_app_begin 之后写入。先暂存到局部变量。
-##   _nebula_last_app_spec = spec     -- 向后兼容：迁移期保留全局写入
-##   _nebula_last_app_name = app_name -- 向后兼容
+##   -- ★ Phase 5.2 R2 (finalized): spec 缓存到 per-app registry（见下方 nebula_app_begin 之后）
 ##   -- ★ Phase 4.9.1: app 级 cell 默认值
 ##   local app_cell_w = (spec.cell and spec.cell.w) or _cfg.DEFAULT_CELL_W
 ##   local app_cell_h = (spec.cell and spec.cell.h) or _cfg.DEFAULT_CELL_H
@@ -707,13 +697,13 @@
 ##         component_id = c.component_id,
 ##         layout       = c.layout,
 ##       })
-##       -- ★ Phase 5.2 R2: auto-dense 优先从 per-visual registry 读取，全局 fallback
+##       -- ★ Phase 5.2 R2 (finalized): auto-dense 从 per-visual registry 读取
 ##       local c_reg = nebula_registry[c.type]
-##       local ad = (c_reg and c_reg._auto_dense) or (_NEBULA_AUTO_DENSE and _NEBULA_AUTO_DENSE[c.type])
+##       local ad = c_reg and c_reg._auto_dense
 ##       if ad then
 ##         local dense_name = c.name .. "_text"
 ##         local producer_name = "nebula_default_edit_area_" .. c.name
-##         -- ★ Phase 5.2 R2: 存储到 per-app registry（消除全局 _NEBULA_AUTO_DENSE_PRODUCERS 污染）
+##         -- ★ Phase 5.2 R2 (finalized): 仅存储到 per-app registry
 ##         local app_reg = nebula_app_registry[app_name]
 ##         app_reg._auto_dense_producers = app_reg._auto_dense_producers or {}
 ##         app_reg._auto_dense_producers[c.name] = {
@@ -723,9 +713,6 @@
 ##           cell_w        = c.cell_w or app_cell_w,
 ##           cell_h        = c.cell_h or app_cell_h,
 ##         }
-##         -- 向后兼容：迁移期保留全局写入
-##         _NEBULA_AUTO_DENSE_PRODUCERS = _NEBULA_AUTO_DENSE_PRODUCERS or {}
-##         _NEBULA_AUTO_DENSE_PRODUCERS[c.name] = app_reg._auto_dense_producers[c.name]
 ##         nebula_app_register_dense_text(dense_name, ad.dense_name, {
 ##           max_chars = ad.max_chars,
 ##           cell_w    = c.cell_w or app_cell_w,
@@ -771,9 +758,8 @@
 ##       blur_radius = sh.blur_radius,
 ##     })
 ##   end
-##   -- ★ Phase 5.2 R2: 从 per-app registry 读取 auto-dense producers，全局 fallback
-##   local _r2_adp = (nebula_app_registry[app_name] and nebula_app_registry[app_name]._auto_dense_producers)
-##     or _NEBULA_AUTO_DENSE_PRODUCERS
+##   -- ★ Phase 5.2 R2 (finalized): 从 per-app registry 读取 auto-dense producers
+##   local _r2_adp = nebula_app_registry[app_name] and nebula_app_registry[app_name]._auto_dense_producers
 ##   if _r2_adp then
 ##     for comp_name, pd in pairs(_r2_adp) do
 ##       local cell_w = pd.cell_w
