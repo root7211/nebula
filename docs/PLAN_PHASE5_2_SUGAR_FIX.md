@@ -461,13 +461,13 @@ require "nebula"
 - [x] `docs/guide/configuration.md` 配置项文档化
 - [x] `nebula_config_override()` 函数实现
 
-### 里程碑 2：全局状态消除完成（R2） ✅
+### 里程碑 2：全局状态消除完成（R2） ✅（finalized — 全局写入已彻底删除，无双路径残留）
 
-- [x] `_NEBULA_AUTO_DENSE` 改为 per-visual registry 存储
-- [x] `_nebula_last_app_spec` 改为 per-app registry 存储
-- [x] `_NEBULA_AUTO_DENSE_PRODUCERS` 改为 per-app registry 存储
-- [x] 多 App/多 Visual 场景测试通过（45 条断言，6 组测试）
-- [x] 回归测试全绿（R2 基础 18/18 + 多场景 45/45 + Phase 3.8 31/31 + Phase 3.11 58/58）
+- [x] `_NEBULA_AUTO_DENSE` 改为 per-visual registry 存储（全局写入已删除）
+- [x] `_nebula_last_app_spec` 改为 per-app registry 存储（全局写入已删除；`nebula_terminal_main` 经 `app_type` 形参读取）
+- [x] `_NEBULA_AUTO_DENSE_PRODUCERS` 改为 per-app registry 存储（全局写入已删除）
+- [x] 多 App/多 Visual 场景测试通过（44 条断言）
+- [x] 回归测试无新增失败（r2 18/18 + multi 44/44；demo 编译验证通过）
 
 ### 里程碑 3：生成代码预览可用（R3）✅（核心功能）
 
