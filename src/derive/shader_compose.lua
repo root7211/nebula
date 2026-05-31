@@ -122,10 +122,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
   let width = fwidth(sdf_sample) * 2.0;
   let alpha = smoothstep(threshold - width, threshold + width, sdf_sample);
   
-  // Debug: show all pixels (comment out discard to see if geometry is correct)
-  // if (alpha < 0.001) {
-  //   discard;
-  // }
+  if (alpha < 0.001) {
+    discard;
+  }
   
   return vec4<f32>(u.text_color.rgb, u.text_color.a * alpha);
 }
@@ -775,8 +774,11 @@ fn vs_main(
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
   let sdf = textureSample(glyph_atlas, glyph_sampler, in.uv).r;
-  let width = fwidth(sdf);
-  let alpha = smoothstep(0.5 - width, 0.5 + width, sdf);
+  
+  // SDF rendering with adjusted threshold (edge value ≈ 0.7098)
+  let threshold = 0.7;
+  let width = fwidth(sdf) * 2.0;
+  let alpha = smoothstep(threshold - width, threshold + width, sdf);
 
   // 背景色 + 前景色按 SDF alpha 叠加
   let color = mix(in.bg_color, vec4<f32>(in.fg_color.rgb, 1.0), in.fg_color.a * alpha);
