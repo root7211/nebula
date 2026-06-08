@@ -117,7 +117,21 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   end
 
   -- 2. 创建 Surface
-  ## if NEBULA_LINUX_DISPLAY ~= 'wayland' then
+  ## if NEBULA_TARGET == 'windows' then
+  -- Windows (HWND) 路径
+  local hwnd_src = WGPUSurfaceSourceWindowsHWND{
+    chain = WGPUChainedStruct{
+      next  = nilptr,
+      sType = WGPUSType_SurfaceSourceWindowsHWND,
+    },
+    hinstance = GetModuleHandleA(nilptr),
+    hwnd      = glfwGetWin32Window(window),
+  }
+  local surf_desc = WGPUSurfaceDescriptor{
+    nextInChain = (@*WGPUChainedStruct)(&hwnd_src),
+    label       = wgpu_str_null(),
+  }
+  ## elseif NEBULA_LINUX_DISPLAY ~= 'wayland' then
   -- Linux (X11) 路径
   local xlib_src = WGPUSurfaceSourceXlibWindow{
     chain   = WGPUChainedStruct{
@@ -143,21 +157,6 @@ function NebulaRenderer:init(window: GLFWwindow, w: uint32, h: uint32): boolean
   }
   local surf_desc = WGPUSurfaceDescriptor{
     nextInChain = (@*WGPUChainedStruct)(&wl_src),
-    label       = wgpu_str_null(),
-  }
-  ## end
-  ## if NEBULA_TARGET == 'windows' then
-  -- Windows (HWND) 路径
-  local hwnd_src = WGPUSurfaceSourceWindowsHWND{
-    chain = WGPUChainedStruct{
-      next  = nilptr,
-      sType = WGPUSType_SurfaceSourceWindowsHWND,
-    },
-    hinstance = GetModuleHandleA(nilptr),
-    hwnd      = glfwGetWin32Window(window),
-  }
-  local surf_desc = WGPUSurfaceDescriptor{
-    nextInChain = (@*WGPUChainedStruct)(&hwnd_src),
     label       = wgpu_str_null(),
   }
   ## end

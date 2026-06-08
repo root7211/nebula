@@ -13,7 +13,11 @@
 -- =============================================================================
 
 ## if NEBULA_TARGET ~= 'wasm' then
+  ## if NEBULA_TARGET == 'windows' then
+## linklib "glfw3"
+  ## else
 ## linklib "glfw"
+  ## end
 ## end
 ## cinclude "<GLFW/glfw3.h>"
 

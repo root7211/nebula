@@ -83,9 +83,33 @@ if [ "$NEBULA_TARGET" == "linux" ]; then
   fi
   
 elif [ "$NEBULA_TARGET" == "windows" ]; then
-  # Windows 编译配置 (假设在 Windows 环境或使用交叉编译)
-  CFLAGS="-I$VENDOR/include"
-  LDFLAGS="-L$VENDOR/lib -lwgpu_native -lglfw3 -luser32 -lgdi32 -lshell32"
+  # Windows 编译配置 (MinGW)
+  # 转换 MSYS 路径为 Windows 路径
+  VENDOR_WIN=$(cygpath -w "$SCRIPT_DIR/vendor/wgpu-native" 2>/dev/null || echo "$SCRIPT_DIR/vendor/wgpu-native" | sed 's|^/c/|C:/|')
+  GLFW_DIR_WIN=$(cygpath -w "$SCRIPT_DIR/vendor/glfw" 2>/dev/null || echo "$SCRIPT_DIR/vendor/glfw" | sed 's|^/c/|C:/|')
+  if [ ! -d "$SCRIPT_DIR/vendor/wgpu-native" ]; then
+    echo "[nebula] Error: vendor/wgpu-native not found for windows build."
+    exit 1
+  fi
+  if [ ! -d "$SCRIPT_DIR/vendor/glfw" ]; then
+    echo "[nebula] Error: vendor/glfw not found for windows build."
+    exit 1
+  fi
+  CFLAGS="-I$VENDOR_WIN/include -I$GLFW_DIR_WIN/include"
+  LDFLAGS="-L$VENDOR_WIN/lib -L$GLFW_DIR_WIN/lib -lwgpu_native -lglfw3 -lopengl32 -lgdi32 -luser32 -lshell32 -ladvapi32 -lws2_32 -luserenv -lbcrypt -lntdll -Wl,--stack,8388608"
+  # term_demo 在 Windows 上不支持 (需要 POSIX PTY)
+  if [ "$DEMO_TARGET" == "term_demo" ] || [ "$DEMO_TARGET" == "term_demo_v2" ]; then
+    echo "[nebula] Warning: term_demo requires POSIX PTY, not supported on Windows"
+    exit 1
+  fi
+  if [ "$DEMO_TARGET" == "json_viewer_demo" ] || [ "$DEMO_TARGET" == "json_viewer_demo_v2" ]; then
+    NELUA_FLAGS="$NELUA_FLAGS -L $SCRIPT_DIR/examples/json_viewer"
+  fi
+  if [ "$DEMO_TARGET" == "code_browser_demo" ]; then
+    NELUA_FLAGS="$NELUA_FLAGS -L $SCRIPT_DIR/examples/code_browser"
+    CODE_BROWSER_WIN=$(cygpath -w "$SCRIPT_DIR/examples/code_browser" 2>/dev/null || echo "$SCRIPT_DIR/examples/code_browser" | sed 's|^/c/|C:/|')
+    CFLAGS="$CFLAGS -I$CODE_BROWSER_WIN"
+  fi
   
 elif [ "$NEBULA_TARGET" == "wasm" ]; then
   # Web (Wasm) 编译配置 — 推荐使用 build_wasm.sh 获得完整体验
