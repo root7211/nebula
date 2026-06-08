@@ -190,6 +190,7 @@ jobs:
 
       - name: Download wgpu-native (Windows GNU)
         run: |
+          rm -rf vendor/wgpu-native
           mkdir -p vendor/wgpu-native
           curl -L -o /tmp/wgpu-win.zip \
             "https://github.com/gfx-rs/wgpu-native/releases/download/v29.0.0.0/wgpu-windows-x86_64-gnu-release.zip"
