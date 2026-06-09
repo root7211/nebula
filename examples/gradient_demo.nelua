@@ -1,0 +1,63 @@
+-- =============================================================================
+-- gradient_demo.nelua — Phase 6.1 渐变填充验证
+-- =============================================================================
+require "nebula"
+
+## nebula_visual("GradientCardVisual", { primitives = {"hoverable"} })
+
+## nebula_app("GradientDemoApp", {
+##   components = {
+##     { name = "linear_card", type = "GradientCardVisual" },
+##     { name = "radial_card", type = "GradientCardVisual" },
+##     { name = "solid_card",  type = "GradientCardVisual" },
+##   },
+## })
+
+## local function on_init(app)
+##   local lines = {}
+##   
+##   -- Linear gradient card (left)
+##   table.insert(lines, string.format([[
+##     %s.linear_card:init_themed(Vec2{x=50, y=150}, Vec2{x=200, y=300}, 16.0)
+##     %s.linear_card.visual.fill_mode = 1
+##     %s.linear_card.visual.gradient_angle = 2.356
+##     %s.linear_card.visual.default_bg_color = Color{r=0.20, g=0.15, b=0.35, a=1.0}
+##     %s.linear_card.visual.default_color_end = Color{r=0.10, g=0.25, b=0.45, a=1.0}
+##     %s.linear_card.visual.hovered_bg_color = Color{r=0.25, g=0.20, b=0.40, a=1.0}
+##     %s.linear_card.visual.hovered_color_end = Color{r=0.15, g=0.30, b=0.50, a=1.0}
+##   ]], app, app, app, app, app, app, app))
+##   
+##   -- Radial gradient card (center)
+##   table.insert(lines, string.format([[
+##     %s.radial_card:init_themed(Vec2{x=300, y=150}, Vec2{x=200, y=300}, 16.0)
+##     %s.radial_card.visual.fill_mode = 2
+##     %s.radial_card.visual.gradient_angle = 0.0
+##     %s.radial_card.visual.default_bg_color = Color{r=0.35, g=0.15, b=0.20, a=1.0}
+##     %s.radial_card.visual.default_color_end = Color{r=0.45, g=0.25, b=0.10, a=1.0}
+##     %s.radial_card.visual.hovered_bg_color = Color{r=0.40, g=0.20, b=0.25, a=1.0}
+##     %s.radial_card.visual.hovered_color_end = Color{r=0.50, g=0.30, b=0.15, a=1.0}
+##   ]], app, app, app, app, app, app, app))
+##   
+##   -- Solid color card (right, backward compatible)
+##   table.insert(lines, string.format([[
+##     %s.solid_card:init_themed(Vec2{x=550, y=150}, Vec2{x=200, y=300}, 16.0)
+##     %s.solid_card.visual.fill_mode = 0
+##     %s.solid_card.visual.default_bg_color = Color{r=0.15, g=0.35, b=0.20, a=1.0}
+##     %s.solid_card.visual.hovered_bg_color = Color{r=0.20, g=0.40, b=0.25, a=1.0}
+##   ]], app, app, app, app))
+##   
+##   return lines
+## end
+
+## local function on_frame(app)
+##   return {}
+## end
+
+## nebula_main("GradientDemoApp", {
+##   title = "Phase 6.1 - Gradient Fill Demo",
+##   width = 800,
+##   height = 600,
+##   bg_r = 0.09, bg_g = 0.09, bg_b = 0.10,
+##   on_init = on_init,
+##   on_frame = on_frame,
+## })

@@ -1025,6 +1025,9 @@
 ##       table.insert(lines, ("  self:init(%s{"):format(type_name))
 ##       table.insert(lines, "    pos = pos, size = size,")
 ##     end
+##     -- ★ Phase 6.1: 渐变填充字段默认值
+##     table.insert(lines, "    fill_mode = 0,      -- 默认纯色填充（向后兼容）")
+##     table.insert(lines, "    gradient_angle = 0.0,")
 ##     -- 辅助：检查某状态某属性是否存在于 Visual record
 ##     local function has_field(state, prop)
 ##       return state_fields and state_fields[state] and state_fields[state][prop]
@@ -1035,6 +1038,12 @@
 ##         if has_field(s, "bg_color") then
 ##           local c = theme.bg
 ##           table.insert(lines, ("    %s_bg_color = Color{ r=%.3f, g=%.3f, b=%.3f, a=%.1f },"):format(
+##             s, c.r, c.g, c.b, c.a))
+##         end
+##         -- ★ Phase 6.1: 渐变终止色默认值（与 bg_color 相同，实现纯色填充）
+##         if has_field(s, "color_end") then
+##           local c = theme.bg
+##           table.insert(lines, ("    %s_color_end = Color{ r=%.3f, g=%.3f, b=%.3f, a=%.1f },"):format(
 ##             s, c.r, c.g, c.b, c.a))
 ##         end
 ##         if has_field(s, "border_color") then
