@@ -31,12 +31,14 @@
 ##   Vec4    = "vec4<f32>",
 ##   Color   = "vec4<f32>",
 ##   float32 = "f32",
+##   uint32  = "u32",  -- Phase 6.1: 渐变填充 fill_mode 字段
 ## }
 ## local TYPE_SIZE_MAP = {
 ##   Vec2    = 8,
 ##   Vec4    = 16,
 ##   Color   = 16,
 ##   float32 = 4,
+##   uint32  = 4,  -- Phase 6.1
 ## }
 ## local LERP_FN_MAP = {
 ##   Color   = "lerp_color",
@@ -193,6 +195,7 @@
 ##   Vec4    = 16,
 ##   Color   = 16,
 ##   float32 = 4,
+##   uint32  = 4,  -- Phase 6.1
 ## }
 ## 
 ## -- 在所有字段列表中追加必要的 _pad<N> 使下一字段起始 offset 满足 align
