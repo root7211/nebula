@@ -84,12 +84,13 @@ L0 (底层) : nebula_annotate + nebula_derive + nebula_app_begin/end ← 完全�
 
 ## 当前状态
 
-**Era II | Phase 5.4 声明式动画系统完成 | Phase 5.2 R1-R5 语法糖体系修复完成 | Code Browser Demo + CI 全量覆盖 36 demo | 编辑器 19 行极限形态 | wgpu-native v29 + 149/149 Phase 5.4 断言全绿（2026-05-25）**
+**Era II | Phase 6.0 Visual System 方案完成 | Phase 5.4 声明式动画系统完成 | Phase 5.2 R1-R5 语法糖体系修复完成 | Code Browser Demo + CI 全量覆盖 36 demo | 编辑器 19 行极限形态 | wgpu-native v29 + 149/149 Phase 5.4 断言全绿（2026-05-25）**
 
 ### 最近完成
 
 | 里程碑 | 内容 | 关键 commit |
 | :--- | :--- | :--- |
+| **Phase 6.0 Visual System 方案** | 五阶段视觉升级方案：6.1 渐变填充（linear/radial，fragment shader uniform 驱动分支）+ 6.2 语义化主题 Token 系统（3 套预置主题：Material Dark / Nord / Dracula，编译期选择 `-D NEBULA_THEME=xxx`）+ 6.3 Shadow 集成 Sugar API（4-pass Gaussian blur 从 L0 手动提升到 L2 声明）+ 6.4 Transform 动画（scale/offset state_fields，vertex shader 变换）+ 6.5 预制组件库 `nebula_material`（card/button/input/divider/avatar）。~900 行新增，0 breaking changes，所有现有 demo 零修改编译通过 | `pending` |
 | **Phase 5.4 声明式动画系统** | `NEBULA_EASINGS` 可编程注册表（7 个内建 easing：linear/ease_out/ease_in/ease_in_out/ease_out_cubic/ease_out_expo/spring）+ `nebula_register_easing()` 自定义注册 + per-property 动画 override（`progress_<prop>`/`duration_<prop>`/`tween_<prop>` 独立字段，`get_t_<prop>()` 独立插值）+ delay 支持（transition 延迟启动）+ `NEBULA_ANIM_DEFAULTS` sugar 动画默认值 + `login_v2_demo.nelua` L2 声明式验证 + 149 条冒烟测试全绿 | `da39dbd` |
 | **Phase 5.2 R3 生成代码预览** | `_NEBULA_GENERATED_SOURCE` 编译期缓存（visuals/apps/builtins 三分类）+ `print_source(mode, name)` 指令（支持 `"all"`/`"visual"`/`"app"`/`"builtin"` 四种模式）+ 源码缓存注入点覆盖 `nebula_derive`/`nebula_derive_app`/`nebula_main`/`nebula_editor_main`/`nebula_terminal_main`/`nebula_builtin_*` 全部生成路径 + 22 条冒烟测试全绿 | `da39dbd` |
 | **Phase 5.3 渲染注册表** | `NEBULA_SDF_SHAPES` + `NEBULA_SHADER_COMPOSERS` 双注册表——与交互侧 `NEBULA_PRIMITIVES` 完全对称；内建 SDF/组合器自注册（吃自己的狗粮）；`nebula_register_sdf_shape()` / `nebula_register_shader_composer()` 公开 API；`nebula_resolve_shader_composer()` 分发函数（显式声明优先，否则 match+priority 自动选择）；`nebula_derive()` 消除 if-else 硬编码改为注册表分发；`nebula_annotate()` 新增 `sdf_shape` / `shader_composer` 可选字段；axiom_validator 扩展校验；107 条冒烟测试全绿 | `ceb1501` |
@@ -250,6 +251,7 @@ L0 (底层) : nebula_annotate + nebula_derive + nebula_app_begin/end ← 完全�
 | **5.3** | **渲染注册表** | **已完成**（`NEBULA_SDF_SHAPES` + `NEBULA_SHADER_COMPOSERS` 双注册表 + 107 条断言全绿） | 81 |
 | **5.4** | **声明式动画系统** | **已完成**（`NEBULA_EASINGS` 注册表 + per-property override + delay + login_v2_demo + 149 条断言全绿） | **85** |
 | **5.2-R4** | **Builtin AST 重构** | **已完成**（`builtin_factory.lua` AST 节点系统 + 5 builtin 迁移 + 84 条冒烟测试） | **83** |
+| **6.0** | **Visual System 升级** | **方案完成**（五阶段：6.1 渐变填充 + 6.2 语义化主题 Token + 6.3 Shadow 集成 Sugar + 6.4 Transform 动画 + 6.5 预制组件库 nebula_material，~900 行新增，0 breaking changes） | **88** |
 
 > 重要度评分基于五个维度加权综合评分（满分 100），详见 [`docs/PHASE_IMPORTANCE_SCORECARD.md`](docs/PHASE_IMPORTANCE_SCORECARD.md)。
 
@@ -416,6 +418,9 @@ nebula/
 │   ├── nebula_cursor.nelua       # 光标系统
 │   ├── nebula_arena.nelua        # Frame Arena 分配器
 │   ├── nebula_theme.nelua        # ★ 内置暗色主题颜色包（One Dark 风格）
+│   ├── nebula_material.nelua     # ★ Phase 6.5 预制组件库（Material Card/Button/Input/Divider/Avatar）
+│   ├── themes/                   # ★ Phase 6.2 主题 Token 系统
+│   │   └── nebula_themes.lua     # 3 套预置主题（Material Dark / Nord / Dracula）+ 语义 token 解析器
 │   ├── cstdlib_bindings.nelua    # C 标准库绑定
 │   ├── wgpu_bindings.nelua       # WebGPU C 绑定
 │   ├── wgpu_bindings_native.nelua # wgpu-native 平台绑定
@@ -516,6 +521,7 @@ nebula/
 | [`PLAN_PHASE5_OMNISCIENT_GRAPH.md`](docs/PLAN_PHASE5_OMNISCIENT_GRAPH.md) | ★ Phase 5.0 — 全知图与端到端特化路径（状态/绑定/事件编译期消解） |
 | [`PLAN_PHASE5_PATCH.md`](docs/PLAN_PHASE5_PATCH.md) | ★ Phase 5.0 完整补丁（mutation AST + Effect 模型 + 路由去重 + dirty bit + 回归测试） |
 | [`PLAN_PHASE5_IMPLEMENTATION.md`](docs/PLAN_PHASE5_IMPLEMENTATION.md) | ★ Phase 5.0 实施计划（5 梯队，整合补丁，里程碑与验收标准） |
+| [`PLAN_PHASE6_VISUAL_SYSTEM.md`](docs/PLAN_PHASE6_VISUAL_SYSTEM.md) | ★ Phase 6.0 — Visual System 升级方案（渐变填充 + 语义化主题 + Shadow 集成 + Transform 动画 + 预制组件库） |
 | [`PLAN_PHASE4_7_BEFORE_4_5.md`](docs/PLAN_PHASE4_7_BEFORE_4_5.md) | Phase 4.7→4.5 调序方案（先积累样本再提炼语法糖） |
 | [`PLAN_PHASE4_5_S3_SUGAR.md`](docs/PLAN_PHASE4_5_S3_SUGAR.md) | Phase 4.5-S3 语法糖深化实施方案（nebula_visual + init_themed + frame_begin） |
 | [`PLAN_PHASE4_8_EDITOR.md`](docs/PLAN_PHASE4_8_EDITOR.md) | Phase 4.8 编辑器功能规划 |
