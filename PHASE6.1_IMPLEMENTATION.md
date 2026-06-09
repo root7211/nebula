@@ -71,9 +71,13 @@ color_end = bg_color   -- 与起始色相同，确保纯色效果
 
 ## 验证结果
 - ✅ gradient_demo.nelua 编译成功
+- ✅ gradient_showcase_demo.nelua 编译成功（8 个渐变变体）
 - ✅ button_v2_demo.nelua 编译成功（向后兼容验证）
 - ✅ 生成的 WGSL 代码包含完整渐变逻辑
 - ✅ Uniforms 结构正确对齐（112 字节）
+- ⚠️ **Bug 修复**: 初版遗漏 uint32 类型映射，导致 WGSL 编译失败
+  - 已修复 (commit de99654): 添加 uint32 到类型映射表
+  - fill_mode 字段现在正确出现在 WGSL Uniforms 结构中
 
 ## 使用示例
 
