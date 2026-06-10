@@ -996,6 +996,12 @@ local function _emit_init_texts(reg, emit)
     emit("      &NEBULA_SLUG_BAND_METAS[0], _metas_sz,")
     emit("      &NEBULA_SLUG_BAND_REFS[0], _refs_sz) then return false end")
     emit("    if not self.pipe_slug_text:update_slug_bind_group(renderer) then return false end")
+  end
+  -- 初始化 text context mesh
+  for _, txt in ipairs(reg.texts) do
+    emit(("  self.%s.mesh:init()"):format(txt.name))
+  end
+  if has_slug_init then
     emit("  end")
   end
 end

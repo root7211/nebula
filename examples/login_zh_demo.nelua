@@ -1,0 +1,32 @@
+-- 简单的中文登录界面（直接使用 CJK SlugText API，不通过 Sugar）
+require "nebula"
+
+## nebula_visual("CardVisual", { primitives = {} })
+## nebula_visual("InputVisual", { primitives = {"hoverable", "clickable", "focusable"} })
+## nebula_visual("ButtonVisual", { primitives = {"hoverable", "clickable"} })
+
+## nebula_app("LoginApp", {
+##   components = {
+##     { name = "card", type = "CardVisual" },
+##     { name = "username_input", type = "InputVisual" },
+##     { name = "password_input", type = "InputVisual" },
+##     { name = "login_btn", type = "ButtonVisual" },
+##   },
+## })
+
+## local function on_init(app)
+##   return {
+##     ("%s.card:init_themed(Vec2{x=220, y=80}, Vec2{x=360, y=400}, 16.0)"):format(app),
+##     ("%s.username_input:init_themed(Vec2{x=252, y=190}, Vec2{x=296, y=44}, 8.0)"):format(app),
+##     ("%s.password_input:init_themed(Vec2{x=252, y=258}, Vec2{x=296, y=44}, 8.0)"):format(app),
+##     ("%s.login_btn:init_themed(Vec2{x=252, y=330}, Vec2{x=296, y=44}, 8.0)"):format(app),
+##   }
+## end
+
+## nebula_main("LoginApp", {
+##   title = "登录",
+##   width = 800,
+##   height = 580,
+##   bg_r = 0.08, bg_g = 0.08, bg_b = 0.10,
+##   on_init = on_init,
+## })

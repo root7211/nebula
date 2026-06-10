@@ -1389,7 +1389,7 @@
 ##   table.insert(lines, ("  local verts: [%d]NebulaSlugVertex"):format(max_vertices))
 ##   table.insert(lines,  "  local mesh_w: float32 = 0.0")
 ##   table.insert(lines,  "  local mesh_h: float32 = 0.0")
-##   table.insert(lines,  "  local vertex_count = nebula_slug_text_build_vertices(")
+##   table.insert(lines,  "  local vertex_count = nebula_cjk_slug_text_build_vertices(")
 ##   table.insert(lines,  "    text,")
 ##   table.insert(lines,  "    self.visual.pos.x,")
 ##   table.insert(lines,  "    self.visual.pos.y,")
