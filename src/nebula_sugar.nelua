@@ -936,3 +936,51 @@
 ##   cell_w     = 10.0,
 ##   cell_h     = 16.0,
 ## })
+
+## -- =============================================================================
+## -- ★ Phase 6.2: Theme Token System
+## -- =============================================================================
+## 
+## -- 加载主题定义
+## local THEMES = dofile(string.format("%s/src/themes/nebula_themes.lua", 
+##   os.getenv("NEBULA_ROOT") or "."))
+## 
+## -- 应用主题到 Visual 的 init_themed
+## function nebula_apply_theme(visual_name, theme_name, state_overrides)
+##   theme_name = theme_name or "material_dark"
+##   state_overrides = state_overrides or {}
+##   
+##   local theme = THEMES[theme_name]
+##   if not theme then
+##     error("nebula_apply_theme: unknown theme '" .. theme_name .. "'")
+##   end
+##   
+##   local reg = nebula_registry[visual_name]
+##   if not reg then
+##     error("nebula_apply_theme: visual '" .. visual_name .. "' not registered")
+##   end
+##   
+##   -- 更新 NEBULA_THEME_DEFAULTS 使 init_themed 使用主题色
+##   for _, state in ipairs(reg.states) do
+##     local override = state_overrides[state]
+##     if override then
+##       NEBULA_THEME_DEFAULTS[state] = {
+##         bg = override.bg or theme.surface,
+##         border = override.border or theme.outline,
+##         border_width = override.border_width or 0,
+##       }
+##     elseif theme[visual_name:lower():gsub("visual$", "")] then
+##       local comp = theme[visual_name:lower():gsub("visual$", "")]
+##       if comp[state] and comp[state].bg then
+##         NEBULA_THEME_DEFAULTS[state] = {
+##           bg = comp[state].bg,
+##           border = comp[state].border or theme.outline,
+##           border_width = comp[state].border_width or 0,
+##         }
+##       end
+##     end
+##   end
+##   
+##   print(("[theme] Applied '%s' theme to %s"):format(theme_name, visual_name))
+## end
+
