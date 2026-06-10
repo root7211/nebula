@@ -230,7 +230,24 @@ fn vs_main(
   if has_border then
     table.insert(fs_lines, "  let border_alpha = (1.0 - smoothstep(-aa, aa, dist + d.border_width)) - fill_alpha;")
   end
-  table.insert(fs_lines, "  var color = d.bg_color * fill_alpha;")
+  
+  -- ★ Phase 6.1: Gradient fill support
+  table.insert(fs_lines, "  // Phase 6.1: Gradient fill")
+  table.insert(fs_lines, "  var bg: vec4<f32>;")
+  table.insert(fs_lines, "  if (d.fill_mode == 1u) {")
+  table.insert(fs_lines, "    // Linear gradient")
+  table.insert(fs_lines, "    let t = dot(p / half_size, vec2<f32>(cos(d.gradient_angle), sin(d.gradient_angle))) * 0.5 + 0.5;")
+  table.insert(fs_lines, "    bg = mix(d.bg_color, d.color_end, t);")
+  table.insert(fs_lines, "  } else if (d.fill_mode == 2u) {")
+  table.insert(fs_lines, "    // Radial gradient")
+  table.insert(fs_lines, "    let t = length(p / half_size);")
+  table.insert(fs_lines, "    bg = mix(d.bg_color, d.color_end, t);")
+  table.insert(fs_lines, "  } else {")
+  table.insert(fs_lines, "    // Solid color (backward compatible)")
+  table.insert(fs_lines, "    bg = d.bg_color;")
+  table.insert(fs_lines, "  }")
+  table.insert(fs_lines, "  var color = bg * fill_alpha;")
+  
   if has_border then
     table.insert(fs_lines, "  color = color + d.border_color * border_alpha;")
   end

@@ -1,0 +1,149 @@
+-- =============================================================================
+-- gradient_showcase_demo.nelua — Phase 6.1 渐变填充完整演示
+-- 
+-- 展示内容：
+-- - 多角度线性渐变（0°, 45°, 90°, 135°）
+-- - 径向渐变（中心到边缘）
+-- - 纯色填充（向后兼容验证）
+-- - 悬停态渐变过渡动画
+-- - 不同颜色组合
+-- =============================================================================
+require "nebula"
+
+## nebula_visual("CardVisual", { primitives = {"hoverable"} })
+
+## nebula_app("GradientShowcaseApp", {
+##   components = {
+##     -- 第一行：线性渐变 - 不同角度
+##     { name = "linear_0",   type = "CardVisual" },  -- 0° (水平)
+##     { name = "linear_45",  type = "CardVisual" },  -- 45°
+##     { name = "linear_90",  type = "CardVisual" },  -- 90° (垂直)
+##     { name = "linear_135", type = "CardVisual" },  -- 135°
+##     
+##     -- 第二行：特殊效果
+##     { name = "radial_1",   type = "CardVisual" },  -- 径向渐变 - 暖色
+##     { name = "radial_2",   type = "CardVisual" },  -- 径向渐变 - 冷色
+##     { name = "solid",      type = "CardVisual" },  -- 纯色（向后兼容）
+##     { name = "linear_180", type = "CardVisual" },  -- 180° (反向水平)
+##   },
+## })
+
+## local function on_init(app)
+##   local lines = {}
+##   local math = math
+##   
+##   -- 第一行 Y 位置
+##   local row1_y = 80
+##   -- 第二行 Y 位置
+##   local row2_y = 300
+##   -- 卡片尺寸
+##   local card_w = 160
+##   local card_h = 180
+##   local spacing = 20
+##   local start_x = 40
+##   
+##   -- ===== 第一行：线性渐变 - 不同角度 =====
+##   
+##   -- 卡片 1: 0° 线性渐变（左到右）
+##   table.insert(lines, string.format([[
+##     %s.linear_0:init_themed(Vec2{x=%d, y=%d}, Vec2{x=%d, y=%d}, 12.0)
+##     %s.linear_0.visual.fill_mode = 1
+##     %s.linear_0.visual.gradient_angle = 0.0
+##     %s.linear_0.visual.default_bg_color = Color{r=0.85, g=0.26, b=0.22, a=1.0}
+##     %s.linear_0.visual.default_color_end = Color{r=0.95, g=0.61, b=0.07, a=1.0}
+##     %s.linear_0.visual.hovered_bg_color = Color{r=0.90, g=0.31, b=0.27, a=1.0}
+##     %s.linear_0.visual.hovered_color_end = Color{r=1.0, g=0.66, b=0.12, a=1.0}
+##   ]], app, start_x, row1_y, card_w, card_h, app, app, app, app, app, app))
+##   
+##   -- 卡片 2: 45° 线性渐变（左下到右上）
+##   local x2 = start_x + card_w + spacing
+##   table.insert(lines, string.format([[
+##     %s.linear_45:init_themed(Vec2{x=%d, y=%d}, Vec2{x=%d, y=%d}, 12.0)
+##     %s.linear_45.visual.fill_mode = 1
+##     %s.linear_45.visual.gradient_angle = 0.785
+##     %s.linear_45.visual.default_bg_color = Color{r=0.61, g=0.15, b=0.69, a=1.0}
+##     %s.linear_45.visual.default_color_end = Color{r=0.40, g=0.23, b=0.72, a=1.0}
+##     %s.linear_45.visual.hovered_bg_color = Color{r=0.66, g=0.20, b=0.74, a=1.0}
+##     %s.linear_45.visual.hovered_color_end = Color{r=0.45, g=0.28, b=0.77, a=1.0}
+##   ]], app, x2, row1_y, card_w, card_h, app, app, app, app, app, app))
+##   
+##   -- 卡片 3: 90° 线性渐变（上到下）
+##   local x3 = x2 + card_w + spacing
+##   table.insert(lines, string.format([[
+##     %s.linear_90:init_themed(Vec2{x=%d, y=%d}, Vec2{x=%d, y=%d}, 12.0)
+##     %s.linear_90.visual.fill_mode = 1
+##     %s.linear_90.visual.gradient_angle = 1.571
+##     %s.linear_90.visual.default_bg_color = Color{r=0.10, g=0.59, b=0.95, a=1.0}
+##     %s.linear_90.visual.default_color_end = Color{r=0.15, g=0.35, b=0.71, a=1.0}
+##     %s.linear_90.visual.hovered_bg_color = Color{r=0.15, g=0.64, b=1.0, a=1.0}
+##     %s.linear_90.visual.hovered_color_end = Color{r=0.20, g=0.40, b=0.76, a=1.0}
+##   ]], app, x3, row1_y, card_w, card_h, app, app, app, app, app, app))
+##   
+##   -- 卡片 4: 135° 线性渐变（左上到右下）
+##   local x4 = x3 + card_w + spacing
+##   table.insert(lines, string.format([[
+##     %s.linear_135:init_themed(Vec2{x=%d, y=%d}, Vec2{x=%d, y=%d}, 12.0)
+##     %s.linear_135.visual.fill_mode = 1
+##     %s.linear_135.visual.gradient_angle = 2.356
+##     %s.linear_135.visual.default_bg_color = Color{r=0.18, g=0.80, b=0.44, a=1.0}
+##     %s.linear_135.visual.default_color_end = Color{r=0.10, g=0.55, b=0.60, a=1.0}
+##     %s.linear_135.visual.hovered_bg_color = Color{r=0.23, g=0.85, b=0.49, a=1.0}
+##     %s.linear_135.visual.hovered_color_end = Color{r=0.15, g=0.60, b=0.65, a=1.0}
+##   ]], app, x4, row1_y, card_w, card_h, app, app, app, app, app, app))
+##   
+##   -- ===== 第二行：特殊效果 =====
+##   
+##   -- 卡片 5: 径向渐变 - 暖色系（红到橙）
+##   table.insert(lines, string.format([[
+##     %s.radial_1:init_themed(Vec2{x=%d, y=%d}, Vec2{x=%d, y=%d}, 12.0)
+##     %s.radial_1.visual.fill_mode = 2
+##     %s.radial_1.visual.default_bg_color = Color{r=0.95, g=0.77, b=0.06, a=1.0}
+##     %s.radial_1.visual.default_color_end = Color{r=0.92, g=0.29, b=0.14, a=1.0}
+##     %s.radial_1.visual.hovered_bg_color = Color{r=1.0, g=0.82, b=0.11, a=1.0}
+##     %s.radial_1.visual.hovered_color_end = Color{r=0.97, g=0.34, b=0.19, a=1.0}
+##   ]], app, start_x, row2_y, card_w, card_h, app, app, app, app, app))
+##   
+##   -- 卡片 6: 径向渐变 - 冷色系（青到紫）
+##   table.insert(lines, string.format([[
+##     %s.radial_2:init_themed(Vec2{x=%d, y=%d}, Vec2{x=%d, y=%d}, 12.0)
+##     %s.radial_2.visual.fill_mode = 2
+##     %s.radial_2.visual.default_bg_color = Color{r=0.40, g=0.93, b=0.93, a=1.0}
+##     %s.radial_2.visual.default_color_end = Color{r=0.20, g=0.30, b=0.70, a=1.0}
+##     %s.radial_2.visual.hovered_bg_color = Color{r=0.45, g=0.98, b=0.98, a=1.0}
+##     %s.radial_2.visual.hovered_color_end = Color{r=0.25, g=0.35, b=0.75, a=1.0}
+##   ]], app, x2, row2_y, card_w, card_h, app, app, app, app, app))
+##   
+##   -- 卡片 7: 纯色填充（向后兼容验证）
+##   table.insert(lines, string.format([[
+##     %s.solid:init_themed(Vec2{x=%d, y=%d}, Vec2{x=%d, y=%d}, 12.0)
+##     %s.solid.visual.fill_mode = 0
+##     %s.solid.visual.default_bg_color = Color{r=0.26, g=0.63, b=0.28, a=1.0}
+##     %s.solid.visual.hovered_bg_color = Color{r=0.31, g=0.68, b=0.33, a=1.0}
+##   ]], app, x3, row2_y, card_w, card_h, app, app, app, app))
+##   
+##   -- 卡片 8: 180° 线性渐变（右到左，反向）
+##   table.insert(lines, string.format([[
+##     %s.linear_180:init_themed(Vec2{x=%d, y=%d}, Vec2{x=%d, y=%d}, 12.0)
+##     %s.linear_180.visual.fill_mode = 1
+##     %s.linear_180.visual.gradient_angle = 3.142
+##     %s.linear_180.visual.default_bg_color = Color{r=0.95, g=0.45, b=0.71, a=1.0}
+##     %s.linear_180.visual.default_color_end = Color{r=0.55, g=0.15, b=0.55, a=1.0}
+##     %s.linear_180.visual.hovered_bg_color = Color{r=1.0, g=0.50, b=0.76, a=1.0}
+##     %s.linear_180.visual.hovered_color_end = Color{r=0.60, g=0.20, b=0.60, a=1.0}
+##   ]], app, x4, row2_y, card_w, card_h, app, app, app, app, app, app))
+##   
+##   return lines
+## end
+
+## local function on_frame(app)
+##   return {}
+## end
+
+## nebula_main("GradientShowcaseApp", {
+##   title = "Phase 6.1 - Gradient Showcase (8 variants + hover effects)",
+##   width = 800,
+##   height = 520,
+##   bg_r = 0.09, bg_g = 0.09, bg_b = 0.11,
+##   on_init = on_init,
+##   on_frame = on_frame,
+## })
