@@ -1,0 +1,78 @@
+-- =============================================================================
+-- login_cjk_demo.nelua — 支持中文的登录界面（SlugText）
+-- =============================================================================
+require "nebula"
+
+## nebula_visual("CardVisual", { primitives = {} })
+## nebula_visual("InputVisual", { primitives = {"hoverable", "clickable", "focusable"} })
+## nebula_visual("ButtonVisual", { primitives = {"hoverable", "clickable"} })
+## nebula_visual("LabelVisual", { text_mode = "slug", max_chars = 32 })
+
+## nebula_app("LoginApp", {
+##   components = {
+##     { name = "card", type = "CardVisual" },
+##     { name = "title", type = "LabelVisual" },
+##     { name = "username_label", type = "LabelVisual" },
+##     { name = "password_label", type = "LabelVisual" },
+##     { name = "username_input", type = "InputVisual" },
+##     { name = "password_input", type = "InputVisual" },
+##     { name = "login_btn", type = "ButtonVisual" },
+##   },
+## })
+
+## local function on_init(app)
+##   local lines = {}
+##   
+##   table.insert(lines, string.format([[
+##     %s.card:init_themed(Vec2{x=220, y=80}, Vec2{x=360, y=400}, 16.0)
+##     %s.card.visual.default_bg_color = Color{r=0.13, g=0.13, b=0.15, a=1.0}
+##     %s.card.visual.default_border_color = Color{r=0.25, g=0.25, b=0.28, a=1.0}
+##     %s.card.visual.default_border_width = 1.0
+##   ]], app, app, app, app))
+##   
+##   -- 初始化 slug text
+##   table.insert(lines, string.format([[
+##     %s.title:init(LabelVisual{pos=Vec2{x=300,y=130}, size=Vec2{x=200,y=30}, pixel_height=24.0, default_text_color=Color{r=0.9,g=0.9,b=0.95,a=1.0}})
+##     %s.title:set_text(%s.renderer, "欢迎登录")
+##     %s.username_label:init(LabelVisual{pos=Vec2{x=252,y=168}, size=Vec2{x=80,y=20}, pixel_height=14.0, default_text_color=Color{r=0.7,g=0.7,b=0.75,a=1.0}})
+##     %s.username_label:set_text(%s.renderer, "用户名")
+##     %s.password_label:init(LabelVisual{pos=Vec2{x=252,y=236}, size=Vec2{x=80,y=20}, pixel_height=14.0, default_text_color=Color{r=0.7,g=0.7,b=0.75,a=1.0}})
+##     %s.password_label:set_text(%s.renderer, "密码")
+##   ]], app, app, app, app, app, app, app, app, app))
+##   
+##   table.insert(lines, string.format([[
+##     %s.username_input:init_themed(Vec2{x=252, y=190}, Vec2{x=296, y=44}, 8.0)
+##     %s.username_input.visual.default_bg_color = Color{r=0.18, g=0.18, b=0.20, a=1.0}
+##     %s.username_input.visual.focused_border_color = Color{r=0.35, g=0.60, b=1.00, a=1.0}
+##     %s.username_input.visual.focused_border_width = 2.0
+##   ]], app, app, app, app))
+##   
+##   table.insert(lines, string.format([[
+##     %s.password_input:init_themed(Vec2{x=252, y=258}, Vec2{x=296, y=44}, 8.0)
+##     %s.password_input.visual.default_bg_color = Color{r=0.18, g=0.18, b=0.20, a=1.0}
+##     %s.password_input.visual.focused_border_color = Color{r=0.35, g=0.60, b=1.00, a=1.0}
+##     %s.password_input.visual.focused_border_width = 2.0
+##   ]], app, app, app, app))
+##   
+##   table.insert(lines, string.format([[
+##     %s.login_btn:init_themed(Vec2{x=252, y=330}, Vec2{x=296, y=44}, 8.0)
+##     %s.login_btn.visual.default_bg_color = Color{r=0.35, g=0.60, b=1.00, a=1.0}
+##     %s.login_btn.visual.hovered_bg_color = Color{r=0.40, g=0.65, b=1.00, a=1.0}
+##     %s.login_btn.visual.pressed_bg_color = Color{r=0.30, g=0.55, b=0.95, a=1.0}
+##   ]], app, app, app, app))
+##   
+##   return lines
+## end
+
+## local function on_frame(app)
+##   return 
+## end
+
+## nebula_main("LoginApp", {
+##   title = "Nebula 登录 - 中文支持",
+##   width = 800,
+##   height = 580,
+##   bg_r = 0.08, bg_g = 0.08, bg_b = 0.10,
+##   on_init = on_init,
+##   on_frame = on_frame,
+## })

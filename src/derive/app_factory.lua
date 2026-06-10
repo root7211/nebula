@@ -206,19 +206,23 @@ function nebula_app_register_component(name, visual_type, opts)
     _layout_seq  = opts.layout and (function() reg._layout_order = reg._layout_order + 1; return reg._layout_order end)() or nil,
   })
 
-  -- 更新 type_groups
-  if not reg.type_groups[visual_type] then
-    reg.type_groups[visual_type] = {
-      visual_type    = visual_type,
-      base           = base,
-      pipeline_name  = base .. "Pipeline",
-      members        = {},
-    }
+  -- 更新 type_groups（slug text 组件跳过，使用共享 pipe_slug_text）
+  local comp_reg = nebula_registry and nebula_registry[visual_type]
+  local is_slug_text = comp_reg and comp_reg.text_mode == "slug"
+  if not is_slug_text then
+    if not reg.type_groups[visual_type] then
+      reg.type_groups[visual_type] = {
+        visual_type    = visual_type,
+        base           = base,
+        pipeline_name  = base .. "Pipeline",
+        members        = {},
+      }
+    end
+    table.insert(reg.type_groups[visual_type].members, {
+      name     = name,
+      is_slot  = false,
+    })
   end
-  table.insert(reg.type_groups[visual_type].members, {
-    name     = name,
-    is_slot  = false,
-  })
 end
 
 -- ★ Phase 3.9 / Phase 3.10.5: 注册一个文本组件（原语 3：编译期 Text 一等公民）
@@ -946,6 +950,13 @@ local function _emit_record_texts(reg, emit)
     if txt.text_mode == "slug" then has_slug_txt = true
     else has_sdf_txt = true end
   end
+  -- ★ 扫描 components：检测 Sugar API 生成的 slug text visual
+  for _, comp in ipairs(reg.components) do
+    local comp_reg = nebula_registry[comp.visual_type]
+    if comp_reg and comp_reg.text_mode == "slug" then
+      has_slug_txt = true
+    end
+  end
   if has_sdf_txt  then emit("  pipe_text: TextPipeline,") end
   if has_slug_txt then emit("  pipe_slug_text: SlugTextPipeline,") end
   for _, txt in ipairs(reg.texts) do
@@ -960,6 +971,13 @@ local function _emit_init_texts(reg, emit)
   for _, txt in ipairs(reg.texts) do
     if txt.text_mode == "slug" then has_slug_init = true
     else has_sdf_init = true end
+  end
+  -- ★ 扫描 components：检测 Sugar API 生成的 slug text visual
+  for _, comp in ipairs(reg.components) do
+    local comp_reg = nebula_registry[comp.visual_type]
+    if comp_reg and comp_reg.text_mode == "slug" then
+      has_slug_init = true
+    end
   end
   emit("")
   emit("  -- ★ Phase 3.9 / Phase 4.1: 初始化文本管线")
@@ -1067,6 +1085,13 @@ local function _emit_deinit_texts(reg, emit)
     local mode = txt.text_mode or "sdf"
     if mode == "sdf" then has_sdf_txt = true end
     if mode == "slug" then has_slug_txt = true end
+  end
+  -- ★ 扫描 components：检测 Sugar API 生成的 slug text visual
+  for _, comp in ipairs(reg.components) do
+    local comp_reg = nebula_registry[comp.visual_type]
+    if comp_reg and comp_reg.text_mode == "slug" then
+      has_slug_txt = true
+    end
   end
   if has_sdf_txt  then emit("  self.pipe_text:deinit()") end
   if has_slug_txt then emit("  self.pipe_slug_text:deinit()") end

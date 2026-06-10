@@ -350,6 +350,22 @@
 ##     return
 ##   end
 ##
+##   -- SlugText 简写路径：text_mode="slug" 支持 CJK
+##   if text_mode == "slug" then
+##     local record_src = ("global %s = @record{ pos: Vec2, size: Vec2, pixel_height: float32, default_text_color: Color }"):format(type_name)
+##     local ast = aster.parse(record_src, _nebula_parse_tag("nebula_visual", type_name))
+##     for _, stat in ipairs(ast) do
+##       inject_statement(stat)
+##     end
+##     nebula_component(type_name, {
+##       text_mode = "slug",
+##       max_chars = spec.max_chars or 256,
+##     })
+##     print(("[sugar] nebula_visual: %s (slug, max_chars=%d, CJK support)"):format(
+##       type_name, spec.max_chars or 256))
+##     return
+##   end
+##
 ##   -- 交互型 Visual 路径
 ##   local resolved = nebula_resolve_primitives(primitives)
 ##   local has_prim = {}
@@ -709,6 +725,12 @@
 ##         cell_h    = c.cell_h or app_cell_h,
 ##         producer  = c.producer,
 ##         layout    = c.layout,
+##       })
+##     elseif text_mode == "slug" then
+##       -- ★ 自动路由：text_mode="slug" → SlugText 管线（static 模式，需手动初始化）
+##       nebula_app_register_text(c.name, c.type, {
+##         mode      = "static",
+##         text_mode = "slug",
 ##       })
 ##     else
 ##       -- 标准组件注册
