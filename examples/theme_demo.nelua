@@ -1,0 +1,78 @@
+-- =============================================================================
+-- theme_demo.nelua — Phase 6.2 主题系统演示
+-- =============================================================================
+require "nebula"
+
+## nebula_visual("ThemedButtonVisual", { primitives = {"clickable"} })
+## nebula_visual("ThemedCardVisual", { primitives = {"hoverable"} })
+
+## nebula_app("ThemeDemoApp", {
+##   components = {
+##     -- Material Dark 主题
+##     { name = "material_btn", type = "ThemedButtonVisual" },
+##     { name = "material_card", type = "ThemedCardVisual" },
+##     
+##     -- Nord 主题
+##     { name = "nord_btn", type = "ThemedButtonVisual" },
+##     { name = "nord_card", type = "ThemedCardVisual" },
+##     
+##     -- Dracula 主题
+##     { name = "dracula_btn", type = "ThemedButtonVisual" },
+##     { name = "dracula_card", type = "ThemedCardVisual" },
+##   },
+## })
+
+## local function on_init(app)
+##   local lines = {}
+##   
+##   -- Material Dark (左列)
+##   table.insert(lines, string.format([[
+##     %s.material_btn:init_themed(Vec2{x=50, y=100}, Vec2{x=200, y=60}, 8.0)
+##     %s.material_btn.visual.default_bg_color = Color{r=0.40, g=0.63, b=0.95, a=1.0}
+##     %s.material_btn.visual.hovered_bg_color = Color{r=0.46, g=0.68, b=1.00, a=1.0}
+##     %s.material_btn.visual.pressed_bg_color = Color{r=0.34, g=0.58, b=0.90, a=1.0}
+##     
+##     %s.material_card:init_themed(Vec2{x=50, y=200}, Vec2{x=200, y=250}, 12.0)
+##     %s.material_card.visual.default_bg_color = Color{r=0.12, g=0.12, b=0.14, a=1.0}
+##     %s.material_card.visual.hovered_bg_color = Color{r=0.14, g=0.14, b=0.16, a=1.0}
+##   ]], app, app, app, app, app, app, app))
+##   
+##   -- Nord (中列)
+##   table.insert(lines, string.format([[
+##     %s.nord_btn:init_themed(Vec2{x=300, y=100}, Vec2{x=200, y=60}, 6.0)
+##     %s.nord_btn.visual.default_bg_color = Color{r=0.53, g=0.75, b=0.82, a=1.0}
+##     %s.nord_btn.visual.hovered_bg_color = Color{r=0.58, g=0.78, b=0.85, a=1.0}
+##     %s.nord_btn.visual.pressed_bg_color = Color{r=0.48, g=0.72, b=0.79, a=1.0}
+##     
+##     %s.nord_card:init_themed(Vec2{x=300, y=200}, Vec2{x=200, y=250}, 10.0)
+##     %s.nord_card.visual.default_bg_color = Color{r=0.23, g=0.26, b=0.32, a=1.0}
+##     %s.nord_card.visual.hovered_bg_color = Color{r=0.26, g=0.29, b=0.35, a=1.0}
+##   ]], app, app, app, app, app, app, app))
+##   
+##   -- Dracula (右列)
+##   table.insert(lines, string.format([[
+##     %s.dracula_btn:init_themed(Vec2{x=550, y=100}, Vec2{x=200, y=60}, 8.0)
+##     %s.dracula_btn.visual.default_bg_color = Color{r=0.74, g=0.58, b=0.98, a=1.0}
+##     %s.dracula_btn.visual.hovered_bg_color = Color{r=0.79, g=0.63, b=1.00, a=1.0}
+##     %s.dracula_btn.visual.pressed_bg_color = Color{r=0.69, g=0.53, b=0.93, a=1.0}
+##     
+##     %s.dracula_card:init_themed(Vec2{x=550, y=200}, Vec2{x=200, y=250}, 12.0)
+##     %s.dracula_card.visual.default_bg_color = Color{r=0.17, g=0.13, b=0.21, a=1.0}
+##     %s.dracula_card.visual.hovered_bg_color = Color{r=0.20, g=0.16, b=0.24, a=1.0}
+##   ]], app, app, app, app, app, app, app))
+##   
+##   return lines
+## end
+
+## local function on_frame(app)
+##   return {}
+## end
+
+## nebula_main("ThemeDemoApp", {
+##   title = "Phase 6.2 - Theme System (Material Dark / Nord / Dracula)",
+##   width = 800,
+##   height = 500,
+##   bg_r = 0.06, bg_g = 0.06, bg_b = 0.08,
+##   on_init = on_init,
+##   on_frame = on_frame,
+## })

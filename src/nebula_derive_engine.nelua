@@ -1657,7 +1657,8 @@
 ##     standard_instanced = use_instanced,
 ##     max_instances      = max_instances,
 ##     -- Phase 2.5 / Phase 3.7: 阴影多 Pass 着色器（仅在 has_shadow=true 时生效，此时 use_instanced=false）
-##     has_shadow          = feats.has_shadow,
+##     -- ★ Phase 6.3: 只有 shadow composer 匹配时才设置 has_shadow 标志
+##     has_shadow          = (composer.name == "shadow") and feats.has_shadow,
 ##     shadow_mask_source  = shadow_shaders and shadow_shaders.shadow_mask_source or nil,
 ##     blur_h_source       = shadow_shaders and shadow_shaders.blur_h_source or nil,
 ##     blur_v_source       = shadow_shaders and shadow_shaders.blur_v_source or nil,

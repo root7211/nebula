@@ -358,6 +358,24 @@ local function gen_pipeline_shadow(base, uniforms_record, wgsl_source,
   emit(("  wgpuQueueWriteBuffer(renderer.queue, self.shadow_mask_ubuf, 0, uniforms, #%s)"):format(uniforms_record))
   emit("end")
 
+  -- ===== update_viewport =====
+  emit(("function %s:update_viewport(renderer: *NebulaRenderer, vw: float32, vh: float32): void"):format(pipe))
+  emit("  -- shadow pipeline uses draw_shadow which doesn't need viewport uniforms")
+  emit("  -- This method exists for API compatibility with standard pipelines")
+  emit("end")
+
+  -- ===== upload (instanced batching compatibility) =====
+  emit(("function %s:upload(renderer: *NebulaRenderer, batch: *%s, count: uint32): void"):format(pipe, uniforms_record))
+  emit("  -- shadow pipeline currently doesn't support instanced batching")
+  emit("  -- Only single-draw mode via update_uniforms is supported")
+  emit("end")
+
+  -- ===== draw_instanced (instanced compatibility) =====
+  emit(("function %s:draw_instanced(pass: WGPURenderPassEncoder, count: uint32): void"):format(pipe))
+  emit("  -- shadow pipeline uses draw_shadow + draw_composite + draw")
+  emit("  -- This method exists for API compatibility only")
+  emit("end")
+
   -- ===== draw_composite（在 surface 主 Pass 中合成模糊阴影） =====
   emit(("function %s:draw_composite(pass: WGPURenderPassEncoder): void"):format(pipe))
   emit("  wgpuRenderPassEncoderSetPipeline(pass, self.composite_pipeline)")

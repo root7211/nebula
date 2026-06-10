@@ -290,11 +290,9 @@ function nebula_compose_shadow_shaders(opts)
   local sdf_fn     = NEBULA_SDF_SHAPES[sdf_shape_name].fn_name
 
   -- 阴影遮罩着色器（Pass 1）：生成高斯模糊前的原始阴影形状
-  local shadow_mask_source = struct_def .. string.format([[
+  local shadow_mask_source = struct_def .. string.format([=[
 
-struct Viewport { size: vec2<f32>, _pad0: f32, _pad1: f32 }
-@group(0) @binding(0) var<uniform> vp: Viewport;
-@group(0) @binding(1) var<uniform> u:  %s;
+@group(0) @binding(0) var<uniform> u: %s;
 
 struct VertexOutput {
   @builtin(position) clip_pos: vec4<f32>,
@@ -307,15 +305,18 @@ fn vs_main(@builtin(vertex_index) vi: u32) -> VertexOutput {
     vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0),
     vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 1.0)
   );
-  let p = u.pos + corners[vi] * u.size;
-  let ndc = (p / vp.size) * 2.0 - 1.0;
+  // Use fullscreen quad in NDC space
+  var ndc_corners = array<vec2<f32>, 4>(
+    vec2<f32>(-1.0, 1.0), vec2<f32>(1.0, 1.0),
+    vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0)
+  );
   var out: VertexOutput;
-  out.clip_pos = vec4<f32>(ndc.x, -ndc.y, 0.0, 1.0);
+  out.clip_pos = vec4<f32>(ndc_corners[vi], 0.0, 1.0);
   out.p = corners[vi];
   return out;
 }
 
-]], struct_name)
+]=], struct_name)
 
   -- ★ Phase 5.3: 统一使用注册表查出的 SDF 函数
   local sdf_call_arg = has_radius and (sdf_fn .. "(p, half_size, u.radius)") or (sdf_fn .. "(p, half_size)")
@@ -841,7 +842,8 @@ nebula_register_shader_composer("instanced", {
   compose       = nebula_compose_shader_instanced,
   pipeline_flag = "standard_instanced",
   match         = function(reg, feats)
-    return not reg.text_mode and not feats.has_shadow
+    -- ★ Phase 6.3: 接受带 shadow 字段的 Visual（shadow composer 被禁用时的回退路径）
+    return not reg.text_mode
   end,
   priority      = 0,
   description   = "标准 Visual 的 Instanced SDF 着色器（默认路径）",
@@ -851,10 +853,12 @@ nebula_register_shader_composer("shadow", {
   compose       = nebula_compose_shadow_shaders,
   pipeline_flag = "has_shadow",
   match         = function(reg, feats)
-    return not reg.text_mode and feats.has_shadow
+    -- ★ Phase 6.3 WIP: shadow multi-pass temporarily disabled
+    -- return not reg.text_mode and feats.has_shadow
+    return false
   end,
   priority      = 10,
-  description   = "阴影多 Pass 路径",
+  description   = "阴影多 Pass 路径（Phase 6.3 暂时禁用）",
 })
 
 nebula_register_shader_composer("text_sdf", {
