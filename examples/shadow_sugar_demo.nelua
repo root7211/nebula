@@ -1,0 +1,94 @@
+-- =============================================================================
+-- shadow_sugar_demo.nelua — Phase 6.3 Shadow Sugar API 演示
+-- =============================================================================
+require "nebula"
+
+## nebula_visual("ShadowCardVisual", { 
+##   primitives = {"hoverable"},
+##   shadow = {
+##     blur = 16,
+##     offset = {0, 4},
+##     color = {r=0, g=0, b=0, a=0.4},
+##   }
+## })
+
+## nebula_visual("ShadowButtonVisual", { 
+##   primitives = {"clickable"},
+##   shadow = {
+##     blur = 12,
+##     offset = {0, 2},
+##     color = {r=0, g=0, b=0, a=0.5},
+##   }
+## })
+
+## nebula_app("ShadowSugarApp", {
+##   components = {
+##     { name = "card1", type = "ShadowCardVisual" },
+##     { name = "card2", type = "ShadowCardVisual" },
+##     { name = "btn1", type = "ShadowButtonVisual" },
+##     { name = "btn2", type = "ShadowButtonVisual" },
+##   },
+## })
+
+## local function on_init(app)
+##   local lines = {}
+##   
+##   -- Card 1: 浅色卡片 + 柔和阴影
+##   table.insert(lines, string.format([[
+##     %s.card1:init_themed(Vec2{x=50, y=50}, Vec2{x=300, y=200}, 16.0)
+##     %s.card1.visual.shadow_offset = Vec2{x=0, y=4}
+##     %s.card1.visual.shadow_blur = 16.0
+##     %s.card1.visual.default_bg_color = Color{r=0.95, g=0.95, b=0.97, a=1.0}
+##     %s.card1.visual.default_shadow_color = Color{r=0, g=0, b=0, a=0.15}
+##     %s.card1.visual.hovered_bg_color = Color{r=0.97, g=0.97, b=0.99, a=1.0}
+##     %s.card1.visual.hovered_shadow_color = Color{r=0, g=0, b=0, a=0.25}
+##   ]], app, app, app, app, app, app, app))
+##   
+##   -- Card 2: 深色卡片 + 强阴影
+##   table.insert(lines, string.format([[
+##     %s.card2:init_themed(Vec2{x=450, y=50}, Vec2{x=300, y=200}, 16.0)
+##     %s.card2.visual.shadow_offset = Vec2{x=0, y=8}
+##     %s.card2.visual.shadow_blur = 24.0
+##     %s.card2.visual.default_bg_color = Color{r=0.12, g=0.12, b=0.14, a=1.0}
+##     %s.card2.visual.default_shadow_color = Color{r=0, g=0, b=0, a=0.5}
+##     %s.card2.visual.hovered_bg_color = Color{r=0.14, g=0.14, b=0.16, a=1.0}
+##     %s.card2.visual.hovered_shadow_color = Color{r=0, g=0, b=0, a=0.7}
+##   ]], app, app, app, app, app, app, app))
+##   
+##   -- Button 1: Primary button
+##   table.insert(lines, string.format([[
+##     %s.btn1:init_themed(Vec2{x=50, y=300}, Vec2{x=160, y=50}, 8.0)
+##     %s.btn1.visual.shadow_offset = Vec2{x=0, y=2}
+##     %s.btn1.visual.shadow_blur = 12.0
+##     %s.btn1.visual.default_bg_color = Color{r=0.40, g=0.63, b=0.95, a=1.0}
+##     %s.btn1.visual.default_shadow_color = Color{r=0, g=0, b=0, a=0.3}
+##     %s.btn1.visual.hovered_bg_color = Color{r=0.46, g=0.68, b=1.00, a=1.0}
+##     %s.btn1.visual.pressed_bg_color = Color{r=0.34, g=0.58, b=0.90, a=1.0}
+##   ]], app, app, app, app, app, app, app))
+##   
+##   -- Button 2: Danger button
+##   table.insert(lines, string.format([[
+##     %s.btn2:init_themed(Vec2{x=250, y=300}, Vec2{x=160, y=50}, 8.0)
+##     %s.btn2.visual.shadow_offset = Vec2{x=0, y=2}
+##     %s.btn2.visual.shadow_blur = 12.0
+##     %s.btn2.visual.default_bg_color = Color{r=0.95, g=0.26, b=0.21, a=1.0}
+##     %s.btn2.visual.default_shadow_color = Color{r=0.5, g=0, b=0, a=0.4}
+##     %s.btn2.visual.hovered_bg_color = Color{r=1.00, g=0.31, b=0.26, a=1.0}
+##     %s.btn2.visual.pressed_bg_color = Color{r=0.90, g=0.21, b=0.16, a=1.0}
+##   ]], app, app, app, app, app, app, app))
+##   
+##   return lines
+## end
+
+## local function on_frame(app)
+##   return {}
+## end
+
+## nebula_main("ShadowSugarApp", {
+##   title = "Phase 6.3 - Shadow Sugar API Demo",
+##   width = 800,
+##   height = 400,
+##   bg_r = 0.85, bg_g = 0.85, bg_b = 0.87,
+##   on_init = on_init,
+##   on_frame = on_frame,
+## })

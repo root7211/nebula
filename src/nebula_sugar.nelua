@@ -370,12 +370,21 @@
 ##   table.insert(fields, "  fill_mode: uint32,")      -- 0=solid, 1=linear, 2=radial
 ##   table.insert(fields, "  gradient_angle: float32,") -- 线性渐变角度（弧度）
 ##
+##   -- ★ Phase 6.3: 阴影字段
+##   if spec.shadow then
+##     table.insert(fields, "  shadow_offset: Vec2,")
+##     table.insert(fields, "  shadow_blur: float32,")
+##   end
+##
 ##   -- 每个 state 的颜色三元组
 ##   for _, s in ipairs(states) do
 ##     table.insert(fields, ("  %s_bg_color: Color,"):format(s))
 ##     table.insert(fields, ("  %s_color_end: Color,"):format(s))  -- Phase 6.1: 渐变终止色
 ##     table.insert(fields, ("  %s_border_color: Color,"):format(s))
 ##     table.insert(fields, ("  %s_border_width: float32,"):format(s))
+##     if spec.shadow then
+##       table.insert(fields, ("  %s_shadow_color: Color,"):format(s))
+##     end
 ##   end
 ##
 ##   -- scrollable 附加字段：content_height + 每状态 track/thumb 颜色
