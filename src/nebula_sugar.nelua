@@ -385,6 +385,11 @@
 ##     if spec.shadow then
 ##       table.insert(fields, ("  %s_shadow_color: Color,"):format(s))
 ##     end
+##     -- ★ Phase 6.4: Transform 字段
+##     if spec.transform then
+##       table.insert(fields, ("  %s_scale: float32,"):format(s))
+##       table.insert(fields, ("  %s_offset_y: float32,"):format(s))
+##     end
 ##   end
 ##
 ##   -- scrollable 附加字段：content_height + 每状态 track/thumb 颜色

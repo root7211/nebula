@@ -1637,6 +1637,7 @@
 ##       struct_name  = layout.wgsl_struct_name,
 ##       has_radius   = feats.has_radius,
 ##       has_border   = feats.has_border,
+##       has_transform = reg.transform,
 ##       sdf_shape    = reg.sdf_shape,
 ##     })
 ##     print(("[derive-instanced] %s: %s path (max=%d)"):format(type_name, composer.name, max_instances))

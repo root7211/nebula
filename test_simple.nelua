@@ -1,0 +1,29 @@
+-- 简单的 GLFW 测试程序
+require 'C.stdio'
+
+## cinclude '<GLFW/glfw3.h>'
+
+global function glfwInit(): cint <cimport, nodecl> end
+global function glfwTerminate(): void <cimport, nodecl> end
+global function glfwGetVersionString(): cstring <cimport, nodecl> end
+
+## linklib "glfw3"
+
+local function main(): cint
+  C.printf("Starting GLFW test...\n")
+  
+  if glfwInit() == 0 then
+    C.printf("Failed to initialize GLFW\n")
+    return 1
+  end
+  
+  local version = glfwGetVersionString()
+  C.printf("GLFW version: %s\n", version)
+  
+  glfwTerminate()
+  C.printf("Test completed successfully!\n")
+  
+  return 0
+end
+
+main()

@@ -212,6 +212,18 @@ fn vs_main(
   table.insert(fs_lines, "  let pixel     = in.clip_position.xy;")
   table.insert(fs_lines, "  let center    = d.pos + d.size * 0.5;")
   table.insert(fs_lines, "  let p         = pixel - center;")
+  
+  -- ★ Phase 6.4: Apply transform (scale + offset_y)
+  if opts.has_transform then
+    table.insert(fs_lines, "  // Phase 6.4: Apply transform")
+    table.insert(fs_lines, "  let scaled_p = p / d.scale;")
+    table.insert(fs_lines, "  let offset_center = center + vec2<f32>(0.0, d.offset_y);")
+    table.insert(fs_lines, "  let transformed_p = (pixel - offset_center) / d.scale;")
+    table.insert(fs_lines, "  let final_p = transformed_p;")
+  else
+    table.insert(fs_lines, "  let final_p = p;")
+  end
+  
   table.insert(fs_lines, "  let half_size = d.size * 0.5;")
   table.insert(fs_lines, "")
   table.insert(fs_lines, "  if (pixel.x < d.pos.x || pixel.x > d.pos.x + d.size.x ||")
@@ -220,9 +232,9 @@ fn vs_main(
   table.insert(fs_lines, "  }")
 
   if has_radius then
-    table.insert(fs_lines, "  let dist = sdf_rounded_rect(p, half_size, d.radius);")
+    table.insert(fs_lines, "  let dist = sdf_rounded_rect(final_p, half_size, d.radius);")
   else
-    table.insert(fs_lines, "  let dist = sdf_rect(p, half_size);")
+    table.insert(fs_lines, "  let dist = sdf_rect(final_p, half_size);")
   end
 
   table.insert(fs_lines, "  let aa = 1.0;")

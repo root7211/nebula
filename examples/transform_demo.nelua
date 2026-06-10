@@ -1,0 +1,75 @@
+-- =============================================================================
+-- transform_demo.nelua — Phase 6.4 Transform Animation Demo
+-- =============================================================================
+require "nebula"
+
+## nebula_visual("TransformButtonVisual", { 
+##   primitives = {"clickable"},
+##   transform = true,
+## })
+
+## nebula_app("TransformApp", {
+##   components = {
+##     { name = "btn1", type = "TransformButtonVisual" },
+##     { name = "btn2", type = "TransformButtonVisual" },
+##     { name = "btn3", type = "TransformButtonVisual" },
+##   },
+## })
+
+## local function on_init(app)
+##   local lines = {}
+##   
+##   -- Button 1: Scale on hover
+##   table.insert(lines, string.format([[
+##     %s.btn1:init_themed(Vec2{x=100, y=150}, Vec2{x=200, y=60}, 8.0)
+##     %s.btn1.visual.default_bg_color = Color{r=0.3, g=0.6, b=0.9, a=1.0}
+##     %s.btn1.visual.default_scale = 1.0
+##     %s.btn1.visual.default_offset_y = 0.0
+##     %s.btn1.visual.hovered_bg_color = Color{r=0.4, g=0.7, b=1.0, a=1.0}
+##     %s.btn1.visual.hovered_scale = 1.05
+##     %s.btn1.visual.hovered_offset_y = -2.0
+##     %s.btn1.visual.pressed_scale = 0.95
+##     %s.btn1.visual.pressed_offset_y = 0.0
+##   ]], app, app, app, app, app, app, app, app, app))
+##   
+##   -- Button 2: Scale + vertical lift
+##   table.insert(lines, string.format([[
+##     %s.btn2:init_themed(Vec2{x=350, y=150}, Vec2{x=200, y=60}, 8.0)
+##     %s.btn2.visual.default_bg_color = Color{r=0.9, g=0.3, b=0.3, a=1.0}
+##     %s.btn2.visual.default_scale = 1.0
+##     %s.btn2.visual.default_offset_y = 0.0
+##     %s.btn2.visual.hovered_bg_color = Color{r=1.0, g=0.4, b=0.4, a=1.0}
+##     %s.btn2.visual.hovered_scale = 1.1
+##     %s.btn2.visual.hovered_offset_y = -4.0
+##     %s.btn2.visual.pressed_scale = 0.9
+##     %s.btn2.visual.pressed_offset_y = 0.0
+##   ]], app, app, app, app, app, app, app, app, app))
+##   
+##   -- Button 3: Pressed squeeze
+##   table.insert(lines, string.format([[
+##     %s.btn3:init_themed(Vec2{x=225, y=280}, Vec2{x=200, y=60}, 8.0)
+##     %s.btn3.visual.default_bg_color = Color{r=0.3, g=0.9, b=0.6, a=1.0}
+##     %s.btn3.visual.default_scale = 1.0
+##     %s.btn3.visual.default_offset_y = 0.0
+##     %s.btn3.visual.hovered_bg_color = Color{r=0.4, g=1.0, b=0.7, a=1.0}
+##     %s.btn3.visual.hovered_scale = 1.02
+##     %s.btn3.visual.hovered_offset_y = -1.0
+##     %s.btn3.visual.pressed_scale = 0.92
+##     %s.btn3.visual.pressed_offset_y = 2.0
+##   ]], app, app, app, app, app, app, app, app, app))
+##   
+##   return lines
+## end
+
+## local function on_frame(app)
+##   return {}
+## end
+
+## nebula_main("TransformApp", {
+##   title = "Phase 6.4 - Transform Animation Demo",
+##   width = 650,
+##   height = 400,
+##   bg_r = 0.15, bg_g = 0.15, bg_b = 0.18,
+##   on_init = on_init,
+##   on_frame = on_frame,
+## })
